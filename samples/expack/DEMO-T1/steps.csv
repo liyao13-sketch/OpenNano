@@ -1,0 +1,4 @@
+step_id,run_id,step_order,step_name,role,duration_s,pressure,pressure_unit,param_json,note
+DEMO-T1-PECVD-0001.S01,DEMO-T1-PECVD-0001,1,main,deposition,120.0,2.0,Torr,"{""sih4_sccm"": 12, ""n2o_sccm"": 460, ""rf_w"": 25, ""heater_temp_c"": 350}",
+DEMO-T1-LDW-0001.S01,DEMO-T1-LDW-0001,1,main,exposure,60.0,,,"{""dose_uc_cm2"": 420, ""pitch_nm"": 1000, ""linewidth_nm"": 500}",
+DEMO-T1-ICP-0003.S01,DEMO-T1-ICP-0003,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 125, ""source_w"": 800}",

@@ -1,0 +1,39 @@
+# OpenNano · 白名单模式
+# ------------------------------------------------------------------
+# 本目录同时是「工艺工作区」(混有大量设备手册/光刻胶说明书/私有文档)。
+# 采用「默认忽略一切 + 显式放行产品文件」,新增文件默认不入库,
+# 从根本上避免误推工艺资料(而非依赖不断补长的排除清单)。
+# ------------------------------------------------------------------
+
+# ① 默认忽略顶层一切
+/*
+
+# ② 只放行产品文件
+!/.gitignore
+!/README.md
+!/LICENSE
+!/NOTICE
+!/dev.sh
+!/server/
+!/web/
+!/samples/
+!/docs/
+
+# ③ 放行目录内部的产物/密钥仍排除
+**/__pycache__/
+*.py[cod]
+server/.venv/
+venv/
+*.egg-info/
+server/.env
+server/.env.local
+*.credentials*
+web/node_modules/
+web/dist/
+.vite/
+*.log
+*.tmp
+*~
+.DS_Store
+.idea/
+*.iml

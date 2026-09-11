@@ -1,0 +1,2 @@
+obs_id,run_id,sample_id,obs_type,severity,description,judgement,action,artifact_id,recorded_by,date
+DEMO-T1-ICP-0003.O01,DEMO-T1-ICP-0003,DEMO-T1-01,OBS-REDEPOSIT,major,sidewall redeposition observed,polymer rich,add O2,,demo,2026-01-04

@@ -1,0 +1,4 @@
+run_id,batch_id,sample_id,stage,stage_seq,date,t_start,t_end,tool,tool_id,recipe_id,operator,purpose,parent_run_id,env_temp_c,env_rh_pct,status,note
+DEMO-T1-PECVD-0001,DEMO-T1,DEMO-T1-01,PECVD,1,2026-01-02,,,PECVD demo,PECVD-DEMO,,demo,film deposition,,23.0,45.0,done,
+DEMO-T1-LDW-0001,DEMO-T1,DEMO-T1-01,LDW,1,2026-01-03,,,LDW demo,LDW-DEMO,,demo,grating exposure,DEMO-T1-PECVD-0001,23.0,45.0,done,
+DEMO-T1-ICP-0003,DEMO-T1,DEMO-T1-01,ICP,3,2026-01-04,,,ICP demo,ICP-DEMO,,demo,mask open etch,DEMO-T1-LDW-0001,23.0,45.0,done,

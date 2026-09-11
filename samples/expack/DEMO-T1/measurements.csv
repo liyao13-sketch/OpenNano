@@ -1,0 +1,6 @@
+meas_id,run_id,sample_id,quantity,value,unit,method,loc,n,uncertainty,source_artifact_id,measured_by,verification,note
+DEMO-T1-PECVD-0001.M01,DEMO-T1-PECVD-0001,DEMO-T1-01,film_thickness_nm,200,nm,椭偏,center,1,2.0,,demo,已核实,
+DEMO-T1-LDW-0001.M01,DEMO-T1-LDW-0001,DEMO-T1-01,final_cd_nm,505,nm,SEM读图,center,1,3.0,,demo,未核实,
+DEMO-T1-ICP-0003.M01,DEMO-T1-ICP-0003,DEMO-T1-01,depth_center_nm,190.0,nm,SEM读图,center,1,3.0,,demo,未核实,
+DEMO-T1-ICP-0003.M02,DEMO-T1-ICP-0003,DEMO-T1-01,selectivity,9.2,,计算派生,,1,,,demo,未核实,
+DEMO-T1-ICP-0003.M03,DEMO-T1-ICP-0003,DEMO-T1-01,swa_deg,86.6,deg,SEM读图,left,1,1.5,,demo,未核实,

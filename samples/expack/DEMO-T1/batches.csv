@@ -1,0 +1,2 @@
+batch_id,series,title,owner,purpose,wafer_size,substrate_json,planned_stages,started_on,status,note
+DEMO-T1,DEMO,Synthetic demo batch,demo,demonstrate the toolchain,4 寸,"{""substrate"":""Si""}",PECVD·LDW·ICP·SEM,2026-01-01,open,synthetic data — NOT real lab data

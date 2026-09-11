@@ -1,0 +1,12 @@
+step_id,run_id,step_order,step_name,role,duration_s,pressure,pressure_unit,param_json,note
+DEMO-T1-PECVD-0001.S01,DEMO-T1-PECVD-0001,1,main,deposition,120.0,2.0,Torr,"{""sih4_sccm"": 12, ""n2o_sccm"": 460, ""rf_w"": 25, ""heater_temp_c"": 350}",
+DEMO-T1-LDW-0001.S01,DEMO-T1-LDW-0001,1,main,exposure,60.0,,,"{""dose_uc_cm2"": 420, ""pitch_nm"": 1000, ""linewidth_nm"": 500}",
+DEMO-T1-ICP-0001.S01,DEMO-T1-ICP-0001,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 95, ""source_w"": 800}",
+DEMO-T1-ICP-0002.S01,DEMO-T1-ICP-0002,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 110, ""source_w"": 800}",
+DEMO-T1-ICP-0003.S01,DEMO-T1-ICP-0003,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 125, ""source_w"": 800}",
+DEMO-T1-ICP-0004.S01,DEMO-T1-ICP-0004,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 140, ""source_w"": 800}",
+DEMO-T1-ICP-0005.S01,DEMO-T1-ICP-0005,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 155, ""source_w"": 800}",
+DEMO-T1-ICP-0006.S01,DEMO-T1-ICP-0006,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 170, ""source_w"": 800}",
+DEMO-T1-ICP-0007.S01,DEMO-T1-ICP-0007,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 185, ""source_w"": 800}",
+DEMO-T1-ICP-0008.S01,DEMO-T1-ICP-0008,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 200, ""source_w"": 800}",
+DEMO-T1-ICP-0009.S01,DEMO-T1-ICP-0009,1,main,etch,90.0,1.5,Pa,"{""chf3_sccm"": 30, ""ar_sccm"": 20, ""bias_w"": 215, ""source_w"": 800}",
