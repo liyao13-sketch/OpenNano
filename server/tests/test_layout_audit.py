@@ -57,14 +57,17 @@ def test_体检_能抓出重叠(proj):
 def test_体检_按前端限高建模(proj):
     """★ 备注不限高 ⇒ 长备注把节点撑高压到下一格（owner报的现象）。
 
-    前端已**限高 3 行**；体检器必须按同一规则建模，否则会报出不存在的情况。
+    前端把备注渲染成**恒定 1 行**（省略号 + 悬浮看全文）；体检器必须按同一规则建模，
+    否则会报出不存在的情况（或反过来漏报真实叠压）。
     """
+    from kb.canvas_geom import CLAMP_COMMENT_LINES
     from kb.layout_audit import audit
     for m in proj["modules"]:
         m["comment"] = "x" * 200
     r = audit(proj, comment_lines=99)
-    assert r["geometry"]["comment_lines_used"] == 3 and r["geometry"]["comment_clamped"] is True
-    assert r["ok"] is True                     # 限高之后，行距 200 足够
+    assert r["geometry"]["comment_lines_used"] == CLAMP_COMMENT_LINES == 1
+    assert r["geometry"]["comment_clamped"] is True
+    assert r["ok"] is True                     # 恒定 1 行 ⇒ 高度与备注长短无关
 
 
 def test_体检_能抓出间距不足(proj):

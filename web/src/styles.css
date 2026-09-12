@@ -788,3 +788,58 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
   background: transparent; transition: background .14s var(--ease);
 }
 .panel-drag:hover { background: var(--accent-soft); }
+
+/* ============================================================================
+   2026-09-13 · 布局：LLM 对话窗只在**画布列下方**（左右两栏各自通到底）
+   ============================================================================ */
+.center-col {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+.center-col > .canvas-wrap { flex: 1; min-height: 0; }
+.center-col > .dock { border-top: 1px solid var(--border); }
+/* 侧栏与详情栏各自撑到底（原来被底栏截断，空间白白浪费） */
+.sidebar, .panel { height: 100%; }
+
+/* ============================================================================
+   2026-09-13 · 动态光效扩展到**画布节点**与**详情栏**（owner："画布上的方块和详情栏
+   能否也添加类似动态光效"）；刻意**克制**：常驻流光只给"选中的那一个"，其余靠 hover。
+   ============================================================================ */
+.proc-node { position: relative; overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .proc-node::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 62%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.17), transparent);
+    transform: translateX(-170%); opacity: 0; pointer-events: none;
+  }
+  /* hover：扫一道就停（不持续闪） */
+  .react-flow__node:hover .proc-node::after { opacity: 1; animation: node-sheen 1.15s var(--ease); }
+  /* 选中：极慢的常驻流光（同一时刻只有一个节点在动） */
+  .react-flow__node.selected .proc-node::after { opacity: .85; animation: node-sheen 7s var(--ease) infinite; }
+  @keyframes node-sheen { 0% { transform: translateX(-170%); } 55%, 100% { transform: translateX(330%); } }
+
+  /* 详情栏：顶边一条极慢游走的光带 + 卡片 hover 扫光 */
+  .panel::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent-hi), transparent);
+    background-size: 220% 100%; opacity: .55; pointer-events: none;
+    animation: panel-sweep 9s linear infinite;
+  }
+  @keyframes panel-sweep { 0% { background-position: -120% 0; } 100% { background-position: 220% 0; } }
+  .panel .card { position: relative; overflow: hidden; }
+  .panel .card::after {
+    content: ""; position: absolute; inset: 0; width: 55%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.12), transparent);
+    transform: translateX(-180%); opacity: 0; pointer-events: none;
+  }
+  .panel .card:hover::after { opacity: 1; animation: node-sheen 1.3s var(--ease); }
+  /* 批次面板（Dock 内）的卡片同样给 hover 扫光，保持一套语言 */
+  .batchdock .card { position: relative; overflow: hidden; }
+  .batchdock .card:hover::after {
+    content: ""; position: absolute; inset: 0; width: 55%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.10), transparent);
+    transform: translateX(-180%); animation: node-sheen 1.3s var(--ease); pointer-events: none;
+  }
+}
+/* 详情栏定位（::before 需要它做定位上下文） */
+.panel { position: relative; }

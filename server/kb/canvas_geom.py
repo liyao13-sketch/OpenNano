@@ -17,16 +17,18 @@ from __future__ import annotations
 #: 节点宽度（与前端 ProcessNode 的 `width:190` 一致）
 NODE_W = 190
 #: 无备注、无芯片行时的基础高度（标题 + 副标题 + 上下内边距 ≈ 69）
-NODE_BASE_H = 69
+NODE_BASE_H = 71
 #: 芯片行（run 短号 / sample / #工序号）高度
-CHIP_H = 16
+CHIP_H = 18
 #: 备注块：每行高度 + 上下额外（内边距与边框）
-COMMENT_LINE_H = 15
-COMMENT_EXTRA = 16
+COMMENT_LINE_H = 16
+COMMENT_EXTRA = 12
 #: 前端备注**限高**行数（`-webkit-line-clamp: 3`）—— 体检与布局都按这个上限算
-CLAMP_COMMENT_LINES = 3
-#: **统一间距**：横纵都用它（等宽）
-GAP = 96
+CLAMP_COMMENT_LINES = 1   # 前端已把备注收成恒定 1 行（省略号 + 悬浮看全文）
+#: **统一间距**：横纵都用它（等宽）。
+#: 96 → 72 是 2026-09-13 owner「画布不够紧凑」后的收紧；仍满足「横纵相等」这条要求，
+#: 改这一个数，后端布局与体检器同时生效（前端只引用同一套几何）。
+GAP = 72
 #: 起点
 X0, Y0 = 140, 80
 #: 兼容旧名：标称列距（= 节点宽 + 统一间距）
@@ -37,7 +39,8 @@ def comment_lines_of(m: dict, shown: bool = True) -> int:
     """该模块备注会占几行（按**限高后的上限**算）。"""
     if not shown or not (m.get("comment") or "").strip():
         return 0
-    # 保守：只要有备注就按满 3 行算（前端会省略号截断）——保证开关备注都不会压到下一格
+    # 前端把备注渲染成**恒定 1 行**（省略号截断、悬浮看全文）⇒ 高度与备注长短无关，
+    # 布局因此可以紧凑：这是"画布不够紧凑、字被缩得很小"的根治点。
     return CLAMP_COMMENT_LINES
 
 

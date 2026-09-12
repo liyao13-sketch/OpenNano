@@ -46,15 +46,15 @@ function ProcessNode({ data }: any) {
   const shortRun = runId ? strip(runId) : ''
   const shortSample = m.core_sample_id ? strip(m.core_sample_id) : ''
   return (
-    <div style={{ width:190, background:'var(--surface)', border:'1px solid var(--border)',
+    <div className="proc-node" style={{ width:190, background:'var(--surface)', border:'1px solid var(--border)',
       borderLeft:`2px solid ${m.disabled || isSeason ? 'var(--faint)' : color}`, borderRadius:10,
       boxShadow:'var(--shadow-1)', color:'var(--text)', opacity: m.disabled ? .5 : (isSeason ? .68 : 1),
       borderStyle: m.disabled || isSeason ? 'dashed' : 'solid' }}>
       <Handle type="target" position={Position.Left} />
-      <div style={{ padding:'7px 11px' }}>
+      <div style={{ padding:'6px 10px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           <span style={{ width:6, height:6, borderRadius:2, background:color, flexShrink:0 }} />
-          <span style={{ fontSize:12.5, fontWeight:600, letterSpacing:'-.01em', flex:1,
+          <span style={{ fontSize:13.5, fontWeight:620, letterSpacing:'-.01em', flex:1, lineHeight:1.35,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
             textDecoration: m.disabled ? 'line-through' : 'none' }}>{primary}</span>
           <span title={m.disabled ? '已禁用(不参与运行)'
@@ -64,13 +64,13 @@ function ProcessNode({ data }: any) {
               color:badge.c, background:badge.bg, border:`1px solid ${badge.bd}`, borderRadius:4,
               padding: isSeason ? '0 4px' : undefined }}>{badge.t}</span>
         </div>
-        <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{secondary}</div>
+        <div style={{ fontSize:11.5, color:'var(--muted)', marginTop:1, lineHeight:1.3 }}>{secondary}</div>
         {(shortRun || shortSample || m.tune_step != null) && (
-          <div style={{ marginTop:5, display:'flex', flexWrap:'wrap', gap:4 }}>
+          <div style={{ marginTop:4, display:'flex', flexWrap:'wrap', gap:3 }}>
             {m.tune_step != null && (
               <span title={`参数调试线 ${m.tune_id || ''} 第 ${m.tune_step} 轮（core run：${runId}）`
                 + '　序号不连续的是 core 的 run 号，这里按扫描轮次显示'}
-                style={{ fontSize:10, fontFamily:'var(--mono)', fontWeight:700,
+                style={{ fontSize:10.5, fontFamily:'var(--mono)', fontWeight:700,
                   color:'var(--accent-fg)', background:'var(--accent)',
                   border:'1px solid var(--accent)', borderRadius:4, padding:'0 5px' }}>
                 run{m.tune_step}
@@ -78,7 +78,7 @@ function ProcessNode({ data }: any) {
             )}
             {shortRun && (
               <span title={`core run：${runId}`}
-                style={{ fontSize:10, fontFamily:'var(--mono)', fontWeight:600,
+                style={{ fontSize:10.5, fontFamily:'var(--mono)', fontWeight:600,
                   color: m.tune_step != null ? 'var(--muted)' : 'var(--accent-hi)',
                   background: m.tune_step != null ? 'transparent' : 'var(--accent-soft)',
                   border: `1px solid ${m.tune_step != null ? 'var(--border)' : 'var(--accent-ring)'}`,
@@ -88,7 +88,7 @@ function ProcessNode({ data }: any) {
             )}
             {shortSample && (
               <span title={`样品/die：${m.core_sample_id}`}
-                style={{ fontSize:10, fontFamily:'var(--mono)', color:'var(--text-2)',
+                style={{ fontSize:10.5, fontFamily:'var(--mono)', color:'var(--text-2)',
                   background:'var(--raise)', border:'1px solid var(--border)',
                   borderRadius:4, padding:'0 4px' }}>
                 {shortSample}
@@ -96,7 +96,7 @@ function ProcessNode({ data }: any) {
             )}
             {m.core_stage_seq != null && (
               <span title={`工序序号 stage_seq=${m.core_stage_seq}`}
-                style={{ fontSize:10, fontFamily:'var(--mono)', color:'var(--faint)',
+                style={{ fontSize:10.5, fontFamily:'var(--mono)', color:'var(--faint)',
                   border:'1px solid var(--border)', borderRadius:4, padding:'0 4px' }}>
                 #{m.core_stage_seq}
               </span>
@@ -106,7 +106,7 @@ function ProcessNode({ data }: any) {
         {kv.length > 0 && (
           <div style={{ marginTop:5, display:'flex', flexWrap:'wrap', gap:4 }}>
             {kv.map(([k, v]) => (
-              <span key={k} style={{ fontSize:10, fontFamily:'var(--mono)', color:'var(--text-2)',
+              <span key={k} style={{ fontSize:10.5, fontFamily:'var(--mono)', color:'var(--text-2)',
                 background:'var(--raise)', border:'1px solid var(--border)', borderRadius:4, padding:'0 4px' }}>
                 {k}={typeof v === 'number' ? Math.round(v * 1000) / 1000 : String(v)}
               </span>
@@ -115,15 +115,14 @@ function ProcessNode({ data }: any) {
         )}
       </div>
       {data.showComments && m.comment && (
-        /* ⚠️ 备注**限高 3 行**（超出省略号，悬浮看全文）：
-           以前不限高 ⇒ 长备注（DRIE 那条 767 字）把节点撑得很高，
-           与下一格（run2/run3 这类）**视觉叠压**（2026-09-13 owner报障）。 */
+        /* ⚠️ 备注收成**恒定的 1 行**（省略号；悬浮看全文）：
+           以前限高 3 行仍会把节点撑高 ⇒ 画布整体变高、fitView 一缩，**字就变得很小**
+           （2026-09-13 owner：「中间画布不够紧凑、字体缩得很小」）。1 行 = 高度恒定、布局可紧凑。 */
         <div title={m.comment}
-          style={{ margin:'0 6px 6px', padding:'4px 7px', fontSize:10.5, lineHeight:1.45,
+          style={{ margin:'0 5px 5px', padding:'2px 6px', fontSize:11, lineHeight:'16px',
           color:'var(--text-2)', background:'rgba(212,162,78,.10)',
-          border:'1px solid rgba(212,162,78,.35)', borderRadius:6,
-          display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical',
-          overflow:'hidden', wordBreak:'break-word' }}>
+          border:'1px solid rgba(212,162,78,.35)', borderRadius:5,
+          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
           {m.comment}
         </div>
       )}
@@ -624,6 +623,11 @@ export default function App() {
       + (src?.from_run ? ` · 来源 ${src.from_run} ${src.date}` : '') + '）')
   }
 
+  /** 适配视图但**保底 75% 缩放**：整图太散时不再把文字缩到看不清（宁可让人平移）。 */
+  const fitReadable = useCallback(() => {
+    flowRef.current?.fitView({ padding: .18, minZoom: .7, maxZoom: 1.1 })
+  }, [])
+
   /* 详情栏左边缘拖拽调宽 */
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -656,7 +660,7 @@ export default function App() {
         const p = pos.get(n.id)
         return p ? { ...n, position: { x: p.x, y: p.y } } : n
       }))
-      setTimeout(() => flowRef.current?.fitView({ padding: .2 }), 60)
+      setTimeout(() => fitReadable(), 60)
       pushLog('view', `自动整理布局：${d.summary?.cols ?? '?'} 列 / ${d.summary?.rows ?? '?'} 行（只改位置）`)
     } catch (e: any) { pushLog('warn', '自动整理布局失败: ' + e.message) }
   }
@@ -668,7 +672,7 @@ export default function App() {
     setEdges((d.edges || []).map(edgeOf))
     setProjectName(d.name || 'EXP')
     setSelectedId(null)
-    setTimeout(() => flowRef.current?.fitView({ padding: 0.2 }), 120)
+    setTimeout(() => fitReadable(), 120)
   }
 
   const loadProjectByName = async (name: string) => {
@@ -989,7 +993,7 @@ export default function App() {
               <label><input type="checkbox" checked={libCollapsed}
                 onChange={e => setLibCollapsed(e.target.checked)} /> 收起左侧工艺库</label>
               <div className="dropdown-sep" />
-              <button className="dropdown-item" onClick={() => { flowRef.current?.fitView({ padding: .2 }); setViewMenu(false) }}>适配视图 (Ctrl+0)</button>
+              <button className="dropdown-item" onClick={() => { fitReadable(); setViewMenu(false) }}>适配视图 (Ctrl+0 · 保底 70%)</button>
               <button className="dropdown-item" onClick={() => { setViewMenu(false); arrangeLayout() }}
                 title="按工序列重排所有节点（只改位置，不动连线与标注）—— 方块叠在一起时一键复位">自动整理布局</button>
               <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>显示日志面板</button>
@@ -1091,6 +1095,7 @@ export default function App() {
             ))}
           </div>
         </div>
+        <div className="center-col">
         <div className="canvas-wrap">
           <ReactFlow nodes={viewNodes} edges={viewEdges} nodeTypes={nodeTypes}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
@@ -1118,7 +1123,7 @@ export default function App() {
               const pos = flowRef.current?.screenToFlowPosition({ x: e.clientX, y: e.clientY })
               addModule(item, { x: pos.x - 88, y: pos.y - 26 })
             }}
-            fitView proOptions={{ hideAttribution: true }}
+            fitView fitViewOptions={{ padding: .18, minZoom: .7, maxZoom: 1.1 }} proOptions={{ hideAttribution: true }}
             onInit={inst => { flowRef.current = inst }}>
             <Background color={theme === 'light' ? 'rgba(15,23,42,.10)' : theme === 'hc' ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.05)'} gap={22} />
             <Controls />
@@ -1156,6 +1161,69 @@ export default function App() {
               </div>
             )}
           </ReactFlow>
+        </div>
+        <Dock
+        active={dockTab}
+        onTab={k => setDockTab(k as any)}
+        tabs={[
+          { key: 'agent', label: 'Agent 对话', render: () => (
+            <div className="dock-col">
+              <div className="chatbar-body" ref={chatRef}>
+                {messages.length === 0 && <div className="chat-empty">问我工艺问题，例如「Ta 怎么刻蚀？」「SiO₂ 掩膜刻蚀常用参数」</div>}
+                {messages.map((m, i) => (
+                  <div key={i} className={"msg " + m.role}>
+                    {m.tools && m.tools.length > 0 && (
+                      <div className="msg-tools">{m.tools.map((t: any, j: number) => (
+                        <div key={j}>{t.ok ? '🔧' : '⚠️'} {t.name}
+                          {t.args && Object.keys(t.args).length > 0 && <span className="tool-args"> {JSON.stringify(t.args)}</span>}
+                        </div>
+                      ))}</div>
+                    )}
+                    <div className="msg-bubble">{m.content}</div>
+                    {m.src && m.src.length > 0 && (
+                      <div className="msg-src">{m.src.map((s: any, j: number) => <div key={j}>📎 [{s.reliability_score}/5] {s.title}</div>)}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="chatbar-input">
+                <input value={input} onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key==='Enter' && send()} placeholder="输入工艺问题…" />
+                <button className="btn" onClick={send} disabled={sending}>{sending ? '…' : '发送'}</button>
+              </div>
+            </div>
+          )},
+          { key: 'batch', label: '批次', render: () => (
+            <BatchPanel onClose={() => setDockTab('agent')} ctx={{
+              projectName, modules: nodes.map(n => n.data.module as Module),
+              edges: edges.map(e => ({ src: e.source, dst: e.target })),
+              onApply: (p, log) => { loadProjectObj(p); pushLog('run', `批次续做：${log}`) },
+              onFormChange: (modules, eqState) => {
+                setNodes(ns => ns.map(n => {
+                  const m = modules.find((x: any) => x.id === n.id)
+                  return m ? { ...n, data: { ...n.data, module: m as Module } } : n
+                }))
+                if (eqState) (window as any).__dshEqState = eqState
+              },
+            }} />
+          )},
+          { key: 'log', label: `日志 (${logs.length})`, render: () => (
+            <div className="log-body" ref={logRef}>
+              {logs.length === 0 && <div className="chat-empty">运行流程后,这里逐步记录:承接参数 → 公式/规则 → 输出。</div>}
+              {logs.map((l, i) => (
+                <div key={i} className={'logline ' + l.kind}><span className="lt">{l.t}</span><span>{l.text}</span></div>
+              ))}
+            </div>
+          )},
+          { key: 'issues', label: `问题 (${issues.length})`, render: () => (
+            <div className="log-body">
+              {issues.length === 0 && <div className="chat-empty">暂无问题。</div>}
+              {issues.map((x, i) => (
+                <div key={i} className="logline error"><span className="lt">{x.t}</span><span>{x.text}</span></div>
+              ))}
+            </div>
+          )},
+        ]} />
         </div>
         <div className="panel-drag" title="拖拽调整详情栏宽度（双击复位 420）"
           onMouseDown={e => {
@@ -1355,68 +1423,6 @@ export default function App() {
           </ErrorBoundary>
         </div>
       </div>
-      <Dock
-        active={dockTab}
-        onTab={k => setDockTab(k as any)}
-        tabs={[
-          { key: 'agent', label: 'Agent 对话', render: () => (
-            <div className="dock-col">
-              <div className="chatbar-body" ref={chatRef}>
-                {messages.length === 0 && <div className="chat-empty">问我工艺问题，例如「Ta 怎么刻蚀？」「SiO₂ 掩膜刻蚀常用参数」</div>}
-                {messages.map((m, i) => (
-                  <div key={i} className={"msg " + m.role}>
-                    {m.tools && m.tools.length > 0 && (
-                      <div className="msg-tools">{m.tools.map((t: any, j: number) => (
-                        <div key={j}>{t.ok ? '🔧' : '⚠️'} {t.name}
-                          {t.args && Object.keys(t.args).length > 0 && <span className="tool-args"> {JSON.stringify(t.args)}</span>}
-                        </div>
-                      ))}</div>
-                    )}
-                    <div className="msg-bubble">{m.content}</div>
-                    {m.src && m.src.length > 0 && (
-                      <div className="msg-src">{m.src.map((s: any, j: number) => <div key={j}>📎 [{s.reliability_score}/5] {s.title}</div>)}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="chatbar-input">
-                <input value={input} onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key==='Enter' && send()} placeholder="输入工艺问题…" />
-                <button className="btn" onClick={send} disabled={sending}>{sending ? '…' : '发送'}</button>
-              </div>
-            </div>
-          )},
-          { key: 'batch', label: '批次', render: () => (
-            <BatchPanel onClose={() => setDockTab('agent')} ctx={{
-              projectName, modules: nodes.map(n => n.data.module as Module),
-              edges: edges.map(e => ({ src: e.source, dst: e.target })),
-              onApply: (p, log) => { loadProjectObj(p); pushLog('run', `批次续做：${log}`) },
-              onFormChange: (modules, eqState) => {
-                setNodes(ns => ns.map(n => {
-                  const m = modules.find((x: any) => x.id === n.id)
-                  return m ? { ...n, data: { ...n.data, module: m as Module } } : n
-                }))
-                if (eqState) (window as any).__dshEqState = eqState
-              },
-            }} />
-          )},
-          { key: 'log', label: `日志 (${logs.length})`, render: () => (
-            <div className="log-body" ref={logRef}>
-              {logs.length === 0 && <div className="chat-empty">运行流程后,这里逐步记录:承接参数 → 公式/规则 → 输出。</div>}
-              {logs.map((l, i) => (
-                <div key={i} className={'logline ' + l.kind}><span className="lt">{l.t}</span><span>{l.text}</span></div>
-              ))}
-            </div>
-          )},
-          { key: 'issues', label: `问题 (${issues.length})`, render: () => (
-            <div className="log-body">
-              {issues.length === 0 && <div className="chat-empty">暂无问题。</div>}
-              {issues.map((x, i) => (
-                <div key={i} className="logline error"><span className="lt">{x.t}</span><span>{x.text}</span></div>
-              ))}
-            </div>
-          )},
-        ]} />
 
       {/* 状态栏(BEAMER 式:项目/规模/选中/运行/后端) */}
       <div className="statusbar">
