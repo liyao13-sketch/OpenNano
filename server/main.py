@@ -223,6 +223,13 @@ class AppendPackReq(BaseModel):
     save_dir: str = ""               # 非空 ⇒ 同时把 zip 落盘到该目录（便于交数据线验收）
 
 
+class RehydrateReq(BaseModel):
+    batch_id: str
+    project_name: str = ""          # 空 = 用 batch_id
+    include_measurements: bool = True
+    persist: bool = False
+
+
 class MenuCheckReq(BaseModel):
     dir: str = ""          # 缺省 = <设备菜单>/<tool>
     tool: str = "RIE-400iPB"
@@ -472,6 +479,27 @@ def api_expack_append_preview(req: AppendPackReq):
             "would_skip_in_core_slice": True,
             "note": ("这些 run 不在 core 里 ⇒ 会进追加包；其余 run 已在 core ⇒ 不会重复写。"
                      "追加包 source=tool-append（不是 core-slice）⇒ 不会被 discover() 跳过。")}
+
+
+@app.post("/api/batch/rehydrate")
+def api_batch_rehydrate(req: RehydrateReq):
+    """**从 core 只读回灌画布**：core → 临时包 → parse_expack → 画布项目。
+
+    用途：接着做（PECVD→…→run1 已入库，从权威源起步，不依赖那个镜像包）。
+    口径：只读 core · 空值测量不进画布（未测≠0）· ID 全照抄 · 不写任何数据资产。
+    """
+    from kb import append_pack as ap
+    try:
+        proj = ap.core_to_project(req.batch_id, req.project_name or req.batch_id, lib=LIB,
+                                  include_measurements=req.include_measurements)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    if req.persist:
+        p = _project_path(proj["name"])
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(proj, ensure_ascii=False, indent=2), encoding="utf-8")
+        proj["_saved_to"] = str(p)
+    return proj
 
 
 class ExpackExportReq(BaseModel):

@@ -588,7 +588,11 @@ def parse_expack(path: Path, lib) -> dict:
                 pj = json.loads(st.get("param_json") or "{}")
             except Exception:  # noqa: BLE001
                 pj = {}
-            pre = (st.get("step_name") or "").strip().lower().replace(" ", "_")
+            # 前缀取**清洗后的步名**：剥掉机台槽位后缀「·槽N」「·slotN」并清标点，
+            # 否则会生成 `chuck-si·槽1_hv_press_exp` 这类脏键（core 里的参数键是干净的）
+            pre = re.sub(r"[·•]\s*(槽|slot)\s*\d+\s*$", "", (st.get("step_name") or "").strip(),
+                         flags=re.I)
+            pre = re.sub(r"[^0-9a-z]+", "_", pre.lower()).strip("_")
             for k, v in pj.items():
                 params[f"{pre}_{k}" if pre and not k.startswith(pre) else k] = v
             for k in ("duration_s", "pressure"):

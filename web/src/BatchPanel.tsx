@@ -109,6 +109,20 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     } catch (e: any) { setMsg('❌ 菜单扫描失败: ' + e.message) } finally { setBusy('') }
   }
 
+  const rehydrate = async () => {
+    if (!batch) return
+    setBusy('rehy'); setMsg('')
+    try {
+      const d = await post('/api/batch/rehydrate', { batch_id: batch, project_name: batch })
+      ctx.onApply({ name: d.name, modules: d.modules || [], edges: d.edges || [] },
+                  `从 core 回灌「${batch}」：${(d.modules || []).length} 个 run`)
+      const i = d._core_to_canvas || {}
+      setMsg(`✅ 已从 core 回灌「${batch}」：${i.runs} 个 run · ${i.steps} 步 · `
+        + `${i.measurements} 条测量（跳过空值 ${i.measurements_blank_skipped}）· ${i.observations} 条现象\n`
+        + `连线 ${(d.edges || []).length} 条（parent 链）· 只读 core，未写任何数据资产`)
+    } catch (e: any) { setMsg('❌ 回灌失败: ' + e.message) } finally { setBusy('') }
+  }
+
   const checkMenu = async () => {
     setBusy('check'); setMsg(''); setReport('')
     try {
@@ -177,6 +191,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
           <label>菜单目录
             <input value={menuDir} onChange={e => setMenuDir(e.target.value)} style={{ width: 380 }} />
           </label>
+          <button className="btn ghost" disabled={busy !== '' || !batch} onClick={rehydrate}
+            title="从 core 只读拉该 batch 的 run 链进画布（接着做的起点；不碰 CSV）">从 core 回灌画布</button>
           <button className="btn ghost" disabled={busy !== ''} onClick={scanMenu}>解析菜单目录</button>
           <button className="btn ghost" disabled={busy !== ''} onClick={checkMenu} title="批量扫该机台下所有导出：配对/未映射列/空壳/越界/跨 dump 漂移">批量体检</button>
           <button className="btn ghost" disabled={busy !== ''} onClick={proposeMapping} title="未映射列 → LLM 提规范键候选（只落提案文件，需人采纳；涉气路归属一律标 needs_human）">LLM 映射建议</button>

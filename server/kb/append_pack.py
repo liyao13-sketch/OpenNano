@@ -382,3 +382,88 @@ def _sample_nature(my_runs: list[dict]) -> str:
         return "混合（" + "/".join(sorted(ns)) + "）"
     return "未标（按 parent 自推）"
 
+# ---------------------------------------------------------------- core → 画布（回灌）
+#: core 表 → 包内 CSV 名（只读，用来喂 parse_expack）
+_PACK_OF_TABLE = {"runs": "runs.csv", "steps": "steps.csv", "measurements": "measurements.csv",
+                  "observations": "observations.csv", "batches": "batches.csv",
+                  "samples": "samples.csv", "recipes": "recipes.csv"}
+
+
+def core_to_project(batch: str, project_name: str = "", lib=None,
+                    include_measurements: bool = True) -> dict:
+    """**从 core 只读回灌画布**：core → 临时包 → `parse_expack` → 画布项目 dict。
+
+    为什么走"临时包"这一跳：
+        `parse_expack` 已经有一整套成熟的 run→模块构造（建模块/匹配机台/灌参数/挂测量/拼备注）。
+        从 core 直接另捏一套模块，**必然与"导入实验包"的产物漂移**（形状、键名、状态都可能不同）。
+        生成同构的临时包再喂给它 ⇒ 两条路的产物**逐字一致**，且日后 parse_expack 升级自动受益。
+
+    口径（数据线 2026-09-12 五条，逐条落实）：
+        只读 core（不写任何数据资产）· `measurements.value` 空**不进画布**（不当 0）·
+        `param_json` 原样 · `obs_type` 表外跳过（parse_expack 侧按词表）· **ID 全部照抄**。
+    """
+    import tempfile
+    from pathlib import Path as _P
+
+    rows = [r for r in read_core_table("runs") if (r.get("batch_id") or "").strip() == batch]
+    if not rows:
+        raise ValueError(f"core 里没有 batch「{batch}」的 run")
+    runs_by_id = {(r.get("run_id") or "").strip(): r for r in rows}
+    keep = set(runs_by_id)
+
+    def _pick(table: str, key: str) -> list[dict]:
+        return [r for r in read_core_table(table) if (r.get(key) or "").strip() in keep]
+
+    tables = {
+        "runs": rows,
+        "steps": _pick("steps", "run_id"),
+        "observations": _pick("observations", "run_id"),
+        "batches": [r for r in read_core_table("batches")
+                    if (r.get("batch_id") or "").strip() == batch],
+        "samples": [r for r in read_core_table("samples")
+                    if (r.get("batch_id") or "").strip() == batch],
+        "recipes": _pick("recipes", "run_id"),
+    }
+    meas_all = _pick("measurements", "run_id")
+    if include_measurements:                      # 空值=未测 ⇒ 不进画布（不当 0）
+        tables["measurements"] = [r for r in meas_all if str(r.get("value", "")).strip() != ""]
+    else:
+        tables["measurements"] = []
+    skipped_blank = len(meas_all) - len(tables["measurements"])
+
+    # 写临时包（内存目录，用完即弃；只含 core 选中行）
+    tmp = _P(tempfile.mkdtemp(prefix="core_to_canvas_"))
+    pdir = tmp / batch
+    pdir.mkdir(parents=True, exist_ok=True)
+    for table, fname in _PACK_OF_TABLE.items():
+        rs = tables.get(table, [])
+        if not rs:
+            continue
+        hdr = list(rs[0].keys())
+        with (pdir / fname).open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=hdr)
+            w.writeheader()
+            for r in rs:
+                w.writerow({k: r.get(k, "") for k in hdr})
+    (pdir / "manifest.json").write_text(json.dumps({
+        "format": "opennano-expack", "version": "0.1", "batch_id": batch,
+        "source": "core-readonly",                # 明示：这是回灌用的只读镜像，不是新数据
+        "project": project_name or batch, "runs": len(rows),
+        "note": "由 core 只读生成，仅供回灌画布；勿当作数据源",
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    from . import expack
+    proj = expack.parse_expack(pdir, lib)
+    proj["name"] = project_name or batch
+    proj["core_batch_id"] = batch
+    proj["_core_to_canvas"] = {
+        "source": "core(只读)", "batch_id": batch, "runs": len(rows),
+        "steps": len(tables.get("steps", [])),
+        "measurements": len(tables.get("measurements", [])),
+        "measurements_blank_skipped": skipped_blank,
+        "observations": len(tables.get("observations", [])),
+        "samples": len(tables.get("samples", [])),
+        "note": "空值测量未进画布（未测 ≠ 0）；ID 全部照抄；不写 core",
+    }
+    return proj
+
