@@ -47,7 +47,10 @@ TEMPLATE_TO_STAGE = {tmpl: st for st, (_sub, tmpl) in STAGE_TO_TEMPLATE.items()}
 
 # 工艺大类 → 缺省 stage(模板名匹配不到时)
 CATEGORY_TO_STAGE = {"etch": "RIE", "deposition": "PECVD", "graphic": "EBL",
-                     "wet": "LIFTOFF", "packaging": "DICE"}
+                     "wet": "LIFTOFF", "packaging": "DICE",
+                     # 表征类(2026-09-12 补:此前 SEM/椭偏等节点会被静默丢弃)
+                     "sem": "SEM", "metro_form": "SEM", "cd_sem": "SEM",
+                     "ellip": "ELLIP", "profilo": "PROFILE", "stress": "STRESS"}
 
 # ---- core 量名词 ⇄ 画布接口参数 ----
 QUANTITY_TO_PARAM = {
@@ -63,6 +66,10 @@ PARAM_TO_QUANTITY.update({"硅CD": "final_cd_nm", "刻蚀深度": "depth_center_
 
 # Bosch 三步骤前缀(导出 steps 时拆步)
 _STEP_PREFIXES = ("pass_", "brk_", "etch_", "bt_", "me_", "stage")
+
+# 气体令牌(参数键常只写气体名,如 etch_sf6 ↔ 设备模板 etch_gas_SF6)
+GAS_TOKENS = ("SF6", "CF4", "C4F8", "CHF3", "O2", "Ar", "N2", "Cl2", "BCl3",
+              "CH4", "HBr", "H2", "He", "NF3", "XeF2")
 
 
 def _sanitize_batch(name: str) -> str:
@@ -89,17 +96,63 @@ def _read_csv(p: Path) -> list[dict]:
 # 导出：画布流程 → 实验数据包(zip)
 # ============================================================
 
-def build_expack(project: dict, purpose: str = "", operator: str = "") -> tuple[bytes, str]:
-    """画布项目 → (zip 字节, 文件夹名=BatchID)。生成待填模板(measurements 留空)。"""
+def resolve_stage(m: dict, lib=None) -> str:
+    """画布模块 → core stage。三级回退：模板名 → 设备模板(经机台) → 工艺大类。
+
+    回退存在的理由：画布的 `equipment_name` 是**画布模板名**，而 TEMPLATE_TO_STAGE
+    只收了 16 个；SEM/椭偏/台阶等表征设备常对不上，过去会**静默丢节点**。
+    """
+    stage = TEMPLATE_TO_STAGE.get(m.get("equipment_name") or "")
+    if stage:
+        return stage
+    eq_name, cat = "", ""
+    if lib:
+        for mc in lib.machines():
+            if mc.get("name") and mc["name"] == m.get("machine_name"):
+                eq_name = mc.get("equipment_id") or ""
+                break
+        for c, eqs in (lib.data.get("equipment") or {}).items():
+            for t in eqs:
+                if eq_name and t.get("id") == eq_name:
+                    cat = c
+                    eq_name = t.get("name") or ""
+                    break
+            if cat:
+                break
+        if eq_name and eq_name in TEMPLATE_TO_STAGE:
+            return TEMPLATE_TO_STAGE[eq_name]
+        # 直接拿 equipment_name 撞设备模板名
+        if m.get("equipment_name") in TEMPLATE_TO_STAGE:
+            return TEMPLATE_TO_STAGE[m["equipment_name"]]
+    return CATEGORY_TO_STAGE.get(cat or m.get("subtype") or "", "")
+
+
+def unmapped_modules(project: dict, lib=None) -> list[dict]:
+    """列出无法映射为工步的节点(用于**显式告警**,不再静默丢)。"""
+    out = []
+    for m in project.get("modules", []):
+        if not resolve_stage(m, lib):
+            out.append({"name": m.get("name") or "(未命名)",
+                        "equipment_name": m.get("equipment_name") or "",
+                        "subtype": m.get("subtype") or "",
+                        "reason": "设备名/大类不在 stage 映射表内"})
+    return out
+
+
+def extract_rows(project: dict, purpose: str = "", operator: str = "",
+                 lib=None) -> tuple[list, list, list, dict, str]:
+    """画布项目 → (run_rows, step_rows, meas_rows, stage_counter, batch)。
+
+    抽成独立函数的原因：流程卡(md)与三个 CSV **必须共用同一套 run/step/meas id**，
+    否则两处各算一遍必然漂移(卡上写的 run_id 在 runs.csv 里找不到)。
+    """
     batch = _sanitize_batch(project.get("name", "EXP"))
     modules = project.get("modules", [])
     now = datetime.now().strftime("%Y-%m-%d")
-
     run_rows, step_rows, meas_rows = [], [], []
     stage_counter: dict[str, int] = {}
     for m in modules:
-        stage = TEMPLATE_TO_STAGE.get(m.get("equipment_name") or "") or \
-            CATEGORY_TO_STAGE.get(m.get("subtype") or "", None)
+        stage = resolve_stage(m, lib)
         if not stage:
             continue
         stage_counter[stage] = stage_counter.get(stage, 0) + 1
@@ -108,17 +161,8 @@ def build_expack(project: dict, purpose: str = "", operator: str = "") -> tuple[
         tool_id = m.get("machine_name") or ""
         run_rows.append([rid, batch, "", stage, stage_counter[stage], now,
                          "", "", m.get("equipment_name") or stage, tool_id,
-                         "", operator or "", purpose or "", "", "", "", "", "planned", ""])
-        # steps:按已知步骤前缀拆分,否则单步
-        params = m.get("params") or {}
-        groups: dict[str, dict] = {}
-        for k, v in params.items():
-            pre = next((p for p in _STEP_PREFIXES if k.startswith(p)), None)
-            if pre:
-                groups.setdefault(pre[:-1] if pre.endswith("_") else pre, {})[k] = v
-            else:
-                groups.setdefault("main", {})[k] = v
-        for si, (sname, pv) in enumerate(groups.items(), start=1):
+                         "", operator or "", purpose or "", "", "", "", "planned", ""])
+        for si, (sname, pv) in enumerate(group_params(m.get("params") or {}).items(), start=1):
             dur = next((vv for kk, vv in pv.items()
                         if kk.endswith(("time_s", "duration_s"))), "")
             press = next((vv for kk, vv in pv.items() if "pressure" in kk), "")
@@ -126,13 +170,225 @@ def build_expack(project: dict, purpose: str = "", operator: str = "") -> tuple[
                   if not k.endswith(("time_s", "duration_s")) and "pressure" not in k}
             step_rows.append([f"{rid}.S{si:02d}", rid, si, sname, "",
                               dur, press, "", json.dumps(pj, ensure_ascii=False), ""])
-        # measurements 模板:接口输出 → 量名词(留空待填)
         for out in (m.get("param_outputs") or []):
             q = PARAM_TO_QUANTITY.get(out, out)
             meta = field_meta(q)
-            meas_rows.append([f"{rid}.M{len([r for r in meas_rows if r[0].startswith(rid)])+1:02d}",
-                              rid, "", q, "", meta.get("unit", ""), "", "", "",
-                              "", "", "", "", ""])
+            n = len([r for r in meas_rows if r[0].startswith(rid)]) + 1
+            meas_rows.append([f"{rid}.M{n:02d}", rid, "", q, "", meta.get("unit", ""),
+                              "", "", "", "", "", "", "", ""])
+    return run_rows, step_rows, meas_rows, stage_counter, batch
+
+
+def group_params(params: dict) -> dict[str, dict]:
+    """按已知步骤前缀把参数拆成 {步骤名: {参数: 值}}(与 steps.csv 同一口径)。"""
+    groups: dict[str, dict] = {}
+    for k, v in (params or {}).items():
+        pre = next((p for p in _STEP_PREFIXES if k.startswith(p)), None)
+        if pre:
+            groups.setdefault(pre[:-1] if pre.endswith("_") else pre, {})[k] = v
+        else:
+            groups.setdefault("main", {})[k] = v
+    return groups
+
+
+def _lib_templates(lib) -> list[tuple[str, dict]]:
+    out = []
+    for _cat, eqs in ((lib.data.get("equipment") or {}) if lib else {}).items():
+        for t in eqs:
+            out.append((t.get("name", ""), t.get("params") or {}))
+    return out
+
+
+def param_meta(key: str, lib, equipment_name: str = "") -> dict:
+    """参数键 → {label, unit}。
+
+    画布参数键与设备模板键常不同名（`etch_sf6` vs `etch_gas_SF6`、`rf_power` vs
+    `etch_bias_power`），故依次尝试：精确 → 去步骤前缀 → 气体令牌 → 尽力匹配。
+    """
+    if not key:
+        return {"label": key, "unit": ""}
+    kl = key.lower()
+    parts = key.split("_", 1)
+    core = parts[1].lower() if len(parts) == 2 and parts[0] + "_" in _STEP_PREFIXES else kl
+    variants = [kl]
+    if core != kl:
+        variants.append(core)
+    if kl.endswith("_sccm"):
+        variants.append(kl[:-5])
+    if core.endswith("_sccm"):
+        variants.append(core[:-5])
+    gas = next((g.lower() for g in GAS_TOKENS if g.lower() == core.split("_")[0]), None)
+
+    templates = _lib_templates(lib)
+    ordered = [p for n, p in templates if n == equipment_name] + \
+              [p for n, p in templates if n != equipment_name]
+    for tpl in ordered:
+        for tkey, tdef in tpl.items():
+            if not isinstance(tdef, dict):
+                continue
+            tl = tkey.lower()
+            hit = False
+            if tl in variants:
+                hit = True
+            elif gas and re.search(rf"(^|_){re.escape(gas)}($|_)", tl):
+                hit = True          # 同一种气体的流量参数
+            if hit:
+                return {"label": tdef.get("label") or key, "unit": tdef.get("unit") or ""}
+    return {"label": key, "unit": ""}
+
+
+def _fmt_num(v) -> str:
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v)
+
+
+def build_process_card(project: dict, purpose: str = "", operator: str = "",
+                       lib=None) -> str:
+    """画布项目 → 人读「实验流程卡」Markdown(上机对照/交接用)。
+
+    与 build_expack 共用 extract_rows ⇒ run_id / step_id / meas_id 与 CSV 逐字一致。
+    内容口径：**计划 + 待填占位**(不掺实测值,实测以 core CSV 为准)。
+    """
+    run_rows, step_rows, meas_rows, stage_counter, batch = extract_rows(
+        project, purpose, operator, lib)
+    modules = [m for m in project.get("modules", []) if m.get("core_run_id")]
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    L: list[str] = []
+    L.append(f"# {batch} · 实验流程卡")
+    L.append("")
+    L.append("> 由 **OpenNano 画布**导出（一次性快照）。本卡为**人读版**；"
+             "数据以同包 core CSV 为准（CSV 权威）。")
+    L.append("")
+    L.append("| 项 | 值 |")
+    L.append("|---|---|")
+    L.append(f"| 批次 | `{batch}` |")
+    L.append(f"| 实验目的 | {purpose or '—'} |")
+    L.append(f"| 操作人 | {operator or '—'} |")
+    L.append(f"| 导出时间 | {now} |")
+    L.append(f"| 工步数 / 计划测量 | {len(run_rows)} / {len(meas_rows)} |")
+    L.append(f"| 项目 | {project.get('name') or batch} |")
+    L.append("")
+
+    # 设备链（含未映射节点显式告警，不静默丢）
+    chain = " → ".join(
+        (f"**{m.get('name') or m.get('equipment_name')}**"
+         f"（{m.get('equipment_name') or '—'}"
+         + (f" @ {m.get('machine_name')}" if m.get("machine_name") else "") + "）")
+        for m in modules)
+    L.append("## 设备链（按序执行）")
+    L.append("")
+    L.append(chain or "（画布上没有可映射为工步的节点）")
+    L.append("")
+    unmapped = unmapped_modules(project, lib)
+    if unmapped:
+        L.append(f"> ⚠️ **有 {len(unmapped)} 个节点未能映射为工步，未进入本卡与 CSV**——"
+                 "请补 stage 映射或改设备名后重新导出：")
+        L.append("")
+        for u in unmapped:
+            L.append(f"> - `{u['name']}`（equipment={u['equipment_name'] or '—'} / "
+                     f"subtype={u['subtype'] or '—'}）：{u['reason']}")
+        L.append("")
+
+    # 逐工步
+    L.append("## 步骤明细")
+    L.append("")
+    step_by_run: dict[str, list] = {}
+    for s in step_rows:
+        step_by_run.setdefault(s[1], []).append(s)
+    meas_by_run: dict[str, list] = {}
+    for r in meas_rows:
+        meas_by_run.setdefault(r[1], []).append(r)
+    for i, m in enumerate(modules, start=1):
+        rid = m["core_run_id"]
+        L.append(f"### {i}. `{rid}` · {m.get('name') or ''}")
+        L.append("")
+        L.append(f"- 设备：{m.get('equipment_name') or '—'}"
+                 + (f" ｜ 机台：{m.get('machine_name')}" if m.get("machine_name") else ""))
+        if m.get("note"):
+            L.append(f"- 备注：{m['note']}")
+        L.append("")
+        steps = step_by_run.get(rid, [])
+        if steps:
+            def _all_params(s):
+                """一条 step 行的全部参数(含 CSV 独立列 duration/pressure),返回 (步序, [(键,值,单位)])。"""
+                sid, _rid, order, sname, _role, dur, press, _pu, pj, _note = s
+                triples = [(k, v, "") for k, v in json.loads(pj or "{}").items()]
+                if dur not in ("", None):
+                    triples.append(("duration_s", dur, "s"))
+                if press not in ("", None):
+                    triples.append(("pressure", press, _pu or "Pa"))
+                return order, triples
+
+            eq_name = m.get("equipment_name") or ""
+            labels_known = any(
+                param_meta(k, lib, eq_name)["label"] != k
+                for s in steps for _o, triples in [_all_params(s)] for k, _v, _u in triples)
+            L.append("| 步 | 参数 | 值 | 单位 |" if labels_known else "| 步 | 参数 | 值 |")
+            L.append("|---|---|---|---|" if labels_known else "|---|---|---|")
+            for s in steps:
+                order, triples = _all_params(s)
+                first = True
+                for k, v, unit in triples:
+                    meta = param_meta(k, lib, eq_name)
+                    label = meta["label"] if meta["label"] != k else f"`{k}`"
+                    cells = [f"S{order:02d}" if first else "", label, _fmt_num(v)]
+                    if labels_known:
+                        cells.append(unit or meta["unit"])
+                    L.append("| " + " | ".join(cells) + " |")
+                    first = False
+                if not triples:
+                    L.append(f"| S{order:02d} | （无参数） | " + (" | " if labels_known else "") + "|")
+            L.append("")
+        ms = meas_by_run.get(rid, [])
+        if ms:
+            L.append("**待填测量**（填回 `measurements.csv`）：")
+            L.append("")
+            L.append("| meas_id | 量名词 | 单位 | 值 | 备注 |")
+            L.append("|---|---|---|---|---|")
+            for r in ms:
+                L.append(f"| `{r[0]}` | {r[3]} | {r[5]} | ☐ | |")
+            L.append("")
+
+    # 通用规范与记录位
+    L.append("## 上机前检查 / 记录")
+    L.append("")
+    L.append("- ☐ 样品编号与数量核对：")
+    L.append("- ☐ 腔体状态确认（上次工艺、清洗/dummy 是否已做）：")
+    L.append("- ☐ 参数与 `runs.csv`/`steps.csv` 核对一致：")
+    L.append("- ☐ 现象记录（填入 `observations.csv`：obs_type 取自现象受控词表）：")
+    L.append("- ☐ SEM/测量图放 `artifacts/`，版图放 `gds/`：")
+    L.append("")
+
+    L.append("## 本包文件说明")
+    L.append("")
+    L.append("| 文件 | 用途 |")
+    L.append("|---|---|")
+    L.append("| `流程_%s.md` | **本卡**：人读流程快照 |" % batch)
+    L.append("| `manifest.json` | 包元信息（批次/目的/操作人/统计） |")
+    L.append("| `flow.json` | 画布原始 JSON（可导回画布） |")
+    L.append("| `batches.csv` · `runs.csv` · `steps.csv` | core 列：批次 / 工步 / 步骤参数 |")
+    L.append("| `measurements.csv` | **待填**实测值（量名词与单位已给） |")
+    L.append("| `observations.csv` | **待填**现象（受控词表取值） |")
+    L.append("| `artifacts/` · `gds/` | 证据图 / 版图 |")
+    L.append("")
+    L.append("---")
+    L.append("")
+    L.append("*权限与改动口径：本卡由画布生成、**只读参考**；要改流程请改画布并重新导出"
+             "（卡不会回写画布）。现场只允许在 `measurements.csv`/`observations.csv` 填数，"
+             "**不要改本卡与 steps.csv 的参数**——core CSV 才是权威源。*")
+    return "\n".join(L) + "\n"
+
+
+def build_expack(project: dict, purpose: str = "", operator: str = "",
+                 lib=None) -> tuple[bytes, str]:
+    """画布项目 → (zip 字节, 文件夹名=BatchID)。生成待填模板(measurements 留空)。
+
+    包内除 core 列 CSV 外还含 **`流程_<批次>.md`**(人读流程卡,见 build_process_card)。
+    """
+    run_rows, step_rows, meas_rows, stage_counter, batch = extract_rows(
+        project, purpose, operator)
+    now = datetime.now().strftime("%Y-%m-%d")
 
     files: dict[str, bytes] = {
         "manifest.json": json.dumps({
@@ -141,6 +397,7 @@ def build_expack(project: dict, purpose: str = "", operator: str = "") -> tuple[
             "source": "canvas", "project": project.get("name", ""),
             "purpose": purpose, "operator": operator,
             "runs": len(run_rows), "planned_measurements": len(meas_rows),
+            "unmapped_nodes": unmapped_modules(project, lib),   # 非空 = 有节点没进包,须处理
         }, ensure_ascii=False, indent=2).encode(),
         "flow.json": json.dumps(project, ensure_ascii=False, indent=2).encode(),
         "batches.csv": _csv_bytes(
@@ -164,6 +421,9 @@ def build_expack(project: dict, purpose: str = "", operator: str = "") -> tuple[
             ["obs_id", "run_id", "sample_id", "obs_type", "severity",
              "description", "judgement", "action", "artifact_id",
              "recorded_by", "date"], []),
+        # 人读流程卡(与上面 CSV 共用同一套 id;不掺实测值)
+        f"流程_{batch}.md": build_process_card(
+            project, purpose=purpose, operator=operator, lib=lib).encode(),
     }
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:

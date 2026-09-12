@@ -27,9 +27,12 @@ class KnowledgeEntry(Base):
     parameters: Mapped[dict] = mapped_column(JSON, default=dict)
     results: Mapped[dict] = mapped_column(JSON, default=dict)
     source: Mapped[str] = mapped_column(String(512), index=True)
-    reliability_score: Mapped[int] = mapped_column(Integer, default=4)
+    reliability_score: Mapped[int] = mapped_column(Integer, default=2)
     constraints: Mapped[list] = mapped_column(JSON, default=list)
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # v0.2:抽取/出处元数据(citation/loc/gap/conflicts/freshness/normalized/
+    # knowledge_type/confidence/verification/source_tier/reliability_basis/版本与批次)
+    extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
@@ -40,6 +43,7 @@ class KnowledgeEntry(Base):
             "parameters": self.parameters or {}, "results": self.results or {},
             "source": self.source, "reliability_score": self.reliability_score,
             "constraints": self.constraints or [], "tags": self.tags or [],
+            "extra_metadata": self.extra_metadata or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -575,8 +575,25 @@ export default function App() {
       })
       pushLog('edit', `导出实验数据包「${projectName}」`)
       alert(`实验数据包已导出（${(size / 1024).toFixed(0)} KB zip）\n\n`
-        + `结构：{项目名}/ manifest + flow + batches/runs/steps/measurements(待填模板)/observations + artifacts/ + gds/\n`
-        + `列名与数据域 core 逐列一致 → 实验后填数值+放 SEM 图 → 交《数据》会话 build_core 落库。`)
+        + `结构：{项目名}/ 流程_{批次}.md + manifest + flow + batches/runs/steps/measurements(待填模板)/observations + artifacts/ + gds/\n`
+        + `列名与数据域 core 逐列一致 → 实验后填数值+放 SEM 图 → 交《数据》会话 build_core 落库。\n`
+        + `其中「流程_*.md」是给人看的流程卡（上机对照/交接），数据仍以 CSV 为准。`)
+    } catch (e: any) { alert('导出失败: ' + e.message) }
+  }
+
+  // 画布流程 → 实验流程卡(Markdown,人读;与包内那张同一份)
+  const exportCard = async () => {
+    try {
+      const purpose = prompt('实验目的(写入卡头,可空):', '') ?? ''
+      const size = await download('/api/expack/card', {
+        name: projectName, purpose,
+        modules: nodes.map(n => n.data.module as Module),
+        edges: edges.map(e => ({ src: e.source, dst: e.target })),
+      })
+      pushLog('edit', `导出实验流程卡「${projectName}」`)
+      alert(`实验流程卡已导出（${(size / 1024).toFixed(1)} KB .md）\n\n`
+        + `人读版：批次信息 + 设备链 + 逐步参数（中文标签/单位）+ 待填测量清单 + 上机检查项。\n`
+        + `⚠️ 只读参考：要改流程请改画布后重新导出；实测值填在包的 measurements.csv / observations.csv。`)
     } catch (e: any) { alert('导出失败: ' + e.message) }
   }
 
@@ -746,7 +763,8 @@ export default function App() {
         <button className="btn ghost" onClick={openLoad}>载入</button>
         <button className="btn ghost" onClick={save}>保存</button>
         <span className="topbar-sep" />
-        <button className="btn ghost" onClick={exportExpack} title="画布流程 → 实验数据包(core 格式,待填模板)">导出实验包</button>
+        <button className="btn ghost" onClick={exportExpack} title="画布流程 → 实验数据包(core 格式,含人读流程卡.md)">导出实验包</button>
+        <button className="btn ghost" onClick={exportCard} title="画布流程 → 实验流程卡(Markdown,人读,可打印上机)">导出流程卡</button>
         <button className="btn ghost" onClick={importExpack} title="实验数据包(文件夹/zip) → 画布流程">导入实验包</button>
         <button className="btn ghost" onClick={() => dataRef.current?.click()} title="上传 Excel 解析为 core 草稿(不落库)">导入数据</button>
         <button className="btn ghost" onClick={exportData} title="导出 core 数据工作簿(9表+量名词)">导出数据</button>

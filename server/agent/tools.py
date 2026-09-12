@@ -90,6 +90,11 @@ def _record_experiment(args: dict, ctx: Context) -> dict:
     missing = [k for k in required if not str(args.get(k) or "").strip()]
     if missing:
         return {"error": f"缺少必填字段: {', '.join(missing)}"}
+    # v0.2:可信度必须显式给出 —— 曾因缺省 4 让文献/口述条目静默变成"系统实测"
+    if args.get("reliability_score") in (None, ""):
+        return {"error": "缺少必填字段: reliability_score（可信度必须显式给出："
+                         "1 推测/已被推翻 · 2 文献未验证 · 3 多次实测 · 4 实测或权威源互证 · 5 金标准）。"
+                         "不要默认为 4。"}
     entry = {
         "process_type": args["process_type"],
         "title": str(args.get("title") or ""),
@@ -98,9 +103,10 @@ def _record_experiment(args: dict, ctx: Context) -> dict:
         "parameters": args.get("parameters") or {},
         "results": args.get("results") or {},
         "source": str(args["source"]),
-        "reliability_score": int(args.get("reliability_score", 4)),
+        "reliability_score": int(args["reliability_score"]),
         "constraints": args.get("constraints") or [],
         "tags": args.get("tags") or [],
+        "extra_metadata": args.get("extra_metadata") or {},
     }
     obj, created = ctx.kb.upsert(entry)
     return {"created": created, "entry": _compact_entry(obj.to_dict())}
@@ -454,9 +460,9 @@ TOOLS: list[Tool] = [
             "parameters": {"type": "object", "description": "配方参数"},
             "results": {"type": "object", "description": "实测结果"},
             "source": {"type": "string", "description": "来源(实验编号/设备手册/文献),必填,用于去重"},
-            "reliability_score": {"type": "integer", "description": "可信度 1~5(1 推测/3 多次/4 实测/5 金标准)"},
+            "reliability_score": {"type": "integer", "description": "可信度 1~5,**必须显式给出、不要默认 4**:1 推测/已被推翻 · 2 文献未验证 · 3 多次实测 · 4 实测或权威源互证 · 5 金标准"},
             "tags": {"type": "array", "items": {"type": "string"}},
-        }, "required": ["process_type", "source"]},
+        }, "required": ["process_type", "source", "reliability_score"]},
         func=_record_experiment, confirm=True,
     ),
     Tool(

@@ -72,9 +72,10 @@ class EntryReq(BaseModel):
     parameters: dict = {}
     results: dict = {}
     source: str
-    reliability_score: int = 4
+    reliability_score: int | None = None   # v0.2:不再默认 4;缺省由 source_tier 分档决定(非 core 落 2)
     constraints: list = []
     tags: list = []
+    extra_metadata: dict = {}              # v0.2:文献抽取元数据(citation/loc/gap/…)与 source_tier
 
 
 # ---------- P1: 工艺引擎 ----------
@@ -179,16 +180,30 @@ class ExpackExportReq(BaseModel):
 
 @app.post("/api/expack/export")
 def api_expack_export(req: ExpackExportReq):
-    """画布流程 → 实验数据包 zip(core 列格式,measurements 为待填模板)。"""
+    """画布流程 → 实验数据包 zip(core 列格式,measurements 为待填模板 + 人读流程卡 md)。"""
     from fastapi import Response as _R
     data, batch = expack_engine.build_expack(
         {"name": req.name, "modules": req.modules, "edges": req.edges},
-        purpose=req.purpose, operator=req.operator)
+        purpose=req.purpose, operator=req.operator, lib=LIB)
     from urllib.parse import quote as _q
     return _R(content=data, media_type="application/zip",
               headers={"Content-Disposition":
                        f"attachment; filename=experiment_package.zip; "
                        f"filename*=UTF-8''{_q(batch + '.zip')}"})
+
+
+@app.post("/api/expack/card")
+def api_expack_card(req: ExpackExportReq):
+    """画布流程 → 单独下载「实验流程卡」Markdown(人读,与包内那张同一份)。"""
+    from fastapi import Response as _R
+    from urllib.parse import quote as _q
+    md = expack_engine.build_process_card(
+        {"name": req.name, "modules": req.modules, "edges": req.edges},
+        purpose=req.purpose, operator=req.operator, lib=LIB)
+    return _R(content=md.encode(), media_type="text/markdown; charset=utf-8",
+              headers={"Content-Disposition":
+                       f"attachment; filename=process_card.md; "
+                       f"filename*=UTF-8''{_q('流程_' + req.name + '.md')}"})
 
 
 class ExpackImportReq(BaseModel):
