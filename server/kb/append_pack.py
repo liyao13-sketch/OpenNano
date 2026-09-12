@@ -109,7 +109,7 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
     now = datetime.now().strftime("%Y-%m-%d")
 
     # ---- runs：只带新 run；parent/stage_seq 照画布（工具算好的值）
-    run_rows, date_src, sample_src = [], {}, {}
+    run_rows, date_src, sample_src, stage_src = [], {}, {}, {}
     for rid in new:
         m = mods.get(rid) or {}
         parts = rid.rsplit("-", 2)
@@ -117,11 +117,15 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
         parent = m.get("core_parent_run_id") or ""
         # ① sample_id：模块上没有时，**继承 core 里该 run（或它的上游）的真实归属**
         sample = (m.get("core_sample_id") or m.get("sample_id") or "").strip()
-        if not sample:
+        if sample:
+            # **值正确时也要报来源**（否则 provenance={} 与"没报"无法区分 —— 数据线 2026-09-13 指出）
+            sample_src[rid] = "模块自带（画布/导入包）"
+        else:
             src = m.get("core_run_id") or rid
+            inherit_from = src if core_facts(src).get("sample_id") else parent
             sample = (core_facts(src).get("sample_id") or core_facts(parent).get("sample_id") or "")
-            if sample:
-                sample_src[rid] = f"继承自 core:{src if core_facts(src).get('sample_id') else parent}"
+            sample_src[rid] = (f"继承自 core:{inherit_from}" if sample
+                               else "**空缺：画布与 core 都没有该 run 的 sample_id**")
         # ② stage_seq：模块没给就取 core 里同 stage 的权威值
         if not m.get("core_stage_seq"):
             for r in read_core_table("runs"):
@@ -129,7 +133,10 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
                         and (r.get("stage") or "").strip() == stage
                         and (r.get("stage_seq") or "").strip()):
                     m["core_stage_seq"] = r["stage_seq"]
+                    stage_src[rid] = f"取自 core 同 stage：{r.get('run_id')}"
                     break
+        else:
+            stage_src[rid] = "模块自带（画布/导入包）"
         # ③ date：**用画布上该 run 的计划日期**；缺失才退回今天，并标注来源
         date = (m.get("core_date") or "").strip()
         if date:
@@ -196,6 +203,7 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
         "new_runs": new, "runs": len(new),
         "only_new_rows": True,
         "sample_id_source": sample_src, "date_source": date_src,
+        "stage_seq_source": stage_src,
         "note": ("追加包：只含尚未入 core 的行；batches/samples/recipes 留空。"
                  "按既有通道增量并入（既有源优先，老行不会被覆盖）。"
                  "**禁止**把它当第二权威去改老行。"),
@@ -236,6 +244,7 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
     return buf.getvalue(), {
         "ok": True, "batch_id": batch, "new_runs": new,
         "sample_id_source": sample_src, "date_source": date_src,
+        "stage_seq_source": stage_src,
         "runs": len(run_rows), "steps": len(step_rows),
         "measurements": len(meas_rows), "observations": len(obs_rows),
         "skipped_obs": skipped_obs,
