@@ -66,6 +66,22 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
     # ① 坐标：只对 core 里有的 run 重排（未入库的计划 run 保留原坐标与相对位置）
     core_mods = [by_run[r["run_id"]] for r in present]
     _layout_modules(present, core_mods)
+    # 同步把 run_nature 写回模块（core 是权威；画布据此把 season 默认收起）
+    for r in present:
+        m = by_run[r["run_id"]]
+        nat = (r.get("run_nature") or "").strip()
+        if nat:
+            m["run_nature"] = nat
+        elif "run_nature" in m:
+            del m["run_nature"]
+    # season 节点：挪到主流程**下方**的独立区（同列对齐其工序，y 压到所有主行之下）——
+    # 数据保留、视觉上不占流程线（owner：season 不画；这里给的是"收起来"的位置）
+    main_rows = [float(m.get("y") or 0) for m in core_mods
+                 if (m.get("run_nature") or "") != "season"]
+    season_y = (max(main_rows) if main_rows else 0) + 260
+    seasons = [m for m in core_mods if (m.get("run_nature") or "") == "season"]
+    for i, m in enumerate(seasons):                     # 逐条错开，不许叠在一起
+        m["y"] = season_y + i * 170
     # 计划 run：挂在父的右侧一列（保持"下一步"的视觉位置）
     for rid, m in by_run.items():
         if rid in {r["run_id"] for r in present}:

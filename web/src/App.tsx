@@ -7,6 +7,7 @@ import { api, download } from './api'
 import Settings from './Settings'
 import KbBrowser from './KbBrowser'
 import BatchPanel from './BatchPanel'
+import Dock from './Dock'
 import PanelTabs from './PanelTabs'
 import type { Module, Library, CatalogItem, Equipment } from './types'
 
@@ -23,11 +24,13 @@ const FAMILY_COLOR: Record<string,string> = {
 
 function ProcessNode({ data }: any) {
   const m: Module = data.module
+  const isSeason = m.run_nature === 'season'
   const color = FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || '#6b7280'
   const primary = m.equipment_name || m.name
   const secondary = m.family_label || m.subtype
   const rs = m.run_state || 'idle'
   const badge = m.disabled ? { t:'禁', c:'var(--faint)', bg:'transparent', bd:'var(--border)' }
+    : isSeason       ? { t:'season', c:'var(--faint)', bg:'transparent', bd:'var(--border-2)' }
     : rs === 'running' ? { t:'…', c:'var(--accent)', bg:'var(--accent-soft)', bd:'var(--accent)' }
     : rs === 'ok'      ? { t:'✓', c:'var(--ok)', bg:'rgba(76,183,130,.14)', bd:'var(--ok)' }
     : rs === 'stale'   ? { t:'!', c:'var(--warn)', bg:'rgba(212,162,78,.14)', bd:'var(--warn)' }
@@ -35,9 +38,9 @@ function ProcessNode({ data }: any) {
   const kv = Object.entries(m.key_values || {}).slice(0, 3)
   return (
     <div style={{ width:190, background:'var(--surface)', border:'1px solid var(--border)',
-      borderLeft:`2px solid ${m.disabled ? 'var(--faint)' : color}`, borderRadius:10,
-      boxShadow:'var(--shadow-1)', color:'var(--text)', opacity: m.disabled ? .5 : 1,
-      borderStyle: m.disabled ? 'dashed' : 'solid' }}>
+      borderLeft:`2px solid ${m.disabled || isSeason ? 'var(--faint)' : color}`, borderRadius:10,
+      boxShadow:'var(--shadow-1)', color:'var(--text)', opacity: m.disabled ? .5 : (isSeason ? .68 : 1),
+      borderStyle: m.disabled || isSeason ? 'dashed' : 'solid' }}>
       <Handle type="target" position={Position.Top} />
       <div style={{ padding:'7px 11px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
@@ -45,9 +48,12 @@ function ProcessNode({ data }: any) {
           <span style={{ fontSize:12.5, fontWeight:600, letterSpacing:'-.01em', flex:1,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
             textDecoration: m.disabled ? 'line-through' : 'none' }}>{primary}</span>
-          <span title={m.disabled ? '已禁用(不参与运行)' : rs === 'ok' ? '已运行' : rs === 'stale' ? '上游已变,结果失效' : '未运行'}
+          <span title={m.disabled ? '已禁用(不参与运行)'
+                : isSeason ? 'season 热机（不加工已登记样品；默认收起，可在「视图」里展开）'
+                : rs === 'ok' ? '已运行' : rs === 'stale' ? '上游已变,结果失效' : '未运行'}
             style={{ fontSize:10, lineHeight:'14px', minWidth:14, textAlign:'center',
-              color:badge.c, background:badge.bg, border:`1px solid ${badge.bd}`, borderRadius:4 }}>{badge.t}</span>
+              color:badge.c, background:badge.bg, border:`1px solid ${badge.bd}`, borderRadius:4,
+              padding: isSeason ? '0 4px' : undefined }}>{badge.t}</span>
         </div>
         <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{secondary}</div>
         {kv.length > 0 && (
@@ -87,7 +93,6 @@ export default function App() {
   const [sending, setSending] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
-  const [batchOpen, setBatchOpen] = useState(false)
   const [projectName, setProjectName] = useState('未命名项目')
   const [loadOpen, setLoadOpen] = useState(false)
   const [projects, setProjects] = useState<{name:string;modules:number;edges:number;saved_at:string}[]>([])
@@ -100,7 +105,10 @@ export default function App() {
   const [running, setRunning] = useState(false)
   const [logs, setLogs] = useState<{t:string;kind:string;text:string}[]>([])
   const [issues, setIssues] = useState<{t:string;text:string}[]>([])
-  const [panelTab, setPanelTab] = useState<'agent'|'log'|'issues'>('agent')
+  const [dockTab, setDockTab] = useState<'agent'|'batch'|'log'|'issues'>('agent')
+  const [fileMenu, setFileMenu] = useState(false)
+  const [showSeason, setShowSeason] = useState(false)
+  const [libCollapsed, setLibCollapsed] = useState(false)
   const [menu, setMenu] = useState<{x:number;y:number;kind:'node'|'edge';id:string}|null>(null)
   const [viewMenu, setViewMenu] = useState(false)
   const [showComments, setShowComments] = useState(false)
@@ -236,7 +244,7 @@ export default function App() {
       if (r.errors?.length) {
         const t = new Date().toLocaleTimeString('zh-CN', { hour12: false })
         setIssues(is => [...is, ...r.errors.map((e: any) => ({ t, text: `${e.name}: ${e.error}` }))])
-        setPanelTab('issues')
+        setDockTab('issues')
       }
       if (r.cyclic?.length) pushLog('warn', `检测到环(未运行): ${r.cyclic.join(' → ')}`)
       pushLog('run', `完成:运行 ${r.ran} 个,跳过 ${r.skipped} 个,错误 ${r.errors?.length || 0} 个`)
@@ -756,8 +764,17 @@ export default function App() {
   const catEquipment: Equipment[] = m && library ? library.equipment[m.subtype] || [] : []
   // 入射膜堆叠(曝光类节点 Process Link 用)
   const inStack = m ? upstreamStack(m.id) : []
+  /* season（热机）节点：数据保留、默认不画（owner 2026-09-12 裁断）。
+     过滤只作用于"渲染"，绝不动 nodes/edges 本体（保存/导出仍是全量）。 */
+  const seasonIds = useMemo(() => new Set(
+    nodes.filter(n => (n.data.module as Module).run_nature === 'season').map(n => n.id)), [nodes])
+  const viewNodes = useMemo(
+    () => (showSeason ? nodes : nodes.filter(n => !seasonIds.has(n.id))), [nodes, seasonIds, showSeason])
+  const viewEdges = useMemo(
+    () => (showSeason ? edges : edges.filter(e => !seasonIds.has(e.source) && !seasonIds.has(e.target))),
+    [edges, seasonIds, showSeason])
   const inferredEdgeCount = useMemo(
-    () => edges.filter(e => (e.data as any)?.inferred).length, [edges])
+    () => viewEdges.filter(e => (e.data as any)?.inferred).length, [viewEdges])
   const topFilmName = inStack.length ? inStack[inStack.length - 1].film : 'Si'
   const stackDesc = ['Si', ...inStack.map(l => l.film + (l.thickness ? ` (${l.thickness} nm)` : ''))].join(' / ')
 
@@ -800,10 +817,15 @@ export default function App() {
                 onChange={e => { setShowComments(e.target.checked); pushLog('view', `备注显示: ${e.target.checked ? '开' : '关'}`) }} /> 显示备注 (F3)</label>
               <label><input type="checkbox" checked={ortho}
                 onChange={e => setOrtho(e.target.checked)} /> 正交连线(曼哈顿)</label>
+              <label><input type="checkbox" checked={showSeason}
+                onChange={e => setShowSeason(e.target.checked)}
+                disabled={seasonIds.size === 0} /> 显示 season 节点{seasonIds.size ? ` (${seasonIds.size})` : ''}</label>
+              <label><input type="checkbox" checked={libCollapsed}
+                onChange={e => setLibCollapsed(e.target.checked)} /> 收起左侧工艺库</label>
               <div className="dropdown-sep" />
               <button className="dropdown-item" onClick={() => { flowRef.current?.fitView({ padding: .2 }); setViewMenu(false) }}>适配视图 (Ctrl+0)</button>
-              <button className="dropdown-item" onClick={() => { setPanelTab('log'); setViewMenu(false) }}>显示日志面板</button>
-              <button className="dropdown-item" onClick={() => { setPanelTab('issues'); setViewMenu(false) }}>显示问题面板 ({issues.length})</button>
+              <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>显示日志面板</button>
+              <button className="dropdown-item" onClick={() => { setDockTab('issues'); setViewMenu(false) }}>显示问题面板 ({issues.length})</button>
               <div className="dropdown-sep" />
               <div style={{ padding:'4px 9px 2px', fontSize:10.5, letterSpacing:'.06em',
                 textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>主题</div>
@@ -823,22 +845,49 @@ export default function App() {
         <button className="btn ghost" onClick={openLoad}>载入</button>
         <button className="btn ghost" onClick={save}>保存</button>
         <span className="topbar-sep" />
-        <button className="btn ghost" onClick={() => setBatchOpen(true)} title="批次管理：run 链 / 续做 / 表单填写 / DRIE 菜单直读">批次</button>
-        <button className="btn ghost" onClick={exportExpack} title="画布流程 → 实验数据包(core 格式,含人读流程卡.md)">导出实验包</button>
-        <button className="btn ghost" onClick={exportCard} title="画布流程 → 实验流程卡(Markdown,人读,可打印上机)">导出流程卡</button>
-        <button className="btn ghost" onClick={exportAppend} title="只导出尚未入 core 的 run（tool-append 包；镜像包 core-slice 会被整包跳过）">导出追加包</button>
-        <button className="btn ghost" onClick={importExpack} title="实验数据包(文件夹/zip) → 画布流程">导入实验包</button>
-        <button className="btn ghost" onClick={() => dataRef.current?.click()} title="上传 Excel 解析为 core 草稿(不落库)">导入数据</button>
-        <button className="btn ghost" onClick={exportData} title="导出 core 数据工作簿(9表+量名词)">导出数据</button>
+        <button className="btn ghost" onClick={() => setDockTab('batch')}
+          title="批次管理：run 链 / 续做 / 表单填写 / 调试线 / DRIE 菜单直读">批次</button>
+        {/* 文件（保存/载入/导入/导出全部收纳；owner 2026-09-12："好多种保存输出"⇒ 一个菜单） */}
+        <div style={{ position:'relative' }}>
+          <button className="btn ghost" onClick={() => setFileMenu(v => !v)} title="保存 / 载入 / 导入 / 导出">文件 ▾</button>
+          {fileMenu && (
+            <div className="dropdown" onMouseLeave={() => setFileMenu(false)}>
+              <div className="dd-sec">项目</div>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); openLoad() }}>载入项目…</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); save() }}>保存项目</button>
+              <div className="dropdown-sep" />
+              <div className="dd-sec">导出</div>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportExpack() }}
+                title="画布流程 → 实验数据包(core 格式,含人读流程卡.md)">导出实验包</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportCard() }}
+                title="画布流程 → 实验流程卡(Markdown,人读,可打印上机)">导出流程卡</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportAppend() }}
+                title="只导出尚未入 core 的 run（tool-append 包）">导出追加包</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportData() }}
+                title="导出 core 数据工作簿(9表+量名词)">导出数据(xlsx)</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportConfig() }}
+                title="导出设备库/参数/影响规则/知识库">导出配置</button>
+              <div className="dropdown-sep" />
+              <div className="dd-sec">导入</div>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); importExpack() }}
+                title="实验数据包(文件夹/zip) → 画布流程">导入实验包</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); dataRef.current?.click() }}
+                title="上传 Excel 解析为 core 草稿(不落库)">导入数据(xlsx)</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); importRef.current?.click() }}
+                title="导入配置包(换机/备份)">导入配置</button>
+            </div>
+          )}
+        </div>
         <input ref={dataRef} type="file" accept=".xlsx,.xlsm" style={{ display:'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) importData(f); e.target.value = '' }} />
-        <button className="btn ghost" onClick={exportConfig} title="导出设备库/参数/影响规则/知识库">导出配置</button>
-        <button className="btn ghost" onClick={() => importRef.current?.click()} title="导入配置包(换机/备份)">导入配置</button>
         <input ref={importRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = '' }} />
       </div>
       <div className="main">
-        <div className="sidebar">
+        {libCollapsed && (
+          <div className="sidebar collapsed" title="展开工艺库" onClick={() => setLibCollapsed(false)}>»</div>
+        )}
+        <div className="sidebar" style={libCollapsed ? { display: 'none' } : undefined}>
           <h3>PROCESS</h3>
           {catalog.filter(c => c.group==='PROCESS').map(c => (
             <div key={c.subtype} className="lib-item" draggable
@@ -861,7 +910,7 @@ export default function App() {
           ))}
         </div>
         <div className="canvas-wrap">
-          <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+          <ReactFlow nodes={viewNodes} edges={viewEdges} nodeTypes={nodeTypes}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onConnect={onConnect} onNodeDragStop={onNodeDragStop}
             deleteKeyCode={['Backspace', 'Delete']}
@@ -1086,62 +1135,69 @@ export default function App() {
           )}
         </div>
       </div>
-      <div className="chatbar">
-        <div className="chatbar-tabs">
-          {(['agent','log','issues'] as const).map(t => (
-            <div key={t} className={'ptab' + (panelTab === t ? ' active' : '')} onClick={() => setPanelTab(t)}>
-              {{agent:'Agent 对话', log:`日志 (${logs.length})`, issues:`问题 (${issues.length})`}[t]}
-            </div>
-          ))}
-          <span className="spacer" />
-          {panelTab !== 'agent' && (
-            <span className="ptab-clear" onClick={() => panelTab === 'log' ? setLogs([]) : setIssues([])}>清空</span>
-          )}
-        </div>
-        {panelTab === 'agent' && (
-          <>
-        <div className="chatbar-body" ref={chatRef}>
-          {messages.length === 0 && <div className="chat-empty">问我工艺问题，例如「Ta 怎么刻蚀？」「SiO₂ 掩膜刻蚀常用参数」</div>}
-          {messages.map((m, i) => (
-            <div key={i} className={"msg " + m.role}>
-              {m.tools && m.tools.length > 0 && (
-                <div className="msg-tools">{m.tools.map((t: any, j) => (
-                  <div key={j}>{t.ok ? '🔧' : '⚠️'} {t.name}
-                    {t.args && Object.keys(t.args).length > 0 && <span className="tool-args"> {JSON.stringify(t.args)}</span>}
+      <Dock
+        active={dockTab}
+        onTab={k => setDockTab(k as any)}
+        tabs={[
+          { key: 'agent', label: 'Agent 对话', render: () => (
+            <div className="dock-col">
+              <div className="chatbar-body" ref={chatRef}>
+                {messages.length === 0 && <div className="chat-empty">问我工艺问题，例如「Ta 怎么刻蚀？」「SiO₂ 掩膜刻蚀常用参数」</div>}
+                {messages.map((m, i) => (
+                  <div key={i} className={"msg " + m.role}>
+                    {m.tools && m.tools.length > 0 && (
+                      <div className="msg-tools">{m.tools.map((t: any, j: number) => (
+                        <div key={j}>{t.ok ? '🔧' : '⚠️'} {t.name}
+                          {t.args && Object.keys(t.args).length > 0 && <span className="tool-args"> {JSON.stringify(t.args)}</span>}
+                        </div>
+                      ))}</div>
+                    )}
+                    <div className="msg-bubble">{m.content}</div>
+                    {m.src && m.src.length > 0 && (
+                      <div className="msg-src">{m.src.map((s: any, j: number) => <div key={j}>📎 [{s.reliability_score}/5] {s.title}</div>)}</div>
+                    )}
                   </div>
-                ))}</div>
-              )}
-              <div className="msg-bubble">{m.content}</div>
-              {m.src && m.src.length > 0 && (
-                <div className="msg-src">{m.src.map((s, j) => <div key={j}>📎 [{s.reliability_score}/5] {s.title}</div>)}</div>
-              )}
+                ))}
+              </div>
+              <div className="chatbar-input">
+                <input value={input} onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key==='Enter' && send()} placeholder="输入工艺问题…" />
+                <button className="btn" onClick={send} disabled={sending}>{sending ? '…' : '发送'}</button>
+              </div>
             </div>
-          ))}
-        </div>
-        <div className="chatbar-input">
-          <input value={input} onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key==='Enter' && send()} placeholder="输入工艺问题…" />
-          <button className="btn" onClick={send} disabled={sending}>{sending ? '…' : '发送'}</button>
-        </div>
-          </>
-        )}
-        {panelTab === 'log' && (
-          <div className="log-body" ref={logRef}>
-            {logs.length === 0 && <div className="chat-empty">运行流程后,这里逐步记录:承接参数 → 公式/规则 → 输出。</div>}
-            {logs.map((l, i) => (
-              <div key={i} className={'logline ' + l.kind}><span className="lt">{l.t}</span><span>{l.text}</span></div>
-            ))}
-          </div>
-        )}
-        {panelTab === 'issues' && (
-          <div className="log-body">
-            {issues.length === 0 && <div className="chat-empty">暂无问题。</div>}
-            {issues.map((x, i) => (
-              <div key={i} className="logline error"><span className="lt">{x.t}</span><span>{x.text}</span></div>
-            ))}
-          </div>
-        )}
-      </div>
+          )},
+          { key: 'batch', label: '批次', render: () => (
+            <BatchPanel onClose={() => setDockTab('agent')} ctx={{
+              projectName, modules: nodes.map(n => n.data.module as Module),
+              edges: edges.map(e => ({ src: e.source, dst: e.target })),
+              onApply: (p, log) => { loadProjectObj(p); pushLog('run', `批次续做：${log}`) },
+              onFormChange: (modules, eqState) => {
+                setNodes(ns => ns.map(n => {
+                  const m = modules.find((x: any) => x.id === n.id)
+                  return m ? { ...n, data: { ...n.data, module: m as Module } } : n
+                }))
+                if (eqState) (window as any).__dshEqState = eqState
+              },
+            }} />
+          )},
+          { key: 'log', label: `日志 (${logs.length})`, render: () => (
+            <div className="log-body" ref={logRef}>
+              {logs.length === 0 && <div className="chat-empty">运行流程后,这里逐步记录:承接参数 → 公式/规则 → 输出。</div>}
+              {logs.map((l, i) => (
+                <div key={i} className={'logline ' + l.kind}><span className="lt">{l.t}</span><span>{l.text}</span></div>
+              ))}
+            </div>
+          )},
+          { key: 'issues', label: `问题 (${issues.length})`, render: () => (
+            <div className="log-body">
+              {issues.length === 0 && <div className="chat-empty">暂无问题。</div>}
+              {issues.map((x, i) => (
+                <div key={i} className="logline error"><span className="lt">{x.t}</span><span>{x.text}</span></div>
+              ))}
+            </div>
+          )},
+        ]} />
+
       {/* 状态栏(BEAMER 式:项目/规模/选中/运行/后端) */}
       <div className="statusbar">
         <span>项目 {projectName}</span><span className="sb-sep" />
@@ -1155,19 +1211,6 @@ export default function App() {
         <span style={{ color: online ? 'var(--ok)' : 'var(--bad)' }}>{online ? '后端已连接' : '后端未连接'}</span>
       </div>
       {kbOpen && <KbBrowser onClose={() => setKbOpen(false)} />}
-      {batchOpen && <BatchPanel onClose={() => setBatchOpen(false)} ctx={{
-        projectName, modules: nodes.map(n => n.data.module as Module),
-        edges: edges.map(e => ({ src: e.source, dst: e.target })),
-        onApply: (p, log) => { loadProjectObj(p); pushLog('run', `批次续做：${log}`) },
-        onFormChange: (modules, eqState) => {
-          // 就地补字段：只改 data.module，不重建 nodes/edges（画布布局不动）
-          setNodes(ns => ns.map(n => {
-            const m = modules.find((x: any) => x.id === n.id)
-            return m ? { ...n, data: { ...n.data, module: m as Module } } : n
-          }))
-          if (eqState) (window as any).__dshEqState = eqState
-        },
-      }} />}
       {loadOpen && (
         <div style={{ position:'fixed', inset:0, background:'rgba(8,9,10,.72)', backdropFilter:'blur(2px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
           <div style={{ width:520, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
@@ -1216,14 +1259,14 @@ export default function App() {
                 <button onClick={() => { editComment(menu.id); setMenu(null) }}>编辑备注…</button>
                 <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}>复制节点 (Ctrl+D)</button>
                 <div className="dropdown-sep" />
-                <button onClick={() => { setSelectedId(menu.id); setPanelTab('log'); setMenu(null) }}>查看日志</button>
+                <button onClick={() => { setSelectedId(menu.id); setDockTab('log'); setMenu(null) }}>查看日志</button>
                 <button className="danger" onClick={() => { deleteSelected(); setMenu(null) }}>删除节点</button>
               </>
             )}
             {menu.kind === 'edge' && (
               <>
                 <button onClick={() => { toggleEdgeDisabled(menu.id); setMenu(null) }}>停用 / 启用连线</button>
-                <button onClick={() => { setPanelTab('log'); setMenu(null) }}>查看日志</button>
+                <button onClick={() => { setDockTab('log'); setMenu(null) }}>查看日志</button>
                 <div className="dropdown-sep" />
                 <button className="danger" onClick={() => { setEdges(eds => eds.filter(e => e.id !== menu.id)); setMenu(null) }}>删除连线</button>
               </>

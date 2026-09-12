@@ -142,3 +142,36 @@ def test_菜单元信息端点(client):
     d = r.json()
     assert d["scope_max"] == 49 and d["pair_tol_min"] >= 1
     assert any(z["range"] == "G50+" and z["keep"] is False for z in d["zones"])
+
+
+def test_调试线端点_有视图给数据_没有也给原因(client, monkeypatch, tmp_path):
+    """`/api/batch/tune_line`：数据线视图在 ⇒ 按 tune_id 分组；不在 ⇒ available=false + 原因（不 500）。"""
+    import sqlite3
+    from kb import batch_runs as br
+    # ① 无视图：给一个空 core
+    core = tmp_path / "core"
+    core.mkdir(exist_ok=True)
+    (core / "runs.csv").write_text("run_id,batch_id\n", encoding="utf-8")
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(core))
+    for n in dir(br):
+        if n.endswith("_CACHE"):
+            setattr(br, n, None)
+    r = client.post("/api/batch/tune_line", json={"modules": [], "batch_id": BATCH})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["available"] is False and "reason" in d
+    # ② 有视图：造一个
+    db = core / "process.db"
+    con = sqlite3.connect(db)
+    con.execute('CREATE VIEW v_tune_line AS SELECT "T1" AS tune_id, "1" AS tune_step,'
+                ' "X-ICP-0001" AS run_id, "2026-09-01" AS date, "ICP" AS stage,'
+                ' "t" AS tool, "s" AS sample_id, NULL AS t_set_s, NULL AS t_dwell_s,'
+                ' 750 AS source_w, 150 AS bias_w, NULL AS bias_w_actual,'
+                ' NULL AS chf3_sccm, NULL AS ar_sccm, NULL AS o2_sccm, NULL AS cf4_sccm,'
+                ' NULL AS sf6_sccm, NULL AS cd_delta_nm, NULL AS depth_nm, NULL AS er_nm_min,'
+                ' NULL AS selectivity, NULL AS film_thickness_nm, NULL AS stress_mpa,'
+                ' NULL AS refractive_index')
+    con.close()
+    r2 = client.post("/api/batch/tune_line", json={"modules": [], "batch_id": ""})
+    d2 = r2.json()
+    assert d2["available"] is True and d2["series"][0]["tune_id"] == "T1"

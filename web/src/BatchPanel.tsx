@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Module } from './types'
+import TuneLineView from './TuneLineView'
 
 /**
  * 批次面板：batch → runs（parent 链）→ 续做 → 表单化填写 → 菜单灌参。
@@ -65,6 +66,9 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const [meas, setMeas] = useState<{ quantity: string; value: string; unit: string; method: string }[]>([])
   const [obs, setObs] = useState<{ obs_type: string; description: string }[]>([])
   const [env, setEnv] = useState<any>({ date: new Date().toISOString().slice(0, 10), tool: 'RIE-400iPB', clean_done: '否' })
+  const [showSeason, setShowSeason] = useState(false)          // season 默认不画（owner 2026-09-12 裁断）
+  const [tuneLine, setTuneLine] = useState<any>(null)          // v_tune_line（数据线视图）
+  const [toolsOpen, setToolsOpen] = useState(false)            // 菜单工具下拉
 
   const payload = useMemo(() => ({ project_name: ctx.projectName, modules: ctx.modules, edges: ctx.edges }), [ctx])
 
@@ -103,6 +107,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       const d = await post('/api/batch/runs', { modules: ctx.modules, batch_id: b })
       setChain(d)
       post('/api/batch/events', { batch_id: b }).then(setEvents).catch(() => {})
+      post('/api/batch/tune_line', { modules: ctx.modules, batch_id: b })
+        .then(setTuneLine).catch(() => setTuneLine(null))
       const pick = d.runs[d.runs.length - 1] || null
       setSel(pick)
       if (pick) loadFormOf(pick.run_id)
@@ -242,52 +248,81 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const runSteps = (sel && ctx.modules.find(m => m.core_run_id === sel.run_id)?.core_menu_steps) || []
   const paramJson: Record<string, any> = runSteps[0]?.param_json || {}
 
+  const natOf = (rid: string) => natMap[rid]?.nature || ''
+  const seasonRuns = (chain?.runs || []).filter(r => natOf(r.run_id) === 'season')
+  const visibleRuns = (chain?.runs || []).filter(r => showSeason || natOf(r.run_id) !== 'season')
+
   return (
-    <div className="modal-back" onClick={onClose}>
-      <div className="modal batch-panel" onClick={e => e.stopPropagation()} style={{ width: 'min(1180px, 96vw)', maxHeight: '92vh', overflow: 'auto' }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0 }}>批次管理 · 续做 · 菜单直读</h3>
-          <button className="btn ghost" onClick={onClose}>关闭</button>
-        </div>
-
-        <div className="row" style={{ gap: 8, flexWrap: 'wrap', margin: '10px 0' }}>
-          <label>批次
-            <select value={batch} onChange={e => setBatch(e.target.value)}>
-              {batches.map(b => <option key={b.batch_id} value={b.batch_id}>{b.batch_id}（{b.runs} 个 run：{b.chain}）</option>)}
-            </select>
-          </label>
-          <label>菜单目录
-            <input value={menuDir} onChange={e => setMenuDir(e.target.value)} style={{ width: 380 }} />
-          </label>
-          <button className="btn ghost" disabled={busy !== '' || !batch} onClick={rehydrate}
-            title="从 core 只读拉该 batch 的 run 链进画布（接着做的起点；不碰 CSV）">从 core 回灌画布</button>
-          <button className="btn ghost" disabled={busy !== ''} onClick={scanMenu}>解析菜单目录</button>
-          <button className="btn ghost" disabled={busy !== ''} onClick={checkMenu} title="批量扫该机台下所有导出：配对/未映射列/空壳/越界/跨 dump 漂移">批量体检</button>
-          <button className="btn ghost" disabled={busy !== ''} onClick={proposeMapping} title="未映射列 → LLM 提规范键候选（只落提案文件，需人采纳；涉气路归属一律标 needs_human）">LLM 映射建议</button>
-          <label>group N
-            <input value={group} onChange={e => setGroup(e.target.value.replace(/\D/g, ''))} style={{ width: 64 }} />
-          </label>
-          <button className="btn ghost" disabled={!group || busy !== ''} onClick={loadGroup}>预览 group</button>
-        </div>
-        {msg && <pre style={{ whiteSpace: 'pre-wrap', background: 'var(--bg2,#0002)', padding: 8, borderRadius: 6, margin: '8px 0' }}>{msg}</pre>}
-        {report && <pre style={{ whiteSpace: 'pre-wrap', background: 'var(--bg2,#0002)', padding: 8, borderRadius: 6, margin: '8px 0', maxHeight: 220, overflow: 'auto', fontSize: 12 }}>{report}</pre>}
-
-        <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
-          {/* 左：链 */}
-          <div style={{ flex: '1 1 520px' }}>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <b>run 链</b>
-              <span style={{ opacity: .7 }}>{chain ? `${chain.nodes} 节点 / ${chain.edges} 连线` : '—'}</span>
+    <div className="batchdock">
+      {/* 工具条：批次 + 回灌 + 菜单工具收纳（原 7 个按钮一字排开 ⇒ 收成 3 个） */}
+      <div className="bd-toolbar">
+        <label>批次
+          <select value={batch} onChange={e => setBatch(e.target.value)}>
+            {batches.map(b => <option key={b.batch_id} value={b.batch_id}>{b.batch_id}（{b.runs} run）</option>)}
+          </select>
+        </label>
+        <button className="btn ghost" disabled={busy !== '' || !batch} onClick={rehydrate}
+          title="从 core 只读拉该 batch 的 run 链进画布（接着做的起点；不碰 CSV）">从 core 回灌画布</button>
+        <div style={{ position: 'relative' }}>
+          <button className="btn ghost" onClick={() => setToolsOpen(v => !v)}>菜单工具 ▾</button>
+          {toolsOpen && (
+            <div className="dropdown" onMouseLeave={() => setToolsOpen(false)}>
+              <div className="dd-sec">菜单目录</div>
+              <div style={{ padding: '2px 9px 6px' }}>
+                <input value={menuDir} onChange={e => setMenuDir(e.target.value)}
+                  style={{ width: 300 }} placeholder="菜单导出目录" />
+              </div>
+              <button className="dropdown-item" disabled={busy !== ''}
+                onClick={() => { setToolsOpen(false); scanMenu() }}>解析菜单目录</button>
+              <button className="dropdown-item" disabled={busy !== ''}
+                onClick={() => { setToolsOpen(false); checkMenu() }}
+                title="批量扫该机台下所有导出：配对/未映射列/空壳/越界/跨 dump 漂移">批量体检</button>
+              <button className="dropdown-item" disabled={busy !== ''}
+                onClick={() => { setToolsOpen(false); proposeMapping() }}
+                title="未映射列 → LLM 提规范键候选（只落提案文件，需人采纳）">LLM 映射建议</button>
+              <div className="dropdown-sep" />
+              <div className="dd-sec">group 灌参预览</div>
+              <div style={{ display: 'flex', gap: 6, padding: '2px 9px 6px', alignItems: 'center' }}>
+                <input value={group} onChange={e => setGroup(e.target.value.replace(/\D/g, ''))}
+                  style={{ width: 64 }} placeholder="N" />
+                <button className="dropdown-item" style={{ flex: 1 }} disabled={!group || busy !== ''}
+                  onClick={() => { setToolsOpen(false); loadGroup() }}>预览 group</button>
+              </div>
             </div>
-            <table className="tbl" style={{ width: '100%', fontSize: 13 }}>
-              <thead><tr><th>run_id</th><th>seq</th><th>性质</th><th>sample/die</th><th>parent</th><th>状态</th><th>recipe</th><th></th></tr></thead>
-              <tbody>
-                {(chain?.runs || []).map(r => (
-                  <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
-                    <td>{r.run_id}</td>
-                    <td>{r.stage_seq}</td>
-                    <td title={natMap[r.run_id]?.why || ''} style={{ opacity: .9, whiteSpace: 'nowrap' }}>
-                      {natMap[r.run_id]?.nature_label || '—'}
+          )}
+        </div>
+        <span className="spacer" />
+        {onClose && <button className="btn ghost" onClick={onClose} title="收起批次面板">✕</button>}
+      </div>
+      {msg && <div className="bd-msg">{msg}</div>}
+      {report && <pre className="bd-report">{report}</pre>}
+
+      <div className="bd-panes">
+        {/* 左：链 + 调试线 + 事件 + 样品树 + 续做 */}
+        <div className="bd-pane">
+          <div className="bd-sec-head">
+            <b>run 链</b>
+            <span className="dim">
+              {chain ? `${chain.nodes} 节点 / ${chain.edges} 连线` : '—'}
+              {seasonRuns.length > 0 && (
+                <label style={{ marginLeft: 10, cursor: 'pointer' }}
+                  title="season（热机）不加工已登记样品；数据保留，默认不画">
+                  <input type="checkbox" checked={showSeason}
+                    onChange={e => setShowSeason(e.target.checked)} />
+                  显示 season（{seasonRuns.length}）
+                </label>
+              )}
+            </span>
+          </div>
+          <table className="tbl" style={{ width: '100%', fontSize: 13 }}>
+            <thead><tr><th>run_id</th><th>seq</th><th>性质</th><th>sample/die</th><th>parent</th><th>状态</th><th>recipe</th><th></th></tr></thead>
+            <tbody>
+              {visibleRuns.map(r => (
+                <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
+                  <td>{r.run_id}</td>
+                  <td>{r.stage_seq}</td>
+                  <td title={natMap[r.run_id]?.why || ''} style={{ opacity: .9, whiteSpace: 'nowrap' }}>
+                    {natMap[r.run_id]?.nature_label || '—'}
                     </td>
                     <td style={{ opacity: .8 }}>{r.sample_id || '—'}</td>
                     <td style={{ opacity: .75 }}>{r.parent_run_id || '—'}</td>
@@ -298,6 +333,22 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 ))}
               </tbody>
             </table>
+
+            {/* 参数调试线（O1）：数据来自数据线的 v_tune_line 视图（缺 = NULL、不补值） */}
+            {tuneLine?.available && (tuneLine.series || []).length > 0 && (
+              <div className="card" style={{ marginTop: 8, padding: 10 }}>
+                <div className="bd-sec-head">
+                  <b>参数调试线（O1 单点优化）</b>
+                  <span className="dim">{tuneLine.source}</span>
+                </div>
+                {tuneLine.series.map((s: any) => <TuneLineView key={s.tune_id} series={s} />)}
+              </div>
+            )}
+            {tuneLine && !tuneLine.available && (
+              <div className="card" style={{ marginTop: 8, padding: 10, fontSize: 12, opacity: .75 }}>
+                <b>参数调试线暂不可用</b>：{tuneLine.reason}
+              </div>
+            )}
 
             {events && events.count > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12 }}>
@@ -441,7 +492,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
           </div>
 
           {/* 右：表单 */}
-          <div style={{ flex: '1 1 520px' }}>
+          <div className="bd-pane">
             <b>表单化填写（{sel?.run_id || '未选 run'}）</b>
             <div style={{ opacity: .75, fontSize: 12, margin: '4px 0' }}>
               键名/量名/现象词全部来自契约（schema §十三/§三 + 受控词表）；没测留空，禁填 0/-/N/A
@@ -521,6 +572,5 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
           </div>
         </div>
       </div>
-    </div>
   )
 }

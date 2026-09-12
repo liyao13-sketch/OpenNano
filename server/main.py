@@ -554,6 +554,17 @@ def api_batch_events(req: BatchEventsReq):
             "ledger": str(be.events_path())}
 
 
+@app.post("/api/batch/tune_line")
+def api_batch_tune_line(req: BatchRunsReq):
+    """**参数调试线**（O1 单点优化视图）—— 只读数据线的 `v_tune_line`。
+
+    返回按 `tune_id` 分组的步序列（参数轴 + 响应列），缺的格就是 NULL（不补值）；
+    视图/库不存在 ⇒ `available=false` + 怎么修，不给 500。
+    """
+    from kb import tune_line as tl
+    return tl.tune_lines(req.batch_id)
+
+
 @app.post("/api/batch/propose")
 def api_batch_propose(req: ProposeReq):
     """工具产出**提案**（裂片/取样）→ 本地预检 → 交数据线 `propose_apply.py`（默认干跑）。

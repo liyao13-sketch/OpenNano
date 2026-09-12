@@ -17,6 +17,8 @@ export interface Module {
   core_stage?: string; core_stage_seq?: number; core_sample_id?: string;
   core_recipe_id?: string; core_date?: string;
   core_measurements?: any[]; core_observations?: any[]; core_menu_steps?: any[];
+  /** core 的 runs.run_nature：chain / trial / batch_level / season（热机，画布默认收起） */
+  run_nature?: string;
 }
 export interface CatalogItem { group: string; kind: string; subtype: string; name: string; desc: string }
 export interface Equipment { id: string; name: string; params: Record<string, ParamDef>;

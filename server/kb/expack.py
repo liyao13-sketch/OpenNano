@@ -706,6 +706,9 @@ def parse_expack(path: Path, lib) -> dict:
             m["core_date"] = r["date"]
         if r.get("parent_run_id"):
             m["core_parent_run_id"] = r["parent_run_id"]
+        if (r.get("run_nature") or "").strip():
+            # season/trial/batch_level 一并带上 —— 画布据此把 season 节点默认收起（owner 2026-09-12 裁断）
+            m["run_nature"] = r["run_nature"].strip()
         oc = _obs_of(r.get("run_id", ""))
         if oc:
             m["comment"] = oc
@@ -790,6 +793,12 @@ def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[
 
     同 stage 的多条 run 之间**永不连线**（那是并存，不是串行）。
     历史/手工节点（连规范 run_id 都没有）才按导出顺序接上一条。
+
+    **`season`（热机）不入流程**（owner 2026-09-12 裁断：录入但不画，留给设备状态监测）：
+      · season run 本身**不得**成为任何边的端点 —— 它是设备调机，不加工任何已登记样品；
+      · 若某 run 的**记录父**恰是 season（如 AR50-T1 的 ICP-0008，core 里 parent=ICP-0007=season），
+        说明那条记录是"参数沿用"被误记成了样品流 ⇒ **不在画布上画它**，
+        改按工艺顺序补一条**推断边**（上游 = 最近的非 season 的上一工序 run）。
     """
     edges: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -799,6 +808,21 @@ def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[
             return
         seen.add((src, dst))
         edges.append({"src": src, "dst": dst, "_link": link})
+
+    def _is_season(run: dict) -> bool:
+        return (run.get("run_nature") or "").strip() == "season"
+
+    def _nearest_upstream(idx: int, my_seq: int) -> str | None:
+        """最近的**非 season** 上一工序 run 的模块 id（推断边的合法上游）。"""
+        for cand in reversed(runs_sorted[:idx]):
+            if _is_season(cand):
+                continue
+            if int(cand.get("stage_seq") or 0) >= my_seq:
+                continue
+            cid = id_by_run.get((cand.get("run_id") or "").strip())
+            if cid:
+                return cid
+        return None
 
     prev_legacy: str | None = None      # 上一条"历史/手工"节点（按导出顺序）
     for idx, r in enumerate(runs_sorted):
@@ -812,19 +836,19 @@ def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[
                 _add(prev_legacy, dst, LINK_RECORDED)
             prev_legacy = dst
             continue
-        src = id_by_run.get((r.get("parent_run_id") or "").strip())
-        if src:
-            _add(src, dst, LINK_RECORDED)             # ① core 明确写的
-            continue
-        # ② 没写 parent ⇒ 按工艺顺序补显示边：上游 = 最近的上一工序里、序号在它之前的那条
+        if _is_season(r):
+            continue                                 # season：本身不挂任何边
         my_seq = int(r.get("stage_seq") or 0)
-        upstream = None
-        for cand in runs_sorted[:idx]:
-            if int(cand.get("stage_seq") or 0) >= my_seq:
-                continue
-            cid = id_by_run.get((cand.get("run_id") or "").strip())
-            if cid:
-                upstream = cid
+        parent_rid = (r.get("parent_run_id") or "").strip()
+        parent_row = next((x for x in runs_sorted
+                           if (x.get("run_id") or "").strip() == parent_rid), None)
+        src = id_by_run.get(parent_rid)
+        if src and parent_row is not None and not _is_season(parent_row):
+            _add(src, dst, LINK_RECORDED)             # ① core 明确写的（且父不是 season）
+            continue
+        # ② 没写 parent、或记录父是 season（"参数沿用"误记成样品流）
+        #    ⇒ 按工艺顺序补显示边：上游 = 最近的非 season 上一工序
+        upstream = _nearest_upstream(idx, my_seq)
         if upstream:
             _add(upstream, dst, LINK_INFERRED)
     return edges

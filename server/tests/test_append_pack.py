@@ -365,3 +365,105 @@ def _ar50lj_rows():
         {"run_id": f"{BATCH}-ASH-0001", "stage": "ASH", "stage_seq": "4",
          "parent_run_id": f"{BATCH}-ICP-0003"},
     ]
+
+
+# ------------------------------------------------------------------ season 不入流程
+def _seed_season(core_dir):
+    """AR50-T1 现状形状：ICP-0007=season（整片），ICP-0008 的记录父恰是 season。"""
+    from conftest import seed_core
+    return seed_core(core_dir, batches=batch_rows(), samples=sample_rows(), runs=[
+        {"run_id": f"{BATCH}-LDW-0001", "batch_id": BATCH, "sample_id": ROOT,
+         "stage": "LDW", "stage_seq": "2", "date": "2026-09-02", "parent_run_id": ""},
+        {"run_id": f"{BATCH}-ICP-0006", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE4",
+         "stage": "ICP", "stage_seq": "3", "date": "2026-09-07", "parent_run_id": "",
+         "run_nature": "trial"},
+        {"run_id": f"{BATCH}-ICP-0007", "batch_id": BATCH, "sample_id": ROOT,
+         "stage": "ICP", "stage_seq": "3", "date": "2026-09-07", "parent_run_id": f"{BATCH}-ICP-0006",
+         "run_nature": "season"},
+        {"run_id": f"{BATCH}-ICP-0008", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE15",
+         "stage": "ICP", "stage_seq": "3", "date": "2026-09-07",
+         "parent_run_id": f"{BATCH}-ICP-0007", "run_nature": "batch_level"},
+        {"run_id": f"{BATCH}-ASH-0001", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE15",
+         "stage": "ASH", "stage_seq": "4", "date": "2026-09-07",
+         "parent_run_id": f"{BATCH}-ICP-0008", "run_nature": "batch_level"},
+    ])
+
+
+def test_season_不进任何边(tmp_path, monkeypatch):
+    """★ owner裁断：season（热机）录入但不画 —— 它不得成为任何边的端点。"""
+    from kb import append_pack as ap
+    d = _seed_season(tmp_path / "core")
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    proj = ap.core_to_project(BATCH)
+    byid = {m["id"]: m for m in proj["modules"]}
+    season_id = next(m["id"] for m in proj["modules"] if m["core_run_id"].endswith("ICP-0007"))
+    assert all(season_id not in (e["src"], e["dst"]) for e in proj["edges"])
+    # season 节点本身还在（数据留存），且带标注
+    m7 = byid[season_id]
+    assert m7.get("run_nature") == "season"
+
+
+def test_记录父是_season_时改补推断边(tmp_path, monkeypatch):
+    """core 里 ICP-0008 的 parent=ICP-0007(season) —— 那是"参数沿用"被记成了样品流，
+    画布上**不画这条**，改补 LDW→0008 的推断边（虚线）。"""
+    from kb import append_pack as ap
+    d = _seed_season(tmp_path / "core")
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    proj = ap.core_to_project(BATCH)
+    byid = {m["id"]: m for m in proj["modules"]}
+    pairs = {(byid[e["src"]]["core_run_id"], byid[e["dst"]]["core_run_id"]): e.get("_link")
+             for e in proj["edges"]}
+    # 不许出现 0006→0007 或 0007→0008（season 相关）
+    assert not any("ICP-0007" in a or "ICP-0007" in b for a, b in pairs)
+    # 0008 的上游改从 LDW 取（推断）
+    assert pairs.get((f"{BATCH}-LDW-0001", f"{BATCH}-ICP-0008")) == "inferred"
+    # 记录链 0008→ASH 保留（两端都不是 season）
+    assert pairs.get((f"{BATCH}-ICP-0008", f"{BATCH}-ASH-0001")) == "recorded"
+
+
+def test_relayout_season_挪出主流程并标注(tmp_path, monkeypatch):
+    from kb import append_pack as ap
+    import kb.relayout as rl
+    d = _seed_season(tmp_path / "core")
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    monkeypatch.setattr(rl, "PROJECTS_DIR", tmp_path / "projects")
+    (tmp_path / "projects").mkdir()
+    # 先造工程文件
+    proj = ap.core_to_project(BATCH)
+    p = tmp_path / "projects" / f"{BATCH}.json"
+    import json as _json
+    p.write_text(_json.dumps(proj, ensure_ascii=False), encoding="utf-8")
+    r = rl.relayout_project(p, BATCH, write=True)
+    j = _json.loads(p.read_text(encoding="utf-8"))
+    seasons = [m for m in j["modules"] if m.get("run_nature") == "season"]
+    mains = [m for m in j["modules"] if m.get("run_nature") != "season"]
+    assert len(seasons) == 1
+    assert all(m["y"] > max(x["y"] for x in mains) for m in seasons)   # 在主流程之下
+
+
+def test_relayout_season_不叠在一起(tmp_path, monkeypatch):
+    """season 区是多行：三条 season 不许共用同一个 (x, y)。"""
+    from kb import append_pack as ap
+    import kb.relayout as rl
+    d = _seed_season(tmp_path / "core")
+    # 多塞一条 season，确保 ≥2 条
+    import csv as _csv
+    with (d / "runs.csv").open("a", newline="", encoding="utf-8") as f:
+        w = _csv.DictWriter(f, fieldnames=list(_csv.DictReader((d / "runs.csv").open(encoding="utf-8-sig")).fieldnames))
+        w.writerow({"run_id": f"{BATCH}-ICP-0001", "batch_id": BATCH, "sample_id": ROOT,
+                    "stage": "ICP", "stage_seq": "3", "date": "2026-09-06", "run_nature": "season"})
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    monkeypatch.setattr(rl, "PROJECTS_DIR", tmp_path / "projects")
+    (tmp_path / "projects").mkdir(exist_ok=True)
+    import json as _json
+    proj = ap.core_to_project(BATCH)
+    p = tmp_path / "projects" / f"{BATCH}.json"
+    p.write_text(_json.dumps(proj, ensure_ascii=False), encoding="utf-8")
+    rl.relayout_project(p, BATCH, write=True)
+    j = _json.loads(p.read_text(encoding="utf-8"))
+    seasons = [(m["x"], m["y"]) for m in j["modules"] if m.get("run_nature") == "season"]
+    assert len(seasons) == 2 and len(set(seasons)) == 2
