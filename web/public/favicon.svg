@@ -1,9 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- OpenNano 图标：把「节点方块」本身画成图标（左色条 + 两条信息线），与画布/左栏同一套语言 -->
-  <rect x="1" y="1" width="30" height="30" rx="8" fill="#0e0f11"/>
-  <rect x="1" y="1" width="30" height="30" rx="8" fill="none" stroke="#2a2c33"/>
-  <rect x="1" y="9" width="3" height="14" rx="1.5" fill="#6d78dc"/>
-  <rect x="7" y="10" width="17" height="3.2" rx="1.6" fill="#f7f8f8"/>
-  <rect x="7" y="16" width="12" height="2.6" rx="1.3" fill="#8a8f98"/>
-  <rect x="7" y="21" width="7" height="2.6" rx="1.3" fill="#4cb782"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    OpenNano 页签图标：标记「N」坐在深色圆角砖上 · 2026-09-13 by the assistant
+    深砖是为了在任何浏览器主题下都看得见；砖色与产品顶栏同色（panel #0e0f11）。
+    注意：XML 注释里不能出现连续两个减号，写 CSS 变量名时请绕开。
+  -->
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="#0e0f11"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="#2a2c33"/>
+  <g transform="translate(3.84 3.84) scale(0.76)"
+     fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.8">
+    <path d="M8.5 26 V6" stroke="#7d88e0"/>
+    <path d="M8.5 6 L23.5 26" stroke="#f7f8f8"/>
+    <path d="M23.5 26 V6" stroke="#f7f8f8"/>
+  </g>
 </svg>

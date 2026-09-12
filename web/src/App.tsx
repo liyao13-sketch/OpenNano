@@ -143,6 +143,21 @@ const ABBR: Record<string, string> = {
 }
 const abbrOf = (c: any) => ABBR[c.subtype] || String(c.subtype || c.name || '').slice(0, 6).toUpperCase()
 
+/* 品牌标记（logo）：一个 N，由**三段工序**组成 —— 第一段点着强调色，后两段走 currentColor。
+   与产品自身的视觉原子（节点方块 + 连线）同源；颜色全走 CSS 变量 ⇒ 三主题自动跟随。
+   源文件（矢量的唯一真源）在 `web/public/brand/`。 */
+function LogoMark({ size = 17 }: { size?: number }) {
+  return (
+    <svg className="logo-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <g fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth={3.4}>
+        <path d="M8.5 26 V6" stroke="var(--accent-text)" />
+        <path d="M8.5 6 L23.5 26" stroke="currentColor" />
+        <path d="M23.5 26 V6" stroke="currentColor" />
+      </g>
+    </svg>
+  )
+}
+
 const nodeTypes = { process: ProcessNode }
 
 export default function App() {
@@ -951,7 +966,10 @@ export default function App() {
     <ErrorBoundary label="主界面">
     <div className="app">
       <div className="topbar">
-        <h1>OpenNano</h1>
+        <span className="brand" title="OpenNano · 工艺协同优化平台">
+          <LogoMark />
+          <span className="brand-name">OpenNano</span>
+        </span>
         <span style={{ color:'var(--muted)' }}>· {projectName} · 组织记忆 {kbTotal} 条</span>
         <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, color:'var(--muted)' }}>
           <span style={{ width:8, height:8, borderRadius:'50%', background: online ? 'var(--ok)' : 'var(--bad)' }} />

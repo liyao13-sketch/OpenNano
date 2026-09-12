@@ -1,4 +1,9 @@
-# OpenNano
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/public/brand/logo-lockup-dark.svg">
+    <img src="web/public/brand/logo-lockup-light.svg" alt="OpenNano" height="40">
+  </picture>
+</h1>
 
 > **An organizational-memory system for micro/nano fabrication** — process flow canvas + LLM agent + reliability-scored knowledge base + data-driven process optimization.
 

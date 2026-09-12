@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"
+     role="img" aria-label="OpenNano">
+  <!--
+    OpenNano 标记 · 2026-09-13 by the assistant
+    构成：一个 N，由**三段工序**组成 —— 第一段点着强调色（靛紫），后两段走 currentColor。
+    「N」= Nano；三段 = 工艺步骤；只有一段着色 = owner定的 Linear 原则（强调色唯一且克制）。
+    颜色：着色段为强调色；另两段用 currentColor ⇒ 内联进页面时自动跟随主题。
+    最小尺寸 14px（再小圆角端点会糊）。留白：四周 ≥ 4px（= 32 视框里的 4）。
+  -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.4">
+    <path d="M8.5 26 V6" stroke="#6d78dc"/>
+    <path d="M8.5 6 L23.5 26" stroke="currentColor"/>
+    <path d="M23.5 26 V6" stroke="currentColor"/>
+  </g>
+</svg>
