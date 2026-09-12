@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -109,6 +110,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="跨线指针校验（只读）")
     ap.add_argument("--strict", action="store_true", help="有失效即退出码 1")
     ap.add_argument("--json", action="store_true", help="输出 JSON（供数据线脚本消费）")
+    ap.add_argument("--allow-missing", action="store_true",
+                    help=("允许「真源不在本机」（CI/别人机器没有 18_工艺数据资产）——"
+                          "此时仍校验禁用名不回流，但不因文件缺失报红。"
+                          "等价于环境变量 OPENNANO_POINTERS_ALLOW_MISSING=1"))
     ap.add_argument("--write-manifest", metavar="路径",
                     help="把清单写成 JSON 文件（跨线**不许擅自改名/移动**的路径清单）")
     a = ap.parse_args()
@@ -120,7 +125,13 @@ def main() -> int:
         print(f"清单已写入：{a.write_manifest}（{len(manifest['pointers'])} 条）")
     if a.json:
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
-    return 1 if (a.strict and not r["ok"]) else 0
+    if not a.strict:
+        return 0
+    # 严格模式：**禁用名回流**在任何环境都算红；文件缺失只在"不该缺"的环境里算红
+    if r["forbidden_hits"]:
+        return 1
+    allow_missing = a.allow_missing or os.environ.get("OPENNANO_POINTERS_ALLOW_MISSING") == "1"
+    return 0 if (allow_missing or not r["missing"]) else 1
 
 
 if __name__ == "__main__":

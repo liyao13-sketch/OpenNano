@@ -45,11 +45,34 @@ server/            FastAPI backend
   engine/          process catalog · parameter templates · formula engine · DOE
   opt/             GPR surrogate · Bayesian optimization (EI) · response-surface plots
   kb/              knowledge base · influence rules · core adapter · experiment packages
+  tests/           regression net (pytest) — see "Tests" below
   agent/           LLM client · tool registry (16 tools) · RAG · orchestrator
 web/               React + TypeScript + React Flow canvas
 samples/           synthetic demo data (no real lab data)
 docs/              design docs (architecture, optimization roadmap, package spec)
 ```
+
+## Tests
+
+The regression net pins the rules that are expensive to re-derive: run numbering and
+branch-safe continuation (`AR50-T1`-style forks), sample inheritance, usage tiers
+(`split` vs `allocate`), append-package provenance, batch-event proposals, the
+cross-line pointer check, and menu `group N = [2(chuck), N(etch), 4(dechuck)]` readout.
+
+```bash
+cd server
+python -m venv .venv-test && . .venv-test/bin/activate    # or: uv venv .venv-test
+pip install -r requirements-dev.txt
+python -m pytest tests -rs        # -rs prints why anything was skipped
+python -m kb.pointer_check --strict   # cross-line pointers (uses --allow-missing in CI)
+```
+
+Discipline the suite enforces by machine rather than memory:
+
+- tests are **offline** and **never write lab data** — synthetic fixtures live in `tmp_path`;
+- cases that need real sources (the `core` CSVs, equipment-menu dumps, the schema) **skip with a
+  reason** on machines that do not have them, instead of passing vacuously;
+- `kb/*.py` must not perform write operations against `core/` or `ingest/`.
 
 ## Core concepts
 

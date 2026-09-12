@@ -220,6 +220,35 @@ def segment_steps(slot: int, export_dir: str | Path, phase: str | None = None) -
     return out
 
 
+def _grp_slots(export_dir: str | Path) -> set[int]:
+    """该导出目录里 `.grp`（recipe 库）实际含有的槽号集合（进程内缓存，只读）。
+
+    用途：机台 `.rcp`（group 库）可能列了某 group，而 `.grp` 里**并没有**对应 recipe
+    ⇒ 灌参前必须先问一句"这两个槽真的有配方吗"。
+    """
+    dm = parser()
+    root = Path(export_dir).expanduser()
+    key = str(root)
+    if key in _GRP_SLOTS_CACHE:
+        return _GRP_SLOTS_CACHE[key]
+    slots: set[int] = set()
+    for p in sorted(root.rglob("*.grp")):
+        for r in dm.parse_grp(p):
+            try:
+                slots.add(int(r["recipe_id"][-3:]))
+            except (KeyError, ValueError, TypeError):
+                continue
+    _GRP_SLOTS_CACHE[key] = slots
+    return slots
+
+
+_GRP_SLOTS_CACHE: dict[str, set[int]] = {}
+
+
+def _has_slot(slot: int, export_dir: str | Path) -> bool:
+    return int(slot) in _grp_slots(export_dir)
+
+
 def group_steps(group_slot: int, export_dir: str | Path) -> dict:
     """「用 group N 灌参」的核心：group N → 三段 [2, N, 4] → 一个 run 的 steps。
 
@@ -229,7 +258,19 @@ def group_steps(group_slot: int, export_dir: str | Path) -> dict:
     机台槽位号保留在 `param_json.machine_step`（工艺侧"步号=机台槽位号"的口径不丢）。
     """
     dm = parser()
+    root = Path(export_dir).expanduser()
     segs = [(SEG_CHUCK, "chuck"), (int(group_slot), "etch"), (SEG_DECHUCK, "dechuck")]
+    # 前置检查：目录要存在、三段都要真有 recipe。机台 `.rcp` 里列了 group，`.grp` 里却可能
+    # **没有**对应 recipe（实测 2025-04-18 那份：G10 在 .rcp 里有、.grp 里没有）
+    # ⇒ 早报清楚，不要等底层 `recipe_by_slot` 抛 `SystemExit`
+    # （那会带崩整个请求进程，且看不出是"目录不存在"还是"槽没配方"）。
+    if not root.is_dir():
+        raise FileNotFoundError(f"菜单导出目录不存在：{root}")
+    missing = sorted({slot for slot, _ in segs if not _has_slot(slot, root)})
+    if missing:
+        raise ValueError(
+            f"group {group_slot} 灌参失败：槽 {missing} 在 .grp 里没有 recipe"
+            f"（.rcp 可能列了该 group 但 .grp 缺配方；请同刻重导两份菜单）")
     steps, counts, skipped = [], {}, {}
     for slot, phase in segs:
         got = segment_steps(slot, export_dir, phase)

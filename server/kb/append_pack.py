@@ -126,7 +126,8 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
             sample = (core_facts(src).get("sample_id") or core_facts(parent).get("sample_id") or "")
             sample_src[rid] = (f"继承自 core:{inherit_from}" if sample
                                else "**空缺：画布与 core 都没有该 run 的 sample_id**")
-        # ② stage_seq：模块没给就取 core 里同 stage 的权威值
+        # ② stage_seq：模块没给就取 core 里同 stage 的权威值；core 里也没这个 stage
+        #    ⇒ 按工序序推算（同 stage 保持同号）**并写明来源**（不许留空、也不许静默填）
         if not m.get("core_stage_seq"):
             for r in read_core_table("runs"):
                 if ((r.get("batch_id") or "").strip() == batch
@@ -135,6 +136,13 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
                     m["core_stage_seq"] = r["stage_seq"]
                     stage_src[rid] = f"取自 core 同 stage：{r.get('run_id')}"
                     break
+            else:
+                from .batch_runs import _stage_seq      # 延迟导入：避免模块级循环依赖
+                hint = _stage_seq([x for x in (project.get("modules") or []) if isinstance(x, dict)],
+                                  batch, stage)
+                m["core_stage_seq"] = hint
+                stage_src[rid] = (f"core 里还没有该 batch 的 {stage} ⇒ 按工序序推算 {hint}"
+                                  "（**请核对**：stage_seq 各 batch 自定）")
         else:
             stage_src[rid] = "模块自带（画布/导入包）"
         # ③ date：**用画布上该 run 的计划日期**；缺失才退回今天，并标注来源

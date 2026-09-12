@@ -65,6 +65,15 @@ def observations() -> list[dict]:
                 for r in csv.DictReader(f) if r.get("obs_type")]
 
 
+class ContractUnavailable(RuntimeError):
+    """契约的**真源**拿不到（数据资产没装载 / 菜单解析器缺失）。
+
+    单独一个异常类型，是为了让接口层能给出**可操作的提示**而不是 500：
+    "工具侧不另存一份契约副本"是有意为之（否则必然与 schema 漂移），
+    代价就是没装载数据资产时表单读不到枚举 —— 这时应当明说，而不是静默给空表。
+    """
+
+
 def param_keys() -> dict:
     """规范参数键（来自 datasets_menu 的映射表：46 列 + MFC 通道 + `_ramp` 后缀）→ 展示用。
 
@@ -72,11 +81,17 @@ def param_keys() -> dict:
     对**所有**映射键都生成（不只是 MFC）。§13.4 另规定时间列合成秒值进
     `steps.duration_s`，但**保留** `process_time_sec` 原秒值键。
     """
-    dm = parser()
-    base = {**dm.MFC_PARAM, **dm.MENU_PARAM}
+    try:
+        dm = parser()
+        base = {**dm.MFC_PARAM, **dm.MENU_PARAM}
+        keep_zero = dm.KEEP_ZERO
+    except Exception as e:                            # noqa: BLE001
+        raise ContractUnavailable(
+            f"菜单解析器（数据线 datasets_menu.py）不可达：{e}；"
+            "参数键契约由它定义，工具侧不另存副本") from e
     out: dict[str, dict] = {}
     for col, key in base.items():
-        out[key] = {"from": col, "keep_zero": col in dm.KEEP_ZERO}
+        out[key] = {"from": col, "keep_zero": col in keep_zero}
     for col, key in base.items():                     # 每列都有 _ramp 变体
         out.setdefault(key + "_ramp", {"from": col + " Ramp", "keep_zero": False})
     out.setdefault("process_time_sec", {"from": "Process time sec.（§13.4 保留原秒值）",
@@ -129,9 +144,33 @@ def check_steps(steps: list[dict], strict: bool = True, stage: str = "") -> list
       的 `gvv1/gvv2` 必须在位（0 也要显式提交）。
     - `strict=False`（**历史数据** append-only 回看）：只报结构性非法（含非 snake_case），
       §13.6 的历史遗留键与缺 gvv 只给提示，不当错误。
+    - `stage`：给了就**以它为准确认该不该要开关量**（PECVD/曝光没有旁通阀）；
+      没给则看步骤里是否出现开关量键来判（保守：只有出现才要求，缺键的工序本来就判不出）。
+
+    ⚠️ 键名表来自数据线 `datasets_menu.py`；**没装载数据资产**时（CI/别人机器）拿不到
+    键名 ⇒ 这里是**降级为"只校验不依赖键表的规则"**（非法键名格式、gvv 在位），
+    并**明说"键名未校验"** —— 既不 500，也不假装校验过了。
     """
-    keys = param_keys()
-    need_gvv = (not stage) or any(s in stage.upper() for s in GVV_STAGES)
+    notes: list[str] = []
+    try:
+        keys = param_keys()
+    except ContractUnavailable as e:
+        keys = {}
+        notes.append(f"[提示] 键名表不可用 ⇒ **本次未校验键名是否在契约内**（{e}）")
+    return notes + _check_steps_with(steps, keys, strict=strict, stage=stage)
+
+
+def _check_steps_with(steps: list[dict], keys: dict, strict: bool = True,
+                      stage: str = "") -> list[str]:
+    """`check_steps` 的**纯逻辑内核**（键名表由调用方注入）—— 便于离线单测。"""
+    # ⚠️ `need_gvv` 的判定顺序：**先看调用方给的 stage**（工单里说 PECVD 就不该要 gvv）；
+    #    stage 没给时才退回"步骤里有没有 gvv 痕迹"（缺键没法判工序，只能保守）。
+    #    曾经漏了这一步 ⇒ 传 stage="PECVD" 仍然报"缺 gvv1/gvv2"（2026-09-13 回归网查出）。
+    if stage:
+        need_gvv = any(s in stage.upper() for s in GVV_STAGES)
+    else:
+        need_gvv = any(sw in (s.get("param_json") or {}) for s in (steps or [])
+                       for sw in SWITCH_KEYS)
     errs: list[str] = []
     for s in steps or []:
         pj = s.get("param_json") or {}

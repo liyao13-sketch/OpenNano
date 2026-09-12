@@ -12,6 +12,11 @@ export interface Module {
   doe: any; annotations: any[]; sim_result: any;
   // 流程运行(BEAMER 式):禁用/备注/运行状态
   disabled?: boolean; comment?: string; run_state?: 'idle' | 'ok' | 'stale' | 'running';
+  // 数据桥：与 core 对接的字段（批次视图/续做/导出追加包都读这些，别再用 (m as any)）
+  core_run_id?: string; core_parent_run_id?: string; core_batch_id?: string;
+  core_stage?: string; core_stage_seq?: number; core_sample_id?: string;
+  core_recipe_id?: string; core_date?: string;
+  core_measurements?: any[]; core_observations?: any[]; core_menu_steps?: any[];
 }
 export interface CatalogItem { group: string; kind: string; subtype: string; name: string; desc: string }
 export interface Equipment { id: string; name: string; params: Record<string, ParamDef>;

@@ -83,10 +83,10 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   useEffect(() => {
     if (!sel || !ctx.onFormChange) return
     const mods = ctx.modules.map(m => m.core_run_id === sel.run_id
-      ? { ...(m as any),
+      ? { ...m,
           core_measurements: meas.filter(x => x.quantity && String(x.value).trim() !== ''),
           core_observations: obs.filter(x => x.obs_type) }
-      : m) as Module[]
+      : m)
     ctx.onFormChange(mods)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meas, obs, sel?.run_id])
@@ -114,9 +114,16 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     if (!sel) return
     setBusy('continue'); setMsg('')
     try {
+      /* ⚠️ 父 run 的口径（2026-09-13 由回归网查出后修正）：
+         界面上"选中的 run" 与 "手填样号" 是两件事 —— 手填了样号，就**以样号为准**
+         （同 stage 内找该样品的上一条 run）；此时把选中的 run 一起发过去会挂错分支。
+         只有没填样号时，才把选中的 run 当作父。 */
+      const wantSample = (sample || '').trim()
       const d = await post('/api/run/continue', {
         ...payload, batch_id: batch, stage: sel.stage,
-        parent_run_id: sel.run_id, sample_id: sample || (sel as any).sample_id || '', persist: false,
+        parent_run_id: wantSample ? '' : sel.run_id,
+        sample_id: wantSample,
+        persist: false,
         menu_group: useMenu && group ? Number(group) : null, menu_dir: menuDir,
       })
       ctx.onApply({ name: d.project.name, modules: d.project.modules, edges: d.project.edges }, d.summary)
@@ -232,7 +239,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
 
   const natMap: Record<string, { nature: string; nature_label: string; why: string }> = {}
   for (const n of (chain?.natures || [])) natMap[n.run_id] = n
-  const runSteps = (sel && (ctx.modules.find(m => m.core_run_id === sel.run_id) as any)?.core_menu_steps) || []
+  const runSteps = (sel && ctx.modules.find(m => m.core_run_id === sel.run_id)?.core_menu_steps) || []
   const paramJson: Record<string, any> = runSteps[0]?.param_json || {}
 
   return (

@@ -75,14 +75,19 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
     ⚠️ 老包（2026-09-12 之前导出的 flow.json）只把 `core_run_id` 写进模块，
     `parent_run_id` 只存在 runs.csv ⇒ 这里做一次**回退绑定**（按 core_run_id 读包内 runs.csv），
     否则批次视图会丢掉整条 parent 链（实测 AR50-T1 丢 11 条边）。
+
+    ⚠️ 教训（连踩三次：`parent_run_id` / `run_nature` / `sample_id`）：
+    **语义标注常只在 core 侧** —— 模块上没有的字段一律从 core/runs.csv 兜底回读。
     """
     parent_map = _parent_map_from_packs()
+    facts = _core_run_facts()
     rows = []
     for m in modules or []:
         rid = m.get("core_run_id") or ""
         p = parse_run_id(rid)
         if not p or p["batch"] != batch:
             continue
+        f = facts.get(rid) or {}
         rows.append({
             "run_id": rid,
             "stage": p["stage"],
@@ -90,38 +95,49 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
             "stage_seq": _stage_seq(modules, p["batch"], p["stage"]),
             "parent_run_id": (m.get("core_parent_run_id") or m.get("parent_run_id")
                               or parent_map.get(rid) or ""),
-            "sample_id": (m.get("core_sample_id") or m.get("sample_id") or ""),
+            "sample_id": (m.get("core_sample_id") or m.get("sample_id")
+                          or f.get("sample_id") or ""),
             # 语义标注常只在 core 侧 ⇒ 模块没有时从 core/runs.csv 读（同 sample_id 的处理）
             "run_nature": (m.get("core_run_nature") or m.get("run_nature")
-                           or _nature_map().get(rid) or ""),
-            "status": m.get("run_state") or "planned",
-            "tool_id": m.get("machine_name") or "",
-            "date": (m.get("core_date") or ""),
+                           or f.get("run_nature") or ""),
+            "status": m.get("run_state") or f.get("status") or "planned",
+            "tool_id": m.get("machine_name") or f.get("tool_id") or "",
+            "date": (m.get("core_date") or f.get("date") or ""),
             "title": m.get("name") or "",
             "note": m.get("comment") or "",
-            "recipe_id": m.get("core_recipe_id") or "",
+            "recipe_id": m.get("core_recipe_id") or f.get("recipe_id") or "",
             "module_id": m.get("id") or "",
         })
     rows.sort(key=lambda r: (r["stage_seq"], r["stage"], r["seq"]))
     return rows
 
 
-_NATURE_CACHE: dict[str, str] | None = None
+_RUN_FACTS_CACHE: dict[str, dict] | None = None
+
+
+def _core_run_facts() -> dict[str, dict]:
+    """core/runs.csv 的 run_id → 若干事实列（进程内缓存，**只读**）。
+
+    存在的理由：`sample_id` / `date` / `status` / `tool_id` / `recipe_id` 在模块上**常为空**，
+    而 core 里有权威值。**每发现一次"某个字段模块上是空的"，就加进这张表** ——
+    不要再为每个字段各写一套 `_xxx_map()`（那正是漏掉 `sample_id` 的原因）。
+    """
+    global _RUN_FACTS_CACHE
+    if _RUN_FACTS_CACHE is not None:
+        return _RUN_FACTS_CACHE
+    cols = ("sample_id", "run_nature", "date", "status", "tool_id", "recipe_id", "stage_seq")
+    out: dict[str, dict] = {}
+    for r in _core_runs_rows():
+        rid = (r.get("run_id") or "").strip()
+        if rid:
+            out[rid] = {c: (r.get(c) or "").strip() for c in cols}
+    _RUN_FACTS_CACHE = out
+    return out
 
 
 def _nature_map() -> dict[str, str]:
-    """core/runs.csv 的 run_id → run_nature（契约 v0.1.4；进程内缓存，只读）。"""
-    global _NATURE_CACHE
-    if _NATURE_CACHE is not None:
-        return _NATURE_CACHE
-    out: dict[str, str] = {}
-    for r in _core_runs_rows():
-        rid = (r.get("run_id") or "").strip()
-        nat = (r.get("run_nature") or "").strip()
-        if rid and nat:
-            out[rid] = nat
-    _NATURE_CACHE = out
-    return out
+    """core/runs.csv 的 run_id → run_nature（只读）。**只是 `_core_run_facts()` 的一个视图**。"""
+    return {rid: f["run_nature"] for rid, f in _core_run_facts().items() if f.get("run_nature")}
 
 
 def _core_runs_rows() -> list[dict]:
@@ -141,14 +157,24 @@ _PARENT_CACHE: dict[str, str] | None = None
 
 
 def _parent_map_from_packs() -> dict[str, str]:
-    """从实验包的 runs.csv 里读 run_id → parent_run_id（进程内缓存；读只读资产，不写）。"""
+    """run_id → parent_run_id（进程内缓存；**只读**，不写任何资产）。
+
+    两个来源，**core 优先**：
+      ① `core/runs.csv`（权威）—— 2026-09-13 回归网查出：以前这里只扫实验包，
+         于是"core 里已入库、但画布模块没带 parent"的 run 会**丢父边**
+         （与 `sample_id` / `run_nature` 是同一个坑：语义标注常在 core 侧）。
+      ② 各实验包内的 `runs.csv`（老包能补 core 尚未入库的续做边）。
+    """
     global _PARENT_CACHE
     if _PARENT_CACHE is not None:
         return _PARENT_CACHE
-    import csv
-    from pathlib import Path
     out: dict[str, str] = {}
-    try:
+    for r in _core_runs_rows():                    # ① core 权威
+        rid = (r.get("run_id") or "").strip()
+        if rid:
+            out[rid] = (r.get("parent_run_id") or "").strip()
+    try:                                           # ② 包内 runs.csv 补 core 没有的
+        import csv
         from .menu_reader import _workspace
         base = _workspace() / "个人空间/18_工艺数据资产"
         for p in list(base.rglob("runs.csv"))[:200]:
@@ -214,26 +240,32 @@ def next_run(modules: list[dict], batch: str, stage: str, parent_run_id: str | N
 
     - 序号：该 batch 该 stage 已有 run 的**最大序号 + 1**（不按数量，避免删过 run 后撞号）
     - parent（**分支安全**）：
-        * 显式给 → 用它；
-        * 否则若指定了 `sample_id` ⇒ **优先取同 sample 的上一条 run**
-          （并发分支场景：LDW 后裂成 8 个 die 各自做 ICP，给 DIE3 续做**绝不能挂到 DIE8 上**）；
-        * 再否则取该 stage 最后一条 run（线性续做语义）。
+        * 给了 `sample_id` ⇒ **优先取同 sample 的上一条 run**，且**显式 parent 也会被校验**：
+          若显式 parent 不属于该 sample，说明"选中的 run"与"要续做的样品"不是一回事
+          ⇒ 以 sample 为准（否则并发分支会挂错父）。
+          （2026-09-13 回归网查出：UI 两个字段都发，且选中的 run 常是列表首条 ⇒ 必然挂错。）
+        * 只给显式 parent ⇒ 用它；
+        * 都没给 ⇒ 取该 stage 最后一条 run（线性续做语义）。
       取不到任何上游时返回**空 parent** —— 无父 run 本身就是合法语义
       （并发分支的兄弟共享同一个上游 LDW，不是首尾相链）。
     - stage_seq：同 stage 保持同号。
     """
     same = [r for r in runs_of_batch(modules, batch) if r["stage"] == stage]
     seq = (max((r["seq"] for r in same), default=0) + 1)
-    parent = parent_run_id
-    if parent is None:
-        if sample_id:
+    mine = [r for r in same if sample_id and r.get("sample_id") == sample_id]
+    if sample_id:
+        if mine:
+            parent = mine[-1]["run_id"]
+        elif parent_run_id and any(r["run_id"] == parent_run_id and
+                                   r.get("sample_id") == sample_id for r in same):
+            parent = parent_run_id              # 显式父确实属于该 sample ⇒ 认它
+        else:
             # 指定了 sample ⇒ **只看这个 sample**；它没做过就保持空
             # （空 parent 是合法语义：并发分支的兄弟不首尾相链。绝不退回别人的 run）
-            mine = [r for r in same if r.get("sample_id") == sample_id]
-            parent = mine[-1]["run_id"] if mine else ""
-        else:
-            # 没指定 sample ⇒ 保持旧的线性续做语义
-            parent = same[-1]["run_id"] if same else ""
+            parent = ""
+    else:
+        parent = parent_run_id if parent_run_id is not None else (
+            same[-1]["run_id"] if same else "")
     stage_seq = same[0]["stage_seq"] if same else (stage_hint or _stage_seq(modules, batch, stage))
     return {
         "batch_id": batch,
@@ -264,6 +296,15 @@ def parallels(modules: list[dict], batch: str) -> list[dict]:
             continue
         samples = sorted({g["sample_id"] for g in group if g["sample_id"]})
         same_parent = bool(parent)
+        if len(samples) >= 2:
+            hint = ""                                  # 各 run 有各自的样品 ⇒ 已能区分
+        elif not samples:
+            # ⚠️ 全都没标 sample ≠ "sample 相同"（曾经这里误报成"同一个样品组"）
+            hint = ("这些 run **都没有 sample 归属** ⇒ 无法判断是同一片做多次、还是多片各做一次；"
+                    "请补 sample_id（或标 `core_run_nature`）")
+        else:
+            hint = (f"这些 run 共用 sample「{samples[0]}」（可能是样品组）⇒ 组内区分未记；"
+                    "若组内每颗各做一次，请标 `core_run_nature=trial`")
         out.append({
             "parent_run_id": parent,
             "stage": stage,
@@ -274,9 +315,7 @@ def parallels(modules: list[dict], batch: str) -> list[dict]:
             # 有父且同 stage ⇒ 同一上游下的并发；无父且同 stage ⇒ 大概率是分片后的同工序并发
             "kind": ("同一上游下的并发（分片/多片并行做同一工序）" if same_parent
                      else "无共同上游的同 stage 并发（疑似分片未记 die）"),
-            "hint": ("" if len(samples) >= 2 else
-                     ("这些 run 的 sample 是**同一个**（可能是样品组）⇒ 组内区分未记；"
-                      "若组内每颗各做一次，请标 `core_run_nature=trial`")),
+            "hint": hint,
         })
     out.sort(key=lambda x: (-x["count"], x["stage"]))
     return out
@@ -352,22 +391,23 @@ def classify(modules: list[dict], batch: str) -> list[dict]:
                 "nature_label": NATURE_LABEL[nature], "why": why,
                 "overridden": bool(override)}
         out.append(item)
-        if not r["parent_run_id"] and not r["sample_id"] and len(same_stage) > 1 and not override:
+        # 需人工判定：无上游 + 无 sample + 未被人工标注（season? 独立试验? —— 工具不猜）
+        if nature == "batch_level" and not r["parent_run_id"] and not r["sample_id"] and not override:
             needs_human.append(r["run_id"])
     return out
 
 
 def needs_human_nature(modules: list[dict], batch: str) -> list[str]:
-    """无法自动判定性质、需域知识（season? 独立试验?）的 run —— 工具不猜，列出来给人标。"""
-    rows = runs_of_batch(modules, batch)
-    by_stage: dict[str, list[dict]] = {}
-    for r in rows:
-        by_stage.setdefault(r["stage"], []).append(r)
-    by_run = {m.get("core_run_id"): m for m in (modules or [])}
-    return [r["run_id"] for r in rows
-            if not r["parent_run_id"] and not r["sample_id"] and len(by_stage[r["stage"]]) > 1
-            and not ((by_run.get(r["run_id"]) or {}).get("core_run_nature")
-                     or (by_run.get(r["run_id"]) or {}).get("run_nature"))]
+    """无法自动判定性质、需域知识（season? 独立试验?）的 run —— 工具不猜，列出来给人标。
+
+    ⚠️ **口径只有一份**：直接复用 `classify()` 的判定结果（`nature=batch_level`
+    且"无上游 + 无 sample"）⇒ 两条出口永不漂移。
+    曾经这里自己重写了一遍条件、且只看画布不看 core ⇒ 已被人标注的 run 仍被列进"待标"
+    （2026-09-13 由回归网查出）。
+    """
+    return [c["run_id"] for c in classify(modules, batch)
+            if c["nature"] == "batch_level" and not c["parent_run_id"] and not c["sample_id"]
+            and not c["overridden"]]
 
 
 def chain_of(modules: list[dict], batch: str) -> dict:

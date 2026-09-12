@@ -171,6 +171,21 @@ def api_export_data(req: ExportDataReq):
 
 
 # ---------- P0: 批次管理 · 续做 · 表单契约 · 菜单直读 ----------
+class BatchListReq(BaseModel):
+    """批次列表只需要画布模块。
+
+    ⚠️ 这里曾经复用 `ExpackExportReq`（其必填字段是 `name`），而批次面板发的是
+    `project_name` ⇒ **422**，面板的批次列表**整个打不开**（2026-09-13 由回归网查出）。
+    入参模型必须与调用方实际发的字段对齐；多出来的字段直接忽略。
+    """
+    model_config = {"extra": "ignore"}
+    project_name: str = ""
+    modules: list[dict] = []
+    edges: list[dict] = []
+    purpose: str = ""
+    operator: str = ""
+
+
 class BatchRunsReq(BaseModel):
     modules: list[dict] = []
     batch_id: str
@@ -254,12 +269,16 @@ def api_form_contract():
     from kb import form_contract as fc
     try:
         return fc.contract()
+    except fc.ContractUnavailable as e:
+        # 契约真源没装载 ⇒ 明说"怎么修"，而不是 500 或静默空表
+        raise HTTPException(
+            503, f"契约真源不可达：{e}（检查 OPENNANO_WORKSPACE / OPENNANO_DATA_ROOT）") from e
     except Exception as e:                       # noqa: BLE001
         raise HTTPException(500, f"读契约失败（schema/词表/解析器不可达）：{e}") from e
 
 
 @app.post("/api/batch/list")
-def api_batch_list(req: ExpackExportReq):
+def api_batch_list(req: BatchListReq):
     """画布上的 batch 概览（含节点/连线数）。"""
     from kb import batch_runs as br
     mods = req.modules or []
@@ -299,7 +318,12 @@ def api_run_continue(req: RunContinueReq):
     if req.menu_group:
         from kb import menu_reader as mr
         export = req.menu_dir or str(mr.default_menu_dir() / "RIE-400iPB")
-        g = mr.group_steps(int(req.menu_group), export)
+        try:
+            g = mr.group_steps(int(req.menu_group), export)
+        except Exception as e:                     # noqa: BLE001
+            # 灌参失败**必须报错**（静默给空 steps 会让人以为"这配方就是空的"）；
+            # 目录不存在 / 槽没配方都是用户可修的输入问题 ⇒ 400 而不是 500。
+            raise HTTPException(400, f"菜单灌参失败：{e}") from e
         steps = g["steps"]
         menu_info = {"group": g["group"], "group_seq": g["group_seq"],
                      "segments": g["segments"], "total_steps": g["total_steps"],
