@@ -39,7 +39,10 @@ const post = async (url: string, body: any) => {
 export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
   const [batches, setBatches] = useState<any[]>([])
   const [batch, setBatch] = useState('')
-  const [chain, setChain] = useState<{ runs: Run[]; nodes: number; edges: number; roots: string[]; parallels?: ParallelGroup[] } | null>(null)
+  const [chain, setChain] = useState<{ runs: Run[]; nodes: number; edges: number; roots: string[]
+    parallels?: ParallelGroup[]
+    natures?: { run_id: string; nature: string; nature_label: string; why: string }[]
+    nature_needs_human?: string[] } | null>(null)
   const [sample, setSample] = useState('')
   const [sel, setSel] = useState<Run | null>(null)
   const [contract, setContract] = useState<any>(null)
@@ -133,6 +136,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     } catch (e: any) { setMsg('❌ 取 group 失败: ' + e.message) } finally { setBusy('') }
   }
 
+  const natMap: Record<string, { nature: string; nature_label: string; why: string }> = {}
+  for (const n of (chain?.natures || [])) natMap[n.run_id] = n
   const runSteps = (sel && (ctx.modules.find(m => m.core_run_id === sel.run_id) as any)?.core_menu_steps) || []
   const paramJson: Record<string, any> = runSteps[0]?.param_json || {}
 
@@ -172,12 +177,15 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               <span style={{ opacity: .7 }}>{chain ? `${chain.nodes} 节点 / ${chain.edges} 连线` : '—'}</span>
             </div>
             <table className="tbl" style={{ width: '100%', fontSize: 13 }}>
-              <thead><tr><th>run_id</th><th>seq</th><th>sample/die</th><th>parent</th><th>状态</th><th>recipe</th><th></th></tr></thead>
+              <thead><tr><th>run_id</th><th>seq</th><th>性质</th><th>sample/die</th><th>parent</th><th>状态</th><th>recipe</th><th></th></tr></thead>
               <tbody>
                 {(chain?.runs || []).map(r => (
                   <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
                     <td>{r.run_id}</td>
                     <td>{r.stage_seq}</td>
+                    <td title={natMap[r.run_id]?.why || ''} style={{ opacity: .9, whiteSpace: 'nowrap' }}>
+                      {natMap[r.run_id]?.nature_label || '—'}
+                    </td>
                     <td style={{ opacity: .8 }}>{r.sample_id || '—'}</td>
                     <td style={{ opacity: .75 }}>{r.parent_run_id || '—'}</td>
                     <td>{r.status}</td>
@@ -187,6 +195,19 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 ))}
               </tbody>
             </table>
+
+            {chain?.nature_needs_human && chain.nature_needs_human.length > 0 && (
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12,
+                                             borderLeft: '3px solid var(--warn,#e8a33d)' }}>
+                <b>需人工判定性质（{chain.nature_needs_human.length} 条）</b>
+                <div style={{ opacity: .8 }}>
+                  这些 run 无上游、也没标 sample ⇒ 可能是 <b>season 预热</b>或<b>批次级（多片一起做）</b>，
+                  工具不猜：请补 <code>sample_id</code>，或在模块上标 <code>core_run_nature</code>
+                  （<code>chain</code>/<code>trial</code>/<code>batch_level</code>）。
+                </div>
+                <div style={{ opacity: .75 }}>{chain.nature_needs_human.join('、')}</div>
+              </div>
+            )}
 
             {chain?.parallels && chain.parallels.length > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12,

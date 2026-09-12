@@ -248,6 +248,74 @@ def parallels(modules: list[dict], batch: str) -> list[dict]:
     return out
 
 
+#: run 性质（数据线 2026-09-12 建议）—— 防"同 stage 同 stage_seq ⇒ 串行"的误读
+NATURE_LABEL = {
+    "chain": "链内续接",           # 有父 run ⇒ 真实上游链
+    "trial": "独立试验",           # 无父 + 有独立 sample ⇒ 与其他 run 并列的试验片
+    "batch_level": "批次级(多片同做)",  # 无父 + 与兄弟同 stage/sample ⇒ season 或"多 die 一起做"
+    "unclassified": "未分类",
+}
+
+
+def classify(modules: list[dict], batch: str) -> list[dict]:
+    """给每条 run 标**性质**：`chain`（链内续接）/ `trial`（独立试验）/ `batch_level`（多片同做）。
+
+    判定顺序（先证据、后启发、再人工覆盖）：
+      1. 模块显式带 `core_run_nature`（或 `run_nature`）⇒ **用它**（域知识优先，如 season 判定）
+      2. 有 `parent_run_id` ⇒ `chain`（真实上游链，最硬）
+      3. 无父，但同 stage 内**只有它自己**用这个 sample（或它是该 stage 唯一一条）⇒ `trial`
+      4. 无父，且同 stage 内有**别的 run 与它共享 sample** ⇒ `batch_level`（多片一起做）
+      5. 无父、无 sample、且同 stage 有多条 ⇒ `trial`（**保守**）+ 计入 `needs_human`
+         —— season 预热 vs 独立试验靠域知识，工具不猜（数据线 2026-09-12 要求）
+    """
+    rows = runs_of_batch(modules, batch)
+    by_stage: dict[str, list[dict]] = {}
+    for r in rows:
+        by_stage.setdefault(r["stage"], []).append(r)
+    by_run = {m.get("core_run_id"): m for m in (modules or [])}
+    out, needs_human = [], []
+    for r in rows:
+        m = by_run.get(r["run_id"]) or {}
+        override = (m.get("core_run_nature") or m.get("run_nature") or "").strip()
+        same_stage = by_stage[r["stage"]]
+        if override in NATURE_LABEL:
+            nature, why = override, "人工标注（域知识优先）"
+        elif r["parent_run_id"]:
+            nature, why = "chain", f"上游 = {r['parent_run_id']}"
+        elif len(same_stage) == 1:
+            nature, why = "trial", "该 stage 只有这一条"
+        else:
+            peers = [x for x in same_stage if x["run_id"] != r["run_id"]]
+            same_sample = [x for x in peers if r["sample_id"] and x["sample_id"] == r["sample_id"]]
+            if same_sample:
+                nature, why = "batch_level", "无上游且与同 stage 的其它 run 共享 sample（多片一起做）"
+            else:
+                nature, why = "trial", "无上游、sample 在同 stage 内唯一 ⇒ 独立试验"
+                if not r["sample_id"]:
+                    why += "；**但本 run 未标 sample ⇒ 疑似 season/批次级，待人工确认**"
+        item = {"run_id": r["run_id"], "stage": r["stage"], "sample_id": r["sample_id"],
+                "parent_run_id": r["parent_run_id"], "nature": nature,
+                "nature_label": NATURE_LABEL[nature], "why": why,
+                "overridden": bool(override)}
+        out.append(item)
+        if not r["parent_run_id"] and not r["sample_id"] and len(same_stage) > 1 and not override:
+            needs_human.append(r["run_id"])
+    return out
+
+
+def needs_human_nature(modules: list[dict], batch: str) -> list[str]:
+    """无法自动判定性质、需域知识（season? 独立试验?）的 run —— 工具不猜，列出来给人标。"""
+    rows = runs_of_batch(modules, batch)
+    by_stage: dict[str, list[dict]] = {}
+    for r in rows:
+        by_stage.setdefault(r["stage"], []).append(r)
+    by_run = {m.get("core_run_id"): m for m in (modules or [])}
+    return [r["run_id"] for r in rows
+            if not r["parent_run_id"] and not r["sample_id"] and len(by_stage[r["stage"]]) > 1
+            and not ((by_run.get(r["run_id"]) or {}).get("core_run_nature")
+                     or (by_run.get(r["run_id"]) or {}).get("run_nature"))]
+
+
 def chain_of(modules: list[dict], batch: str) -> dict:
     """画布上该 batch 的链是否自洽（给 UI 画链 + 验收用）。
 
@@ -266,4 +334,6 @@ def chain_of(modules: list[dict], batch: str) -> dict:
         "roots": [r["run_id"] for r in rows if not r["parent_run_id"]],
         "dangling_parents": broken,     # parent 指向画布外的 run —— 正常(跨包续做)，不算错
         "parallels": parallels(modules, batch),   # 并行分支（防"直线误读"）
+        "natures": classify(modules, batch),      # 每条 run 的性质（链内续接/独立试验/批次级）
+        "nature_needs_human": needs_human_nature(modules, batch),   # 需域知识判定（season?）的 run
     }

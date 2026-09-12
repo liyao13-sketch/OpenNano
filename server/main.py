@@ -220,6 +220,7 @@ class AppendPackReq(BaseModel):
     purpose: str = ""
     operator: str = ""
     batch: str = ""
+    save_dir: str = ""               # 非空 ⇒ 同时把 zip 落盘到该目录（便于交数据线验收）
 
 
 class MenuCheckReq(BaseModel):
@@ -439,6 +440,15 @@ def api_expack_append(req: AppendPackReq):
     if blob is None:
         return info                                   # 没有新 run：回 JSON 说明，不产空包
     name = f"{info['batch_id']}_append.zip"
+    if req.save_dir:
+        # 落盘到用户**显式指定**的目录（工具不擅自写数据资产区）
+        try:
+            d = Path(req.save_dir).expanduser()
+            d.mkdir(parents=True, exist_ok=True)
+            (d / name).write_bytes(blob)
+            info["saved_to"] = str(d / name)
+        except OSError as e:
+            info["save_error"] = f"落盘失败（仍可下载）：{e}"
     return _R(content=blob, media_type="application/zip",
               headers={"Content-Disposition":
                        f"attachment; filename=append_pack.zip; "
