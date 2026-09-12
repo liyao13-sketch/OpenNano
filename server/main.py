@@ -212,6 +212,15 @@ class ProposalVerifyReq(BaseModel):
     tool: str = "RIE-400iPB"
 
 
+class AppendPackReq(BaseModel):
+    project_name: str = ""
+    modules: list[dict] = []
+    edges: list[dict] = []
+    purpose: str = ""
+    operator: str = ""
+    batch: str = ""
+
+
 class MenuCheckReq(BaseModel):
     dir: str = ""          # 缺省 = <设备菜单>/<tool>
     tool: str = "RIE-400iPB"
@@ -400,6 +409,51 @@ def api_adapter_verify(req: ProposalVerifyReq):
     if not prop:
         raise HTTPException(404, f"没有 {req.tool} 的提案")
     return ap.verify_mapping(prop)
+
+
+@app.post("/api/expack/append")
+def api_expack_append(req: AppendPackReq):
+    """**追加包**（`source=tool-append`）：只含尚未入 core 的 run。
+
+    为什么必须单独有这个出口（数据线 2026-09-12 复核）：
+    `AR50-T1` 这类镜像包 `manifest.source == "core-slice"`，`datasets_folder.discover()`
+    **按设计整包跳过**（防自噬）⇒ 只往镜像包里加 run 再导出，落库时整包被丢。
+    追加包不是 core-slice ⇒ 正常入库，且既有源优先、老行不会被覆盖。
+    """
+    from fastapi import Response as _R
+    from urllib.parse import quote as _q
+    from kb import append_pack as ap
+    # 新 run 的 note 不该继承上游 run 的长备注（那是上一炉的结论），只留本 run 自己的
+    mods = []
+    for m in req.modules:
+        m = dict(m)
+        if m.get("core_parent_run_id") and (m.get("comment") or "").count("【OBS-") >= 2:
+            m["comment"] = ""
+        mods.append(m)
+    proj = {"name": req.project_name, "modules": mods, "edges": req.edges}
+    blob, info = ap.build_append_pack(proj, purpose=req.purpose,
+                                      operator=req.operator, batch=req.batch)
+    if blob is None:
+        return info                                   # 没有新 run：回 JSON 说明，不产空包
+    name = f"{info['batch_id']}_append.zip"
+    return _R(content=blob, media_type="application/zip",
+              headers={"Content-Disposition":
+                       f"attachment; filename=append_pack.zip; "
+                       f"filename*=UTF-8''{_q(name)}",
+                       "X-Append-Info": _q(json.dumps(info, ensure_ascii=False))})
+
+
+@app.post("/api/expack/append/preview")
+def api_expack_append_preview(req: AppendPackReq):
+    """预览：哪些 run 会被当成"新增行"打进追加包（只读 core 比主键）。"""
+    from kb import append_pack as ap
+    proj = {"name": req.project_name, "modules": req.modules, "edges": req.edges}
+    new = ap.new_runs_of(proj)
+    have = ap.core_run_ids()
+    return {"core_runs": len(have), "new_runs": new, "count": len(new),
+            "would_skip_in_core_slice": True,
+            "note": ("这些 run 不在 core 里 ⇒ 会进追加包；其余 run 已在 core ⇒ 不会重复写。"
+                     "追加包 source=tool-append（不是 core-slice）⇒ 不会被 discover() 跳过。")}
 
 
 class ExpackExportReq(BaseModel):

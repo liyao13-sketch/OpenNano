@@ -599,6 +599,24 @@ export default function App() {
     } catch (e: any) { alert('导出失败: ' + e.message) }
   }
 
+  // 追加包：只含尚未入 core 的 run（镜像包 core-slice 会被整包跳过，必须走这个出口）
+  const exportAppend = async () => {
+    try {
+      const proj = { project_name: projectName, modules: nodes.map(n => n.data.module as Module),
+        edges: edges.map(e => ({ src: e.source, dst: e.target })) }
+      const pv = await (await fetch('/api/expack/append/preview', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })).json()
+      if (!pv.count) { alert('没有需要追加的 run（core 里都已有）\n\n' + (pv.note || '')); return }
+      const purpose = prompt(`将追加 ${pv.count} 个 run：\n${pv.new_runs.join('\n')}\n\n实验目的(可空):`, '') ?? ''
+      const size = await download('/api/expack/append', { ...proj, purpose })
+      pushLog('edit', `导出追加包「${projectName}」：${pv.new_runs.length} 个新 run`)
+      alert(`追加包已导出（${(size / 1024).toFixed(1)} KB）\n\n`
+        + `含 ${pv.new_runs.length} 个新 run：${pv.new_runs.join(', ')}\n`
+        + `manifest.source=tool-append ⇒ **不会被 core-slice 规则跳过**；既有源优先，老行不会被覆盖。\n\n`
+        + `入库：交《数据》会话跑 datasets_folder.py --dry-run → build_core.py。`)
+    } catch (e: any) { alert('导出失败: ' + e.message) }
+  }
+
   const importExpack = async () => {
     const path = prompt('实验数据包路径（文件夹或 zip，如 ~/Downloads/AR50-T1）：', '')
     if (!path || !path.trim()) return
@@ -768,6 +786,7 @@ export default function App() {
         <button className="btn ghost" onClick={() => setBatchOpen(true)} title="批次管理：run 链 / 续做 / 表单填写 / DRIE 菜单直读">批次</button>
         <button className="btn ghost" onClick={exportExpack} title="画布流程 → 实验数据包(core 格式,含人读流程卡.md)">导出实验包</button>
         <button className="btn ghost" onClick={exportCard} title="画布流程 → 实验流程卡(Markdown,人读,可打印上机)">导出流程卡</button>
+        <button className="btn ghost" onClick={exportAppend} title="只导出尚未入 core 的 run（tool-append 包；镜像包 core-slice 会被整包跳过）">导出追加包</button>
         <button className="btn ghost" onClick={importExpack} title="实验数据包(文件夹/zip) → 画布流程">导入实验包</button>
         <button className="btn ghost" onClick={() => dataRef.current?.click()} title="上传 Excel 解析为 core 草稿(不落库)">导入数据</button>
         <button className="btn ghost" onClick={exportData} title="导出 core 数据工作簿(9表+量名词)">导出数据</button>
