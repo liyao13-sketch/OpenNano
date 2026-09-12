@@ -504,3 +504,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .btn:focus-visible, .dropdown-item:focus-visible, .ptab:focus-visible {
   outline: none; box-shadow: 0 0 0 3px var(--accent-ring);
 }
+
+/* 下拉分组标题右侧的用途提示 */
+.dd-sec { display: flex; align-items: baseline; gap: 6px; }
+.dd-hint { text-transform: none; letter-spacing: 0; font-weight: 400; opacity: .7; }

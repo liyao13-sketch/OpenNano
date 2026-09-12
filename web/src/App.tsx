@@ -902,29 +902,32 @@ export default function App() {
           <button className="btn ghost" onClick={() => setFileMenu(v => !v)} title="保存 / 载入 / 导入 / 导出">文件 ▾</button>
           {fileMenu && (
             <div className="dropdown" onMouseLeave={() => setFileMenu(false)}>
+              {/* 按**功能**分组（不按"导入/导出"分）——方向由条目里的动词表达（owner 2026-09-13） */}
               <div className="dd-sec">项目</div>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); openLoad() }}>载入项目…</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); save() }}>保存项目</button>
               <div className="dropdown-sep" />
-              <div className="dd-sec">导出</div>
+              <div className="dd-sec">实验包与流程卡<span className="dd-hint">与 core 对接</span></div>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportExpack() }}
                 title="画布流程 → 实验数据包(core 格式,含人读流程卡.md)">导出实验包</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportCard() }}
                 title="画布流程 → 实验流程卡(Markdown,人读,可打印上机)">导出流程卡</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportAppend() }}
-                title="只导出尚未入 core 的 run（tool-append 包）">导出追加包</button>
-              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportData() }}
-                title="导出 core 数据工作簿(9表+量名词)">导出数据(xlsx)</button>
-              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportConfig() }}
-                title="导出设备库/参数/影响规则/知识库">导出配置</button>
-              <div className="dropdown-sep" />
-              <div className="dd-sec">导入</div>
+                title="只导出尚未入 core 的 run（tool-append 包）">导出追加包（增量）</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); importExpack() }}
-                title="实验数据包(文件夹/zip) → 画布流程">导入实验包</button>
+                title="实验数据包(文件夹/zip) → 画布流程">导入实验包…</button>
+              <div className="dropdown-sep" />
+              <div className="dd-sec">测量数据<span className="dd-hint">Excel 宽表</span></div>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportData() }}
+                title="导出 core 数据工作簿(9表+量名词)">导出数据工作簿</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); dataRef.current?.click() }}
-                title="上传 Excel 解析为 core 草稿(不落库)">导入数据(xlsx)</button>
+                title="上传 Excel 解析为 core 草稿(不落库)">导入数据…</button>
+              <div className="dropdown-sep" />
+              <div className="dd-sec">系统配置<span className="dd-hint">换机 / 备份</span></div>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); exportConfig() }}
+                title="导出设备库/参数/影响规则/知识库">导出配置包</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); importRef.current?.click() }}
-                title="导入配置包(换机/备份)">导入配置</button>
+                title="导入配置包(换机/备份)">导入配置包…</button>
             </div>
           )}
         </div>
