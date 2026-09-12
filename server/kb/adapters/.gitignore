@@ -1,0 +1,4 @@
+# LLM 映射提案是**本机产物**（含机台列名与样例值），不进仓库。
+# 只有 README 与代码进仓；提案留在本机供人采纳。
+proposed/*.json
+!proposed/.gitkeep
