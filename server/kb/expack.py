@@ -709,6 +709,12 @@ def parse_expack(path: Path, lib) -> dict:
         if (r.get("run_nature") or "").strip():
             # season/trial/batch_level 一并带上 —— 画布据此把 season 节点默认收起（owner 2026-09-12 裁断）
             m["run_nature"] = r["run_nature"].strip()
+        # 参数调试线归属（v0.1.6）：画布据此显示 run1/run2…（ICP-XXXX 的序号不连续，读数不直观）
+        if (r.get("tune_id") or "").strip():
+            m["tune_id"] = r["tune_id"].strip()
+        if (r.get("tune_step") or "").strip():
+            m["tune_step"] = int(r["tune_step"]) if r["tune_step"].strip().isdigit() \
+                else r["tune_step"].strip()
         oc = _obs_of(r.get("run_id", ""))
         if oc:
             m["comment"] = oc

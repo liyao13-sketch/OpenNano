@@ -175,3 +175,24 @@ def test_调试线端点_有视图给数据_没有也给原因(client, monkeypat
     r2 = client.post("/api/batch/tune_line", json={"modules": [], "batch_id": ""})
     d2 = r2.json()
     assert d2["available"] is True and d2["series"][0]["tune_id"] == "T1"
+
+
+def test_工程里的边带来源标记与箭头样式(client, monkeypatch, tmp_path):
+    """画布边的"两类线"必须落盘可分辨（`_link`），否则刷新后实线/虚线又会混成一样。"""
+    from kb import append_pack as ap
+    from conftest import seed_core
+    from batch_fixtures import BATCH, ROOT, batch_rows, sample_rows
+    d = seed_core(tmp_path / "core", batches=batch_rows(), samples=sample_rows(), runs=[
+        {"run_id": f"{BATCH}-LDW-0001", "batch_id": BATCH, "sample_id": ROOT,
+         "stage": "LDW", "stage_seq": "2", "parent_run_id": ""},
+        {"run_id": f"{BATCH}-ICP-0001", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE4",
+         "stage": "ICP", "stage_seq": "3", "parent_run_id": ""},
+        {"run_id": f"{BATCH}-ICP-0002", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE4",
+         "stage": "ICP", "stage_seq": "3", "parent_run_id": f"{BATCH}-ICP-0001"},
+    ])
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    p = ap.core_to_project(BATCH)
+    assert p["edges"] and all("_link" in e for e in p["edges"])
+    kinds = {e["_link"] for e in p["edges"]}
+    assert kinds <= {"recorded", "inferred"}

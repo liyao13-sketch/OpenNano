@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactFlow, {
-  Background, Controls, Handle, Position, addEdge, SelectionMode,
+  Background, Controls, Handle, MarkerType, Position, addEdge, SelectionMode,
   useNodesState, useEdgesState, Node, Edge, Connection,
 } from 'reactflow'
 import { api, download } from './api'
@@ -49,7 +49,7 @@ function ProcessNode({ data }: any) {
       borderLeft:`2px solid ${m.disabled || isSeason ? 'var(--faint)' : color}`, borderRadius:10,
       boxShadow:'var(--shadow-1)', color:'var(--text)', opacity: m.disabled ? .5 : (isSeason ? .68 : 1),
       borderStyle: m.disabled || isSeason ? 'dashed' : 'solid' }}>
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div style={{ padding:'7px 11px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           <span style={{ width:6, height:6, borderRadius:2, background:color, flexShrink:0 }} />
@@ -64,13 +64,24 @@ function ProcessNode({ data }: any) {
               padding: isSeason ? '0 4px' : undefined }}>{badge.t}</span>
         </div>
         <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{secondary}</div>
-        {(shortRun || shortSample) && (
+        {(shortRun || shortSample || m.tune_step != null) && (
           <div style={{ marginTop:5, display:'flex', flexWrap:'wrap', gap:4 }}>
+            {m.tune_step != null && (
+              <span title={`参数调试线 ${m.tune_id || ''} 第 ${m.tune_step} 轮（core run：${runId}）`
+                + '　序号不连续的是 core 的 run 号，这里按扫描轮次显示'}
+                style={{ fontSize:10, fontFamily:'var(--mono)', fontWeight:700,
+                  color:'var(--accent-fg)', background:'var(--accent)',
+                  border:'1px solid var(--accent)', borderRadius:4, padding:'0 5px' }}>
+                run{m.tune_step}
+              </span>
+            )}
             {shortRun && (
               <span title={`core run：${runId}`}
                 style={{ fontSize:10, fontFamily:'var(--mono)', fontWeight:600,
-                  color:'var(--accent-hi)', background:'var(--accent-soft)',
-                  border:'1px solid var(--accent-ring)', borderRadius:4, padding:'0 4px' }}>
+                  color: m.tune_step != null ? 'var(--muted)' : 'var(--accent-hi)',
+                  background: m.tune_step != null ? 'transparent' : 'var(--accent-soft)',
+                  border: `1px solid ${m.tune_step != null ? 'var(--border)' : 'var(--accent-ring)'}`,
+                  borderRadius:4, padding:'0 4px' }}>
                 {shortRun}
               </span>
             )}
@@ -109,7 +120,7 @@ function ProcessNode({ data }: any) {
           {m.comment}
         </div>
       )}
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -171,7 +182,7 @@ export default function App() {
   useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior:'smooth' }) }, [messages])
 
   const onConnect = useCallback((c: Connection) =>
-    setEdges(eds => addEdge({ ...c, type:'smoothstep' }, eds)), [setEdges])
+    setEdges(eds => addEdge({ ...c, ...EDGE_BASE }, eds)), [setEdges])
 
   // 靠近吸附自动连线:节点拖放后,若下方/附近有节点且端口距离近 → 自动连线(不用手画)
   const onNodeDragStop = useCallback((_: any, node: Node) => {
@@ -187,7 +198,7 @@ export default function App() {
         setEdges(eds => {
           if (eds.some(e => e.source === node.id && e.target === other.id)) return eds
           return addEdge({ id: `e-${node.id}-${other.id}`, source: node.id,
-            target: other.id, type: 'smoothstep' }, eds)
+            target: other.id, ...EDGE_BASE }, eds)
         })
         break
       }
@@ -213,8 +224,8 @@ export default function App() {
       const target = out[0].target
       setEdges(eds => [
         ...eds.filter(e => e.id !== out[0].id),
-        { id:`e-${selectedId}-${m.id}`, source:selectedId, target:m.id, type: ortho ? 'step' : 'smoothstep' },
-        { id:`e-${m.id}-${target}`, source:m.id, target, type: ortho ? 'step' : 'smoothstep' },
+        { id:`e-${selectedId}-${m.id}`, source:selectedId, target:m.id, ...EDGE_BASE },
+        { id:`e-${m.id}-${target}`, source:m.id, target, ...EDGE_BASE },
       ])
       pushLog('edit', `插入节点「${m.name}」(位于选中节点之后,已自动改接线)`)
     } else {
@@ -444,8 +455,8 @@ export default function App() {
 
   // 正交连线(BEAMER: Manhattan Line Connection)
   useEffect(() => {
-    setEdges(eds => eds.map(e => e.type === (ortho ? 'step' : 'smoothstep') ? e
-      : { ...e, type: ortho ? 'step' : 'smoothstep' }))
+    setEdges(eds => eds.map(e => e.type === (ortho ? 'smoothstep' : 'default') ? e
+      : { ...e, type: ortho ? 'smoothstep' : 'default' }))
   }, [ortho, setEdges])
 
   // 把当前节点的接口定义(承接/影响/公式)存回设备模板,后续节点继承
@@ -543,12 +554,16 @@ export default function App() {
        · recorded —— core 的 parent_run_id 明确写的，实线；
        · inferred —— run 没写 parent 时按**工艺顺序**补的显示边，虚线 + 标注。
      两者在导出/入库口径上都不等价：inferred 只是"看起来的顺序"，不是记录下来的归属。 */
+  /* 边默认样式：**平滑曲线 + 箭头**（默认不用折角；正交折角在「视图」里可切） */
+  const EDGE_BASE = { type: 'default' as const,
+    markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15 } }
+
   const edgeOf = (e: any) => {
     const inferred = (e._link || e.link) === 'inferred'
     return {
       id: `e-${e.src ?? e.src_module}-${e.dst ?? e.dst_module}`,
       source: String(e.src ?? e.src_module), target: String(e.dst ?? e.dst_module),
-      type: 'smoothstep',
+      ...EDGE_BASE,
       data: { inferred },
       style: inferred
         ? { strokeDasharray: '6 5', stroke: 'var(--faint)' }
@@ -752,7 +767,7 @@ export default function App() {
         const sid = refMap[op.src] || nds.find(n => matchNode(n, op.src))?.id
         const tid = refMap[op.dst] || nds.find(n => matchNode(n, op.dst))?.id
         if (sid && tid && sid !== tid) {
-          eds.push({ id: `e-${sid}-${tid}`, source: sid, target: tid, type: 'smoothstep' })
+          eds.push({ id: `e-${sid}-${tid}`, source: sid, target: tid, ...EDGE_BASE })
           pushLog('edit', `Agent 连线 ${op.src} → ${op.dst}`)
         } else pushLog('warn', `Agent 连线失败(${op.src} → ${op.dst})`)
       } else if (op.type === 'set_params') {
@@ -851,7 +866,7 @@ export default function App() {
               <label><input type="checkbox" checked={showComments}
                 onChange={e => { setShowComments(e.target.checked); pushLog('view', `备注显示: ${e.target.checked ? '开' : '关'}`) }} /> 显示备注 (F3)</label>
               <label><input type="checkbox" checked={ortho}
-                onChange={e => setOrtho(e.target.checked)} /> 正交连线(曼哈顿)</label>
+                onChange={e => setOrtho(e.target.checked)} /> 折角连线(正交·默认用平滑曲线)</label>
               <label><input type="checkbox" checked={showSeason}
                 onChange={e => setShowSeason(e.target.checked)}
                 disabled={seasonIds.size === 0} /> 显示 season 节点{seasonIds.size ? ` (${seasonIds.size})` : ''}</label>

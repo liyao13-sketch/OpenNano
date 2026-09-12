@@ -73,10 +73,10 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
         m = by_run[r["run_id"]]
         for key, col in (("run_nature", "run_nature"), ("core_sample_id", "sample_id"),
                          ("core_stage_seq", "stage_seq"), ("core_recipe_id", "recipe_id"),
-                         ("core_date", "date")):
+                         ("core_date", "date"), ("tune_id", "tune_id"), ("tune_step", "tune_step")):
             val = (r.get(col) or "").strip()
             if val:
-                m[key] = int(val) if key == "core_stage_seq" and val.isdigit() else val
+                m[key] = int(val) if key in ("core_stage_seq", "tune_step") and val.isdigit() else val
             elif key == "run_nature" and key in m:
                 del m[key]
     # season 节点：挪到主流程**下方**的独立区（同列对齐其工序，y 压到所有主行之下）——
