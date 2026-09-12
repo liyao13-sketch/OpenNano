@@ -80,7 +80,17 @@ def plan_vs_actual(batch: str) -> dict:
     allocs = [e for e in evs if e["kind"] == "allocate"]
     planned = ((spec.get("grid") or {}).get("count")
                or (spec.get("count") if isinstance(spec.get("count"), int) else None))
-    actual = sum(int(e["count"]) for e in allocs if str(e["count"]).isdigit())
+    # ⚠️ 分层口径（数据线 2026-09-13 强调）：
+    #   顶层累加会把"从 15 颗组里再取 1 颗"算成新增用量 ⇒ 必须区分
+    #   · 顶层用量 = 从**整片**取（from 是整片）—— AR50-T1 = 4+15 = 19 颗
+    #   · 组内取用 = from 是某个**组**（不含 `-DIE` 之外仍属组）—— AR50-T1 = 1 颗（从 DIE15 组取第 1 颗）
+    root_id = (spec.get("from_sample_id") or f"{batch}-01").strip()
+    top = sum(int(e["count"]) for e in allocs
+              if str(e["count"]).isdigit() and e["from_sample_id"] == root_id)
+    inner = sum(int(e["count"]) for e in allocs
+                if str(e["count"]).isdigit() and e["from_sample_id"] != root_id)
+    actual = top + inner                                  # 兼容旧字段：仍给总和
+    unallocated = (planned - top) if isinstance(planned, int) else None
 
     def _ids(pattern: str, n: int) -> list[str]:
         """按 id_pattern 生成计划位号（如 AR50-T1-01-D{n:02d} → D01…D49）。"""
@@ -99,7 +109,10 @@ def plan_vs_actual(batch: str) -> dict:
         "planned": planned,
         "planned_ids": _ids(spec.get("id_pattern", ""), planned or 0)[:8] + (["…"] if (planned or 0) > 8 else []),
         "id_pattern": spec.get("id_pattern", ""),
-        "actual_allocated": actual,
+        "actual_allocated": actual,          # 兼容旧字段（= top + inner）
+        "used_from_wafer": top,              # ★ 顶层用量（从整片取）—— 数据线口径的"19"
+        "used_from_group": inner,            # ★ 组内取用（从某个组里再取）
+        "root_sample_id": root_id,
         "splits": [{"at": e["at"], "count": e["count"], "status": e["status"],
                     "after_stage": e["after_stage"], "note": e["note"][:40]} for e in splits],
         "allocations": [{"at": e["at"], "from": e["from_sample_id"], "to": e["to_sample_id"],
@@ -108,7 +121,7 @@ def plan_vs_actual(batch: str) -> dict:
         "source": "core(只读) + batch_events.csv(只读)",
         "note": ("`split`=物理裂片（只 1 条×49）；`allocate`=取样分配（3 条 4/15/1）。"
                  "二者不可混为一谈；实际用量只算 allocate。"),
-        "unallocated": (planned - actual) if isinstance(planned, int) else None,
+        "unallocated": unallocated,          # 未用 = 计划 − 顶层用量（不含组内取用）
     }
 
 

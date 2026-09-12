@@ -288,16 +288,33 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             {events && events.count > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12 }}>
                 <b>样品事件（裂片 / 取样分配）</b>
-                <span style={{ opacity: .7 }}>　计划 {events.plan_vs_actual.planned ?? '—'} 颗 ·
-                  实际取样 {events.plan_vs_actual.actual_allocated} 颗
-                  {events.plan_vs_actual.unallocated != null ? ` · 未用 ${events.plan_vs_actual.unallocated}` : ''}</span>
+                <div style={{ marginTop: 2 }}>
+                  计划 <b>{events.plan_vs_actual.planned ?? '—'}</b> 颗
+                  {events.plan_vs_actual.id_pattern ? `（${events.plan_vs_actual.id_pattern}）` : ''}
+                  · 实际用量 <b>{events.plan_vs_actual.used_from_wafer ?? 0}</b> 颗（从整片取）
+                  {events.plan_vs_actual.used_from_group ? ` · 组内另取 ${events.plan_vs_actual.used_from_group} 颗` : ''}
+                  {events.plan_vs_actual.unallocated != null ? ` · 未用 ${events.plan_vs_actual.unallocated} 颗` : ''}
+                </div>
+                {events.plan_vs_actual.planned_ids?.length > 0 && (
+                  <div style={{ opacity: .6, fontSize: 11 }}>
+                    计划位号：{events.plan_vs_actual.planned_ids.join(' ')}
+                    <b>（应然规则；本批未在裂片时登记位号 ⇒ 实际只能到组级）</b>
+                  </div>
+                )}
+                {events.plan_vs_actual.spec?.source_gds && (
+                  <div style={{ opacity: .6, fontSize: 11 }}>版图来源：{events.plan_vs_actual.spec.source_gds}</div>
+                )}
                 <table className="tbl" style={{ width: '100%', fontSize: 12, marginTop: 4 }}>
                   <thead><tr><th>event</th><th>kind</th><th>日期</th><th>从 → 到</th><th>颗数</th><th>状态</th></tr></thead>
                   <tbody>
                     {events.events.map((e: any) => (
                       <tr key={e.event_id}>
                         <td><code>{e.event_id}</code></td>
-                        <td>{e.kind === 'split' ? '裂片' : e.kind === 'allocate' ? '取样分配' : e.kind}</td>
+                        <td>{e.kind === 'split' ? '裂片'
+                             : e.kind === 'allocate'
+                               ? (events.plan_vs_actual.root_sample_id && e.from_sample_id !== events.plan_vs_actual.root_sample_id
+                                  ? '取样分配（组内）' : '取样分配')
+                             : e.kind}</td>
                         <td>{e.at}</td>
                         <td style={{ opacity: .8 }}>{e.from_sample_id} → {e.to_sample_id || '（组）'}</td>
                         <td>{e.count}</td><td>{e.status}</td>
