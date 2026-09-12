@@ -210,7 +210,8 @@ def run_proposer(proposal: dict, apply: bool = False, timeout: int = 120) -> dic
 def consistency_preview(batch: str) -> dict:
     """**提前预警**：事件台账 ↔ 样品树 一致性（对齐数据线 QA 关 `[11]` 的三项）。
 
-    ⚠️ 权威判定在数据线的 `data_qa.py [11]`（计入违约、在 build_core 里跑）；
+    ⚠️ 权威判定在数据线的 **`ingest/core_schema.py` 的 `qa()`**（QA 关 `[11]`，由 `ingest/build_core.py` 运行、
+    计入违约）；
     这里只是**只读预览**，让工具在落账前/后就地给个提示，不替代它。
 
     三项：① `to_sample_id` 悬空 ② `status=done` 的 `allocate` 未产出样品行 ③ `from_sample_id` 悬空。
@@ -237,10 +238,11 @@ def consistency_preview(batch: str) -> dict:
         "dangling_to": dangling_to, "dangling_from": dangling_from,
         "allocate_done_without_sample": missing_rows,
         "source": "core(只读) 预览",
-        "authority": ("权威判定在数据线 data_qa.py 的 QA 关 [11]（计入违约、随 build_core 跑）；"
-                      "本预览仅供工具侧提前预警"),
+        "authority": ("权威判定在数据线 ingest/core_schema.py 的 qa()（QA 关 [11]），"
+                      "由 ingest/build_core.py 运行、计入违约；本预览仅供工具侧提前预警"),
         "note": ("⚠️ `split` **只登记事件、不建样品行** —— 子样品由 `allocate` 建。"
-                 "所以裂片之后样品表**不会**自动多出 N 行，这是设计如此"
-                 "（没登记位号的「59 颗」不该硬塞进样品表）。"),
+                 "所以裂片之后样品表**不会**自动多出 N 行（设计如此）："
+                 "`samples` 只收「真实产生/使用」的样品；"
+                 "没登记位号的那些颗**从未被指派**（不是被拦下）。"),
     }
 
