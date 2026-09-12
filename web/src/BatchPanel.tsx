@@ -42,6 +42,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const [menuDir, setMenuDir] = useState('')
   const [group, setGroup] = useState('')
   const [preview, setPreview] = useState<any>(null)
+  const [report, setReport] = useState('')
   const [meas, setMeas] = useState<{ quantity: string; value: string; unit: string; method: string }[]>([])
   const [obs, setObs] = useState<{ obs_type: string; description: string }[]>([])
   const [env, setEnv] = useState<any>({ date: new Date().toISOString().slice(0, 10), tool: 'RIE-400iPB', clean_done: '否' })
@@ -92,6 +93,30 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     } catch (e: any) { setMsg('❌ 菜单扫描失败: ' + e.message) } finally { setBusy('') }
   }
 
+  const checkMenu = async () => {
+    setBusy('check'); setMsg(''); setReport('')
+    try {
+      const d = await post('/api/menu/check', { dir: menuDir, text: true })
+      setReport(d.text || '')
+      setMsg(`体检：${d.summary.dumps} 份导出 · 可用 ${d.summary.ok} · 有问题 ${d.summary.with_warnings} ⇒ ${d.summary.verdict}`)
+    } catch (e: any) { setMsg('❌ 体检失败: ' + e.message) } finally { setBusy('') }
+  }
+
+  const proposeMapping = async () => {
+    setBusy('llm'); setMsg(''); setReport('')
+    try {
+      const d = await post('/api/adapter/propose', { tool: 'RIE-400iPB', dir: menuDir })
+      if (d.skipped) { setMsg('✅ ' + d.note); return }
+      const ok = (d.mappings || []).filter((m: any) => m.suggest)
+      const human = (d.mappings || []).filter((m: any) => m.needs_human)
+      setReport('LLM 提案（' + d.model + '）\n' + (d.mappings || []).map((m: any) =>
+        `  ${m.column} → ${m.suggest || '（无候选）'}  conf=${m.confidence.toFixed(2)}`
+        + (m.needs_human ? ' ⚠️需人工裁决' : '') + `\n     理由: ${m.reason}`).join('\n'))
+      setMsg(`提案已落盘（不生效）：${ok.length} 条有候选 · ${human.length} 条需人工裁决\n`
+        + `文件：server/kb/adapters/proposed/RIE-400iPB.json —— 采纳需改 datasets_menu 映射表 + §13.2 契约，再由数据线复核`)
+    } catch (e: any) { setMsg('❌ 提案失败: ' + e.message) } finally { setBusy('') }
+  }
+
   const loadGroup = async () => {
     if (!group) return
     setBusy('group'); setMsg('')
@@ -123,12 +148,15 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             <input value={menuDir} onChange={e => setMenuDir(e.target.value)} style={{ width: 380 }} />
           </label>
           <button className="btn ghost" disabled={busy !== ''} onClick={scanMenu}>解析菜单目录</button>
+          <button className="btn ghost" disabled={busy !== ''} onClick={checkMenu} title="批量扫该机台下所有导出：配对/未映射列/空壳/越界/跨 dump 漂移">批量体检</button>
+          <button className="btn ghost" disabled={busy !== ''} onClick={proposeMapping} title="未映射列 → LLM 提规范键候选（只落提案文件，需人采纳；涉气路归属一律标 needs_human）">LLM 映射建议</button>
           <label>group N
             <input value={group} onChange={e => setGroup(e.target.value.replace(/\D/g, ''))} style={{ width: 64 }} />
           </label>
           <button className="btn ghost" disabled={!group || busy !== ''} onClick={loadGroup}>预览 group</button>
         </div>
         {msg && <pre style={{ whiteSpace: 'pre-wrap', background: 'var(--bg2,#0002)', padding: 8, borderRadius: 6, margin: '8px 0' }}>{msg}</pre>}
+        {report && <pre style={{ whiteSpace: 'pre-wrap', background: 'var(--bg2,#0002)', padding: 8, borderRadius: 6, margin: '8px 0', maxHeight: 220, overflow: 'auto', fontSize: 12 }}>{report}</pre>}
 
         <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
           {/* 左：链 */}

@@ -201,6 +201,23 @@ class MenuGroupReq(BaseModel):
     tool: str = "RIE-400iPB"
 
 
+class ProposalReq(BaseModel):
+    tool: str = "RIE-400iPB"
+    dir: str = ""                 # 给了就自动取其未映射列
+    columns: list[str] = []
+    samples: dict = {}
+
+
+class ProposalVerifyReq(BaseModel):
+    tool: str = "RIE-400iPB"
+
+
+class MenuCheckReq(BaseModel):
+    dir: str = ""          # 缺省 = <设备菜单>/<tool>
+    tool: str = "RIE-400iPB"
+    text: bool = False     # True = 附人读报告
+
+
 @app.get("/api/form/contract")
 def api_form_contract():
     """表单用枚举/键表（全部读自 schema 与受控词表，工具侧不另编一份）。"""
@@ -323,6 +340,66 @@ def api_menu_group(req: MenuGroupReq):
         return mr.group_steps(int(req.group), d)
     except (FileNotFoundError, mr.MenuParserUnavailable, ValueError) as e:
         raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/menu/check")
+def api_menu_check(req: MenuCheckReq):
+    """**批量菜单体检**：扫该机台下所有导出，出可用性报告（只读，不写任何文件）。
+
+    回答：配对可靠吗 / 列认全了吗 / 配方是空壳吗 / 越界了吗 / 与上次 dump 漂移了吗。
+    """
+    from kb import menu_checker as mc, menu_reader as mr
+    root = Path(req.dir).expanduser() if req.dir else (mr.default_menu_dir() / req.tool)
+    try:
+        res = mc.check_tree(root)
+    except Exception as e:                       # noqa: BLE001
+        raise HTTPException(400, f"体检失败：{e}") from e
+    if req.text:
+        res["text"] = mc.report_text(res)
+    return res
+
+
+@app.get("/api/adapter/proposals")
+def api_adapter_proposals():
+    """列出已落盘的**提案**（在 kb/adapters/proposed/，不生效）。"""
+    from kb import adapter_proposal as ap
+    return {"dir": str(ap.PROPOSED_DIR), "proposals": ap.list_proposals()}
+
+
+@app.post("/api/adapter/propose")
+def api_adapter_propose(req: ProposalReq):
+    """**LLM 映射助手**：未映射列 → 规范键候选（只落提案文件，不生效）。
+
+    - 只把**列名 + 少量样例值**交给 LLM（绝不整份文件）。
+    - 输出经白名单强校验（不在规范键表里的建议作废并留痕）。
+    - `needs_human=true` 的条目（气路归属/未知语义）必须人工裁决。
+    """
+    from kb import adapter_proposal as ap, menu_checker as mc, menu_reader as mr
+    cols = req.columns
+    if not cols and req.dir:
+        root = Path(req.dir).expanduser()
+        try:
+            res = mc.check_dump(root)
+            cols = res.get("step_columns", {}).get("unmapped") or []
+        except Exception as e:                     # noqa: BLE001
+            raise HTTPException(400, f"取未映射列失败：{e}") from e
+    if not cols:
+        return {"skipped": True, "note": "没有未映射列（列名已全覆盖）"}
+    try:
+        res = ap.propose_mappings(req.tool, cols, req.samples)
+    except Exception as e:                         # noqa: BLE001
+        raise HTTPException(500, f"提案失败：{e}") from e
+    return res
+
+
+@app.post("/api/adapter/verify")
+def api_adapter_verify(req: ProposalVerifyReq):
+    """自证：提案里的映射能否把未映射列清零（只比名字，不碰数值）。"""
+    from kb import adapter_proposal as ap
+    prop = ap.load_proposal(req.tool)
+    if not prop:
+        raise HTTPException(404, f"没有 {req.tool} 的提案")
+    return ap.verify_mapping(prop)
 
 
 class ExpackExportReq(BaseModel):

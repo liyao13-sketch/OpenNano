@@ -126,6 +126,20 @@ def slot_zones() -> list[dict]:
 
 
 # ------------------------------------------------------------------ 解析
+def step_columns(grp_path: str | Path) -> list[str]:
+    """从 .grp 里取原始 **step 列名**（"Step type" 表头那 47 列）。
+
+    用途：体检报告要判"哪些列没被映射成规范键"。只看解析器**输出**的键是不够的
+    （输出已经过 `map_params` 清洗，看不出"漏了哪一列"）。
+    """
+    dm = parser()
+    for line in dm._lines(Path(grp_path)):          # noqa: SLF001 —— 复用其编码嗅探
+        cells = dm._f(line)                          # noqa: SLF001
+        if cells and cells[0].startswith("Step type"):
+            return [c.strip() for c in cells if c.strip()]
+    return []
+
+
 def load_menu(export_dir: str | Path) -> dict:
     """解析一个「{YYYYMMDD}_菜单导出/」目录 → 预览用结构（不写任何文件）。"""
     dm = parser()
