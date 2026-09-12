@@ -159,8 +159,8 @@ export default function App() {
   const [viewMenu, setViewMenu] = useState(false)
   const [showComments, setShowComments] = useState(false)
   const [ortho, setOrtho] = useState(false)
-  const [theme, setTheme] = useState<'linear'|'hc'>(
-    () => (localStorage.getItem('opennano-theme') as 'linear'|'hc') || 'linear')
+  const [theme, setTheme] = useState<'linear'|'light'|'hc'>(
+    () => (localStorage.getItem('opennano-theme') as 'linear'|'light'|'hc') || 'linear')
   const logRef = useRef<HTMLDivElement>(null)
   const saveRef = useRef<() => void>(() => {})
   const chatRef = useRef<HTMLDivElement>(null)
@@ -881,6 +881,8 @@ export default function App() {
                 textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>主题</div>
               <button className="dropdown-item" onClick={() => setTheme('linear')}>
                 {theme === 'linear' ? '● ' : '○ '}Linear(默认低饱和)</button>
+              <button className="dropdown-item" onClick={() => setTheme('light')}>
+                {theme === 'light' ? '● ' : '○ '}明亮工作台(浅色)</button>
               <button className="dropdown-item" onClick={() => setTheme('hc')}>
                 {theme === 'hc' ? '● ' : '○ '}高对比度(PyCharm 风)</button>
               <div className="dropdown-sep" />
@@ -991,7 +993,7 @@ export default function App() {
             }}
             fitView proOptions={{ hideAttribution: true }}
             onInit={inst => { flowRef.current = inst }}>
-            <Background color="rgba(255,255,255,.05)" gap={22} />
+            <Background color={theme === 'light' ? 'rgba(15,23,42,.10)' : theme === 'hc' ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.05)'} gap={22} />
             <Controls />
             {families.length > 0 && (
               <div style={{ position:'absolute', right:12, bottom:12, zIndex:5,

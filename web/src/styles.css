@@ -508,3 +508,152 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 /* 下拉分组标题右侧的用途提示 */
 .dd-sec { display: flex; align-items: baseline; gap: 6px; }
 .dd-hint { text-transform: none; letter-spacing: 0; font-weight: 400; opacity: .7; }
+
+/* ============================================================================
+   2026-09-13 · A 方案（Linear 补齐：渐变/模糊/流光/微噪点/外发光/庄重字距/克制动效）
+              + E 方案（明亮工作台 = 浅色主题）
+   —— 全部走 token：浅色主题只重定义变量，不改任何组件代码。
+   ============================================================================ */
+
+/* ---------- A 的"表面那层光"（暗色默认值） ---------- */
+:root {
+  --grad-panel:   linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,0) 46%), var(--panel);
+  --grad-surface: linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.006) 62%), var(--surface);
+  --grad-accent:  linear-gradient(180deg, var(--accent-hi), var(--accent));
+  --top-sheen:    inset 0 1px 0 rgba(255,255,255,.055);
+  --glow-accent:  0 0 22px -7px rgba(94,106,210,.75);
+  --glow-ring:    0 0 0 3px var(--accent-ring), 0 0 26px -6px rgba(94,106,210,.55);
+  --veil:         rgba(14,15,17,.74);
+  --blur:         blur(14px) saturate(145%);
+  --noise-opacity:.035;
+  --noise:        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>");
+  --grid-dot:     rgba(255,255,255,.05);
+  --ease:         cubic-bezier(.2,.8,.2,1);
+}
+:root[data-theme="hc"] {
+  --glow-accent: 0 0 20px -6px rgba(77,159,255,.7);
+  --glow-ring:   0 0 0 3px var(--accent-ring), 0 0 24px -6px rgba(77,159,255,.5);
+  --top-sheen:   inset 0 1px 0 rgba(255,255,255,.10);
+  --noise-opacity: .022;
+}
+
+/* ---------- E · 明亮工作台（浅色主题） ---------- */
+:root[data-theme="light"] {
+  --bg:      #f4f6f8;   /* 画布底：略灰，让白面板浮起来 */
+  --panel:   #ffffff;
+  --surface: #ffffff;
+  --raise:   #ffffff;
+  --hover:   #eef1f5;
+  --border:  rgba(15,23,42,.10);
+  --border-2:rgba(15,23,42,.22);
+  --text:    #0f172a;
+  --text-2:  #334155;
+  --muted:   #64748b;
+  --faint:   #94a3b8;
+  --accent:      #4f46e5;
+  --accent-hi:   #4338ca;
+  --accent-soft: rgba(79,70,229,.10);
+  --accent-ring: rgba(79,70,229,.26);
+  --accent-fg:   #ffffff;
+  --ok:#0e7a4d; --warn:#b45309; --bad:#c0362c; --info:#1d4ed8; --violet:#6d28d9;
+  --shadow-1: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04);
+  --shadow-2: 0 16px 40px rgba(15,23,42,.14);
+  /* 族色：在白底上要压深一档才够清楚 */
+  --fam-resist:#a16207; --fam-expose:#4f46e5; --fam-etch:#b91c1c; --fam-dep:#047857;
+  --fam-wet:#0369a1; --fam-dope:#854d0e; --fam-bond:#c2410c; --fam-pack:#475569;
+  --fam-thermal:#9f1239; --fam-assist:#64748b; --fam-metro:#6d28d9;
+  --fam-metro-form:#0f766e; --fam-metro-comp:#a21caf; --fam-metro-opt:#6d28d9; --fam-metro-elec:#4d7c0f;
+  --kind-process:#4f46e5; --kind-inspect:#6d28d9; --kind-design:#a16207; --kind-sim:#047857;
+  /* A 的 token 在浅色下的对应值 */
+  --grad-panel:   linear-gradient(180deg, #ffffff, #fafbfd);
+  --grad-surface: linear-gradient(180deg, #ffffff, #fbfcfe);
+  --grad-accent:  linear-gradient(180deg, #5b52ea, #4338ca);
+  --top-sheen:    inset 0 1px 0 rgba(255,255,255,.9);
+  --glow-accent:  0 6px 16px -7px rgba(79,70,229,.5);
+  --glow-ring:    0 0 0 3px var(--accent-ring), 0 8px 20px -8px rgba(79,70,229,.35);
+  --veil:         rgba(255,255,255,.86);
+  --noise-opacity:.016;
+  --grid-dot:     rgba(15,23,42,.10);
+}
+:root[data-theme="light"] ::selection { background: rgba(79,70,229,.18); }
+:root[data-theme="light"] .react-flow__edge-path { stroke: rgba(15,23,42,.34); }
+:root[data-theme="light"] .react-flow__edge.selected .react-flow__edge-path,
+:root[data-theme="light"] .react-flow__edge:hover .react-flow__edge-path { stroke: var(--accent); }
+:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(15,23,42,.18); background-clip: content-box; }
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(15,23,42,.30); background-clip: content-box; }
+:root[data-theme="light"] .chatbar-body, :root[data-theme="light"] .log-body { background: transparent; }
+
+/* ---------- ① 渐变 + 磨砂（顶栏 / 面板 / 浮层 / 停靠栏） ---------- */
+.topbar, .dock {
+  background: var(--grad-panel);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--top-sheen);
+}
+.card {
+  background: var(--grad-surface);
+  box-shadow: var(--top-sheen), var(--shadow-1);
+  transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
+}
+.card:hover { border-color: var(--border-2); }
+.dropdown, .ctxmenu {
+  background: var(--veil);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--top-sheen), var(--shadow-2);
+}
+.sidebar, .panel { background: var(--grad-panel); }
+
+/* ---------- ② 微噪点（一层覆盖全屏的"胶片颗粒"，指针穿透） ---------- */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  opacity: var(--noise-opacity); background-image: var(--noise);
+}
+
+/* ---------- ③ 外发光（主按钮 / 选中节点 / 徽标） ---------- */
+.btn { background: var(--grad-accent); box-shadow: var(--top-sheen), var(--glow-accent); }
+.btn.ghost { background: var(--grad-surface); box-shadow: var(--top-sheen); }
+.btn.ghost:hover { box-shadow: var(--top-sheen), 0 4px 14px -8px rgba(0,0,0,.55); }
+.react-flow__node.selected > div { box-shadow: var(--glow-ring) !important; }
+.react-flow__node:hover > div { box-shadow: var(--top-sheen), 0 6px 18px -10px rgba(0,0,0,.6) !important; }
+.chip-x:hover { text-shadow: 0 0 10px rgba(229,100,92,.7); }
+
+/* ---------- ④ 动态流光（极慢、只扫重点元素） ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .btn { position: relative; overflow: hidden; }
+  .btn::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 42%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.22), transparent);
+    transform: translateX(-140%); animation: on-sheen 9s var(--ease) 3s infinite;
+  }
+  .btn.ghost::after { display: none; }        /* 次要按钮不流光，避免吵 */
+  @keyframes on-sheen { 0% { transform: translateX(-140%); } 42%, 100% { transform: translateX(340%); } }
+  .topbar h1::after {                          /* 品牌字后面一缕极淡的流光 */
+    content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.14) 50%, transparent 70%);
+    animation: on-brand 11s var(--ease) 4s infinite; pointer-events: none;
+  }
+  .topbar h1 { position: relative; overflow: hidden; }
+  @keyframes on-brand { 0% { transform: translateX(-120%); } 30%, 100% { transform: translateX(220%); } }
+}
+
+/* ---------- ⑤ 庄重字体：字距 / 字重梯度 / 全局等宽数字 ---------- */
+body { letter-spacing: -.006em; font-variant-numeric: tabular-nums; }
+.topbar h1 { letter-spacing: -.015em; font-weight: 640; }
+.panel h2, .bd-sec-head b { letter-spacing: -.012em; font-weight: 640; }
+.card h4, .sidebar h3, .dd-sec, .iface-sec { letter-spacing: .075em; font-weight: 650; }
+.tbl td, .tbl th, .logline, code, .chip { font-variant-numeric: tabular-nums; }
+.statusbar { letter-spacing: .01em; }
+
+/* ---------- ⑥ 克制的微动效（120–180ms，统一缓动） ---------- */
+.btn { transition: background .14s var(--ease), border-color .14s var(--ease),
+                   box-shadow .14s var(--ease), transform .14s var(--ease); }
+.btn:hover:not(:disabled) { transform: translateY(-1px); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(.985); }
+.lib-item { transition: background .14s var(--ease), color .14s var(--ease), transform .14s var(--ease); }
+.lib-item:hover { transform: translateX(1px); }
+.lib-item:active { transform: scale(.99); }
+.ptab { transition: color .14s var(--ease), border-color .14s var(--ease); }
+.dropdown-item, .ctxmenu button { transition: background .12s var(--ease), color .12s var(--ease); }
+.react-flow__node > div { transition: border-color .16s var(--ease), box-shadow .16s var(--ease); }
+.dock-chev { transition: color .14s var(--ease), background .14s var(--ease); }
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+}
