@@ -221,6 +221,7 @@ class AppendPackReq(BaseModel):
     operator: str = ""
     batch: str = ""
     save_dir: str = ""               # 非空 ⇒ 同时把 zip 落盘到该目录（便于交数据线验收）
+    core_eq_state: list[dict] = []   # 面板填的"上机环境一行"（批次级）
 
 
 class RehydrateReq(BaseModel):
@@ -446,7 +447,8 @@ def api_expack_append(req: AppendPackReq):
         if m.get("core_parent_run_id") and (m.get("comment") or "").count("【OBS-") >= 2:
             m["comment"] = ""
         mods.append(m)
-    proj = {"name": req.project_name, "modules": mods, "edges": req.edges}
+    proj = {"name": req.project_name, "modules": mods, "edges": req.edges,
+            "core_eq_state": req.core_eq_state}
     blob, info = ap.build_append_pack(proj, purpose=req.purpose,
                                       operator=req.operator, batch=req.batch)
     if blob is None:
@@ -504,6 +506,7 @@ def api_batch_rehydrate(req: RehydrateReq):
 
 class ExpackExportReq(BaseModel):
     name: str = "EXP"
+    core_eq_state: list[dict] = []      # 面板填的"上机环境一行"（批次级）
     modules: list[dict] = []
     edges: list[dict] = []
     purpose: str = ""
@@ -515,7 +518,8 @@ def api_expack_export(req: ExpackExportReq):
     """画布流程 → 实验数据包 zip(core 列格式,measurements 为待填模板 + 人读流程卡 md)。"""
     from fastapi import Response as _R
     data, batch = expack_engine.build_expack(
-        {"name": req.name, "modules": req.modules, "edges": req.edges},
+        {"name": req.name, "modules": req.modules, "edges": req.edges,
+         "core_eq_state": req.core_eq_state},
         purpose=req.purpose, operator=req.operator, lib=LIB)
     from urllib.parse import quote as _q
     return _R(content=data, media_type="application/zip",

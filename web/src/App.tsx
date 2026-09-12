@@ -571,7 +571,7 @@ export default function App() {
     try {
       const purpose = prompt('实验目的(写入 manifest,可空):', '') ?? ''
       const size = await download('/api/expack/export', {
-        name: projectName, purpose,
+        name: projectName, purpose, core_eq_state: (window as any).__dshEqState || [],
         modules: nodes.map(n => n.data.module as Module),
         edges: edges.map(e => ({ src: e.source, dst: e.target })),
       })
@@ -603,7 +603,8 @@ export default function App() {
   const exportAppend = async () => {
     try {
       const proj = { project_name: projectName, modules: nodes.map(n => n.data.module as Module),
-        edges: edges.map(e => ({ src: e.source, dst: e.target })) }
+        edges: edges.map(e => ({ src: e.source, dst: e.target })),
+        core_eq_state: (window as any).__dshEqState || [] }
       const pv = await (await fetch('/api/expack/append/preview', { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })).json()
       if (!pv.count) { alert('没有需要追加的 run（core 里都已有）\n\n' + (pv.note || '')); return }
@@ -1131,6 +1132,14 @@ export default function App() {
         projectName, modules: nodes.map(n => n.data.module as Module),
         edges: edges.map(e => ({ src: e.source, dst: e.target })),
         onApply: (p, log) => { loadProjectObj(p); pushLog('run', `批次续做：${log}`) },
+        onFormChange: (modules, eqState) => {
+          // 就地补字段：只改 data.module，不重建 nodes/edges（画布布局不动）
+          setNodes(ns => ns.map(n => {
+            const m = modules.find((x: any) => x.id === n.id)
+            return m ? { ...n, data: { ...n.data, module: m as Module } } : n
+          }))
+          if (eqState) (window as any).__dshEqState = eqState
+        },
       }} />}
       {loadOpen && (
         <div style={{ position:'fixed', inset:0, background:'rgba(8,9,10,.72)', backdropFilter:'blur(2px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>

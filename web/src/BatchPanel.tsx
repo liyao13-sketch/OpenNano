@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Module } from './types'
 
 /**
@@ -16,6 +16,7 @@ type Ctx = {
   modules: Module[]
   edges: { src: string; dst: string }[]
   onApply: (p: { name: string; modules: Module[]; edges: any[] }, log: string) => void
+  onFormChange?: (modules: Module[], eqState?: any) => void
 }
 
 type Run = {
@@ -75,11 +76,33 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /** 把表单值**就地**写回画布模块（不重建画布）；导出时才能合并进包。
+   *  触发条件：当前选中 run + 该 run 的表单值变化。 */
+  useEffect(() => {
+    if (!sel || !ctx.onFormChange) return
+    const mods = ctx.modules.map(m => m.core_run_id === sel.run_id
+      ? { ...(m as any),
+          core_measurements: meas.filter(x => x.quantity && String(x.value).trim() !== ''),
+          core_observations: obs.filter(x => x.obs_type) }
+      : m) as Module[]
+    ctx.onFormChange(mods)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meas, obs, sel?.run_id])
+
+  /** 环境一行是**批次级**：存到窗口上随项目一起导出（App 侧读 __dshEqState） */
+  useEffect(() => {
+    if (env?.date) ctx.onFormChange?.(ctx.modules, [env])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [env])
+
   const loadChain = async (b: string) => {
     if (!b) return
     try {
       const d = await post('/api/batch/runs', { modules: ctx.modules, batch_id: b })
-      setChain(d); setSel(d.runs[d.runs.length - 1] || null)
+      setChain(d)
+      const pick = d.runs[d.runs.length - 1] || null
+      setSel(pick)
+      if (pick) loadFormOf(pick.run_id)
     } catch (e: any) { setMsg('链加载失败: ' + e.message) }
   }
   useEffect(() => { loadChain(batch); /* eslint-disable-next-line */ }, [batch, ctx.modules.length])
@@ -168,6 +191,16 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
         {n.children.length > 0 && renderTree(n.children.map(c => all[c]).filter(Boolean), all, d + 1)}
       </div>
     ))
+
+  /** 切换 run 时把该 run 已存的表单值读回面板（否则切走再切回就空了） */
+  const loadFormOf = (runId: string) => {
+    const m: any = ctx.modules.find(x => x.core_run_id === runId) || {}
+    setMeas((m.core_measurements || []).map((r: any) => ({
+      quantity: r.quantity || '', value: String(r.value ?? ''), unit: r.unit || '',
+      method: r.method || '' })))
+    setObs((m.core_observations || []).map((o: any) => ({
+      obs_type: o.obs_type || '', description: o.description || '' })))
+  }
 
   const natMap: Record<string, { nature: string; nature_label: string; why: string }> = {}
   for (const n of (chain?.natures || [])) natMap[n.run_id] = n

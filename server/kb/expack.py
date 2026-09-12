@@ -200,12 +200,43 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
             # 非菜单步**没有**机台槽位号 ⇒ 该列留空（step_name 仍记组名）
             step_rows.append([f"{rid}.S{si:02d}", rid, si, "", sname, "",
                               dur, press, "", json.dumps(pj, ensure_ascii=False), ""])
+        # 面板填的测量值（表单）→ 合并进 measurements：同 quantity 填值，未覆盖的追加行
+        form_meas = [r for r in (m.get("core_measurements") or [])
+                     if str(r.get("value", "")).strip() != ""]     # 空=未测，不当 0
+        used_ids: set = set()
         for out in (m.get("param_outputs") or []):
             q = PARAM_TO_QUANTITY.get(out, out)
             meta = field_meta(q)
+            hit = next((r for r in form_meas
+                        if r.get("quantity") == q and id(r) not in used_ids), None)
+            if hit:
+                used_ids.add(id(hit))
+            elif form_meas:
+                # 面板已经填过值 ⇒ **不再产出空模板行**（与追加包口径一致：空=未测，不写行）
+                continue
             n = len([r for r in meas_rows if r[0].startswith(rid)]) + 1
-            meas_rows.append([f"{rid}.M{n:02d}", rid, "", q, "", meta.get("unit", ""),
-                              "", "", "", "", "", "", "", ""])
+            meas_rows.append([(hit or {}).get("meas_id") or f"{rid}.M{n:02d}", rid,
+                              (hit or {}).get("sample_id") or m.get("core_sample_id") or "", q,
+                              str(hit.get("value", "")).strip() if hit else "",
+                              (hit or {}).get("unit") or meta.get("unit", ""),
+                              (hit or {}).get("method", ""), (hit or {}).get("loc", ""),
+                              (hit or {}).get("n", ""), (hit or {}).get("uncertainty", ""),
+                              (hit or {}).get("source_artifact_id", ""),
+                              (hit or {}).get("measured_by") or operator or "",
+                              (hit or {}).get("verification") or "未核实",
+                              (hit or {}).get("note", "")])
+        for r in form_meas:                            # 不在接口输出里的量名也照记
+            if id(r) in used_ids:
+                continue
+            n = len([x for x in meas_rows if x[0].startswith(rid)]) + 1
+            meas_rows.append([r.get("meas_id") or f"{rid}.M{n:02d}", rid,
+                              r.get("sample_id") or m.get("core_sample_id") or "",
+                              r.get("quantity", ""), str(r.get("value", "")).strip(),
+                              r.get("unit", ""), r.get("method", ""), r.get("loc", ""),
+                              r.get("n", ""), r.get("uncertainty", ""),
+                              r.get("source_artifact_id", ""),
+                              r.get("measured_by") or operator or "",
+                              r.get("verification") or "未核实", r.get("note", "")])
     return run_rows, step_rows, meas_rows, stage_counter, batch
 
 
@@ -284,6 +315,47 @@ def _unpack_step(s) -> tuple:
         return tuple(s[:11])
     sid, rid, order, sname, role, dur, press, pu, pj, note = (list(s) + [""] * 10)[:10]
     return (sid, rid, order, "", sname, role, dur, press, pu, pj, note)
+
+
+def _form_observations(project: dict, operator: str, now: str) -> list[list]:
+    """面板填的**现象** → observations 行（obs_type 表外跳过；id 照抄或用 {run}.O{nn}）。"""
+    from . import form_contract as fc
+    vocab = {o["obs_type"] for o in fc.observations()}
+    out = []
+    for m in project.get("modules") or []:
+        rid = m.get("core_run_id") or ""
+        for i, o in enumerate((m.get("core_observations") or []), start=1):
+            ot = (o.get("obs_type") or "").strip()
+            if not ot or (vocab and ot not in vocab):
+                continue
+            out.append([o.get("obs_id") or f"{rid}.O{i:02d}", rid,
+                        o.get("sample_id") or m.get("core_sample_id") or "", ot,
+                        o.get("severity", ""), o.get("description", ""),
+                        o.get("judgement", ""), o.get("action", ""),
+                        o.get("artifact_id", ""), o.get("recorded_by") or operator or "",
+                        o.get("date") or now])
+    return out
+
+
+def _form_eq_state(project: dict) -> list[list]:
+    """面板填的**环境一行** → eq_state.csv 行（§十一 口径；超量程留空并在 note 标注）。"""
+    from . import form_contract as fc
+    rows = project.get("core_eq_state") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    out = []
+    for r in rows:
+        norm, warns = fc.check_eq_state(r)
+        if not norm.get("date"):
+            continue
+        sid = r.get("state_id") or f"EQ-{norm['date'].replace('-', '')}-{norm.get('tool', '(环境)')}"
+        out.append([sid, norm["date"], norm.get("tool", "(环境)"),
+                    norm.get("env_temp_c", ""), norm.get("env_rh_pct", ""),
+                    norm.get("chamber_bg_pa", ""), norm.get("chiller_temp_c", ""),
+                    norm.get("chamber_temp_c", ""), norm.get("he_flow", ""),
+                    norm.get("clean_done", ""),
+                    (norm.get("note", "") + ("；⚠️ " + "；".join(warns) if warns else ""))])
+    return out
 
 
 def build_process_card(project: dict, purpose: str = "", operator: str = "",
@@ -470,7 +542,13 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
         "observations.csv": _csv_bytes(
             ["obs_id", "run_id", "sample_id", "obs_type", "severity",
              "description", "judgement", "action", "artifact_id",
-             "recorded_by", "date"], []),
+             "recorded_by", "date"], _form_observations(project, operator, now)),
+        # 环境一行（面板填的；没有就不写这个文件）
+        **({} if not _form_eq_state(project) else {
+            "eq_state.csv": _csv_bytes(
+                ["state_id", "date", "tool", "env_temp_c", "env_rh_pct",
+                 "chamber_bg_pa", "chiller_temp_c", "chamber_temp_c", "he_flow",
+                 "clean_done", "note"], _form_eq_state(project))}),
         # 人读流程卡(与上面 CSV 共用同一套 id;不掺实测值)
         f"流程_{batch}.md": build_process_card(
             project, purpose=purpose, operator=operator, lib=lib).encode(),
