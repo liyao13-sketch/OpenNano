@@ -182,7 +182,8 @@ class RunContinueReq(BaseModel):
     stage: str
     modules: list[dict] = []
     edges: list[dict] = []
-    parent_run_id: str = ""          # 空 = 取该 stage 最后一个 run（续做语义）
+    parent_run_id: str = ""          # 空 = 取同 sample 的上一条（取不到才退回该 stage 最后一条）
+    sample_id: str = ""              # 样品/die（并发分支下续做必须带，否则可能挂错分支）
     menu_group: int | None = None    # 给了就是用 group N 灌参
     menu_dir: str = ""
     title: str = ""
@@ -264,7 +265,8 @@ def api_run_continue(req: RunContinueReq):
     import uuid as _uuid
     from kb import batch_runs as br
     mods = req.modules or []
-    nxt = br.next_run(mods, req.batch_id, req.stage, req.parent_run_id or None)
+    nxt = br.next_run(mods, req.batch_id, req.stage, req.parent_run_id or None,
+                      sample_id=(req.sample_id or None))
     src = next((m for m in mods if m.get("core_run_id") == nxt["parent_run_id"]), None)
 
     menu_info = None
@@ -293,6 +295,7 @@ def api_run_continue(req: RunContinueReq):
         "core_batch_id": nxt["batch_id"],
         "core_stage": nxt["stage"],
         "core_stage_seq": nxt["stage_seq"],
+        "core_sample_id": nxt.get("sample_id") or "",
         "core_date": req.date or "",
         "run_state": "planned",
         "annotations": [],

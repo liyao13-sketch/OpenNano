@@ -99,7 +99,8 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
         m = mods.get(rid) or {}
         parts = rid.rsplit("-", 2)
         stage = parts[1] if len(parts) == 3 else ""
-        run_rows.append([rid, m.get("core_batch_id") or batch, "", stage,
+        run_rows.append([rid, m.get("core_batch_id") or batch,
+                         m.get("core_sample_id") or "", stage,
                          m.get("core_stage_seq", ""), m.get("core_date") or now,
                          "", "", m.get("equipment_name") or stage, m.get("machine_name") or "",
                          m.get("core_recipe_id") or "", operator or "",

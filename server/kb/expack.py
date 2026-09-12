@@ -172,7 +172,8 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         # parent：工具算好的优先，否则取同 batch 上一个 run（导出顺序即执行顺序）
         parent = m.get("core_parent_run_id") or (run_rows[-1][0] if run_rows else "")
         m["core_parent_run_id"] = parent
-        run_rows.append([rid, batch, "", stage, m.get("core_stage_seq", seq_in_stage), now,
+        run_rows.append([rid, batch, m.get("core_sample_id") or "", stage,
+                         m.get("core_stage_seq", seq_in_stage), now,
                          "", "", m.get("equipment_name") or stage, tool_id,
                          m.get("core_recipe_id") or "", operator or "", purpose or "",
                          parent, "", "", "planned",

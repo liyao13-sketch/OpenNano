@@ -90,6 +90,7 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
             "stage_seq": _stage_seq(modules, p["batch"], p["stage"]),
             "parent_run_id": (m.get("core_parent_run_id") or m.get("parent_run_id")
                               or parent_map.get(rid) or ""),
+            "sample_id": (m.get("core_sample_id") or m.get("sample_id") or ""),
             "status": m.get("run_state") or "planned",
             "tool_id": m.get("machine_name") or "",
             "date": (m.get("core_date") or ""),
@@ -174,16 +175,31 @@ def batches_of(modules: list[dict]) -> list[dict]:
 
 
 def next_run(modules: list[dict], batch: str, stage: str, parent_run_id: str | None = None,
-             stage_hint: int | None = None) -> dict:
+             stage_hint: int | None = None, sample_id: str | None = None) -> dict:
     """算下一步 run 的标识（**序号由工具算，禁手输**）。
 
     - 序号：该 batch 该 stage 已有 run 的**最大序号 + 1**（不按数量，避免删过 run 后撞号）
-    - parent：显式给就用；否则取该 batch 该 stage 的**最后一个 run**（续做语义）
-    - stage_seq：同 stage 保持同号（复用现有值）
+    - parent（**分支安全**）：
+        * 显式给 → 用它；
+        * 否则若指定了 `sample_id` ⇒ **优先取同 sample 的上一条 run**
+          （并发分支场景：LDW 后裂成 8 个 die 各自做 ICP，给 DIE3 续做**绝不能挂到 DIE8 上**）；
+        * 再否则取该 stage 最后一条 run（线性续做语义）。
+      取不到任何上游时返回**空 parent** —— 无父 run 本身就是合法语义
+      （并发分支的兄弟共享同一个上游 LDW，不是首尾相链）。
+    - stage_seq：同 stage 保持同号。
     """
     same = [r for r in runs_of_batch(modules, batch) if r["stage"] == stage]
     seq = (max((r["seq"] for r in same), default=0) + 1)
-    parent = parent_run_id if parent_run_id is not None else (same[-1]["run_id"] if same else "")
+    parent = parent_run_id
+    if parent is None:
+        if sample_id:
+            # 指定了 sample ⇒ **只看这个 sample**；它没做过就保持空
+            # （空 parent 是合法语义：并发分支的兄弟不首尾相链。绝不退回别人的 run）
+            mine = [r for r in same if r.get("sample_id") == sample_id]
+            parent = mine[-1]["run_id"] if mine else ""
+        else:
+            # 没指定 sample ⇒ 保持旧的线性续做语义
+            parent = same[-1]["run_id"] if same else ""
     stage_seq = same[0]["stage_seq"] if same else (stage_hint or _stage_seq(modules, batch, stage))
     return {
         "batch_id": batch,
@@ -192,8 +208,44 @@ def next_run(modules: list[dict], batch: str, stage: str, parent_run_id: str | N
         "run_id": f"{batch}-{stage}-{seq:04d}",
         "parent_run_id": parent,
         "stage_seq": stage_seq,
+        "sample_id": sample_id or (same[-1].get("sample_id") if same else ""),
         "is_continuation": bool(same),
+        "same_sample_runs": [r["run_id"] for r in same if sample_id and r.get("sample_id") == sample_id],
     }
+
+
+def parallels(modules: list[dict], batch: str) -> list[dict]:
+    """识别**并行分支**：同一 (parent, stage) 下有多条 run ⇒ 并发实验，不是首尾相链。
+
+    AR50-T1 的实例：LDW 后裂片成 8 个 die、各做 1 次 ICP（同一工序的 8 个样品并发）。
+    若这些 run 没有区分 sample/die，画布只能画成直线 ⇒ 会被误读为"同一片刻了 8 次"。
+    """
+    rows = runs_of_batch(modules, batch)
+    bucket: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        bucket.setdefault((r["parent_run_id"] or "", r["stage"]), []).append(r)
+    out = []
+    for (parent, stage), group in bucket.items():
+        if len(group) < 2:
+            continue
+        samples = sorted({g["sample_id"] for g in group if g["sample_id"]})
+        same_parent = bool(parent)
+        out.append({
+            "parent_run_id": parent,
+            "stage": stage,
+            "runs": [g["run_id"] for g in group],
+            "count": len(group),
+            "samples": samples,
+            "distinct_samples": len(samples),
+            # 有父且同 stage ⇒ 同一上游下的并发；无父且同 stage ⇒ 大概率是分片后的同工序并发
+            "kind": ("同一上游下的并发（分片/多片并行做同一工序）" if same_parent
+                     else "无共同上游的同 stage 并发（疑似分片未记 die）"),
+            "hint": ("" if len(samples) >= 2 else
+                     "这些 run 未区分 sample/die ⇒ 只能画成直线；"
+                     "补 samples(die 层) + runs.sample_id 后即可渲染为并行分支"),
+        })
+    out.sort(key=lambda x: (-x["count"], x["stage"]))
+    return out
 
 
 def chain_of(modules: list[dict], batch: str) -> dict:
@@ -213,4 +265,5 @@ def chain_of(modules: list[dict], batch: str) -> dict:
         "edges": sum(1 for r in rows if r["parent_run_id"]),
         "roots": [r["run_id"] for r in rows if not r["parent_run_id"]],
         "dangling_parents": broken,     # parent 指向画布外的 run —— 正常(跨包续做)，不算错
+        "parallels": parallels(modules, batch),   # 并行分支（防"直线误读"）
     }

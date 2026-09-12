@@ -22,6 +22,11 @@ type Run = {
   run_id: string; stage: string; seq: number; stage_seq: number
   parent_run_id: string; status: string; tool_id: string; date: string
   title: string; recipe_id: string; module_id: string; note: string
+  sample_id?: string
+}
+type ParallelGroup = {
+  parent_run_id: string; stage: string; runs: string[]; count: number
+  samples: string[]; distinct_samples: number; kind: string; hint: string
 }
 
 const post = async (url: string, body: any) => {
@@ -34,7 +39,8 @@ const post = async (url: string, body: any) => {
 export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
   const [batches, setBatches] = useState<any[]>([])
   const [batch, setBatch] = useState('')
-  const [chain, setChain] = useState<{ runs: Run[]; nodes: number; edges: number; roots: string[] } | null>(null)
+  const [chain, setChain] = useState<{ runs: Run[]; nodes: number; edges: number; roots: string[]; parallels?: ParallelGroup[] } | null>(null)
+  const [sample, setSample] = useState('')
   const [sel, setSel] = useState<Run | null>(null)
   const [contract, setContract] = useState<any>(null)
   const [busy, setBusy] = useState('')
@@ -74,7 +80,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     try {
       const d = await post('/api/run/continue', {
         ...payload, batch_id: batch, stage: sel.stage,
-        parent_run_id: sel.run_id, persist: false,
+        parent_run_id: sel.run_id, sample_id: sample || (sel as any).sample_id || '', persist: false,
         menu_group: useMenu && group ? Number(group) : null, menu_dir: menuDir,
       })
       ctx.onApply({ name: d.project.name, modules: d.project.modules, edges: d.project.edges }, d.summary)
@@ -166,12 +172,13 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               <span style={{ opacity: .7 }}>{chain ? `${chain.nodes} 节点 / ${chain.edges} 连线` : '—'}</span>
             </div>
             <table className="tbl" style={{ width: '100%', fontSize: 13 }}>
-              <thead><tr><th>run_id</th><th>seq</th><th>parent</th><th>状态</th><th>recipe</th><th></th></tr></thead>
+              <thead><tr><th>run_id</th><th>seq</th><th>sample/die</th><th>parent</th><th>状态</th><th>recipe</th><th></th></tr></thead>
               <tbody>
                 {(chain?.runs || []).map(r => (
                   <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
                     <td>{r.run_id}</td>
                     <td>{r.stage_seq}</td>
+                    <td style={{ opacity: .8 }}>{r.sample_id || '—'}</td>
                     <td style={{ opacity: .75 }}>{r.parent_run_id || '—'}</td>
                     <td>{r.status}</td>
                     <td style={{ opacity: .75 }}>{r.recipe_id || '—'}</td>
@@ -181,12 +188,38 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               </tbody>
             </table>
 
+            {chain?.parallels && chain.parallels.length > 0 && (
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12,
+                                             borderLeft: '3px solid var(--warn,#e8a33d)' }}>
+                <b>并行分支（{chain.parallels.length} 组）</b>
+                {chain.parallels.map((g, i) => (
+                  <div key={i} style={{ marginTop: 4 }}>
+                    · <code>{g.stage}</code> × <b>{g.count}</b> 路{g.samples.length ? `（${g.distinct_samples} 个不同 sample/die）` : '（未记 sample/die）'}
+                    <div style={{ opacity: .75 }}>　{g.kind}</div>
+                    {g.hint && <div style={{ opacity: .75 }}>　⚠️ {g.hint}</div>}
+                  </div>
+                ))}
+                <div style={{ opacity: .7, marginTop: 4 }}>
+                  ⇒ 画布上应渲染为**同一上游下的并排分支**，不是首尾相链（避免"同一片刻了 N 次"的误读）
+                </div>
+              </div>
+            )}
+
             {sel && (
               <div className="card" style={{ marginTop: 10, padding: 10 }}>
                 <b>续做（从 {sel.run_id}）</b>
                 <div style={{ opacity: .8, margin: '4px 0' }}>
                   将生成 <code>{batch}-{sel.stage}-{String(sel.seq + 1).padStart(4, '0')}</code>
                   ，parent 指向 <code>{sel.run_id}</code>，stage_seq 保持 {sel.stage_seq}
+                </div>
+                <div className="row" style={{ gap: 8, margin: '6px 0' }}>
+                  <label style={{ fontSize: 12 }}>sample/die
+                    <input value={sample} placeholder={sel.sample_id || '如 AR50-T1-01-DIE3'}
+                      onChange={e => setSample(e.target.value)} style={{ width: 170, marginLeft: 4 }} />
+                  </label>
+                  <span style={{ fontSize: 11, opacity: .7 }}>
+                    填了 ⇒ **只认同 sample 的上一条**（并发分支下不会挂错）；留空 ⇒ 退回"该工序最后一条"
+                  </span>
                 </div>
                 <div className="row" style={{ gap: 8 }}>
                   <button className="btn" disabled={busy !== ''} onClick={() => doContinue(false)}>续做（复制参数）</button>
