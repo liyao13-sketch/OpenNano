@@ -673,3 +673,15 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 .statusbar { position: relative; z-index: 3; }   /* 小字保持清晰 */
 .dock      { z-index: 110; }
 .topbar    { position: relative; z-index: 120; }
+
+/* 错误边界的提示框（一个节点出错时只替换那一块，不再整屏变白） */
+.errbox {
+  margin: 8px; padding: 12px 14px; border-radius: var(--radius-lg);
+  background: var(--grad-surface);
+  border: 1px solid var(--bad); box-shadow: var(--top-sheen), var(--shadow-1);
+}
+.errbox-h { font-weight: 650; color: var(--bad); margin-bottom: 6px; }
+.errbox-msg { font-family: var(--mono); font-size: 11.5px; color: var(--text-2);
+  background: var(--raise); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; margin-bottom: 8px; word-break: break-all; }
+.errbox-tip { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.6; }

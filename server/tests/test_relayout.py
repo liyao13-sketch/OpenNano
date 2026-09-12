@@ -111,3 +111,23 @@ def test_修复器不许清掉未入库_run_的父(env):
     plan = next(m for m in json.loads(p.read_text(encoding="utf-8"))["modules"]
                 if m["core_run_id"] == f"{BATCH}-DRIE-0001")
     assert plan["core_parent_run_id"] == f"{BATCH}-ASH-0001"
+
+
+def test_重排给所有模块补齐结构性字段(env):
+    """★ 回归："点 DRIE 什么都不见了"（白屏）。
+
+    续做生成的模块曾缺 `key_values` ⇒ 面板 `m.key_values[k]` 抛错 ⇒ 整树卸载。
+    重排时对**所有**模块（不只 core 里的）补齐结构字段，语义不变（空就是空）。
+    """
+    from kb.relayout import relayout_project
+    p = _write_project(env / "proj5.json")
+    j = json.loads(p.read_text(encoding="utf-8"))
+    j["modules"][0].pop("key_values", None)              # 模拟老工程/续做的缺字段
+    j["modules"][0]["formulas"] = None
+    p.write_text(json.dumps(j, ensure_ascii=False), encoding="utf-8")
+    relayout_project(p, BATCH, write=True)
+    mods = json.loads(p.read_text(encoding="utf-8"))["modules"]
+    for m in mods:
+        for k in ("key_values", "params", "param_defs", "param_inputs",
+                  "param_outputs", "formulas", "material", "annotations"):
+            assert k in m and m[k] is not None, (m.get("core_run_id"), k)

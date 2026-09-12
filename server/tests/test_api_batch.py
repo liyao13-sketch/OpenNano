@@ -196,3 +196,19 @@ def test_工程里的边带来源标记与箭头样式(client, monkeypatch, tmp_
     assert p["edges"] and all("_link" in e for e in p["edges"])
     kinds = {e["_link"] for e in p["edges"]}
     assert kinds <= {"recorded", "inferred"}
+
+
+def test_续做产出的模块形状完整_不许缺_key_values(client, core):
+    """★ 回归：点 DRIE（续做出来的 DRIE-0002）整屏变白。
+
+    根因：续做时把 `key_values`/`sim_result` 整个删掉 ⇒ 前端面板 `m.key_values[k]` 抛错。
+    判据：新模块的**结构性字段必须存在**（可以为空），形状与包/core 来的模块一致。
+    """
+    payload = {"batch_id": BATCH, "stage": "DRIE", "modules": modules()}
+    d = client.post("/api/run/continue", json=payload).json()
+    m = d["module"]
+    for k in ("key_values", "params", "param_defs", "param_inputs",
+              "param_outputs", "formulas", "material", "annotations"):
+        assert k in m, f"续做模块缺字段 {k}"
+    assert m["key_values"] == {} and m["sim_result"] is None    # 不继承结果，但字段在
+    assert isinstance(m["param_inputs"], list) and isinstance(m["formulas"], dict)

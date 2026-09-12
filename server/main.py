@@ -335,6 +335,20 @@ def api_run_continue(req: RunContinueReq):
         **{k: v for k, v in base.items()
            if k not in ("core_run_id", "core_parent_run_id", "core_recipe_id",
                         "key_values", "sim_result", "core_date", "id")},
+        # ⚠️ 新 run 的**结果**字段必须"存在但为空"：
+        #    以前是把 key_values/sim_result 整个删掉 ⇒ 画布模块缺字段 ⇒
+        #    前端面板 `m.key_values[k]` 抛错、**整屏变白**（2026-09-13 owner"点 DRIE 什么都不见了"）。
+        #    语义不变（不继承上游结果），但形状完整。
+        "key_values": {},
+        "sim_result": None,
+        # 结构性字段一律给默认值，保证任何来源的模块形状一致（包/core 来的模块也可能缺）
+        "params": base.get("params") or {},
+        "param_defs": base.get("param_defs") or {},
+        "param_inputs": base.get("param_inputs") or [],
+        "param_outputs": base.get("param_outputs") or [],
+        "formulas": base.get("formulas") or {},
+        "material": base.get("material") or {},
+        "annotations": base.get("annotations") or [],
         "id": f"md_{_uuid.uuid4().hex[:8]}",
         "name": (req.title or (base.get("name") or "") or f"{req.stage} 续做"),
         "x": float(base.get("x") or 0) + 260,

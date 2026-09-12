@@ -58,6 +58,16 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
     if not batch:
         return {"ok": False, "error": f"无法确定批次：{path.name}"}
 
+    # ⓪ 先给**所有**模块补齐结构性字段（老工程/续做生成的模块可能缺 key_values 等 ⇒
+    #    前端面板会抛错并整屏变白；语义不变，"空就是空"，但形状必须完整）
+    for _m in (proj.get("modules") or []):
+        for _k, _dflt in (("key_values", {}), ("params", {}), ("param_defs", {}),
+                          ("param_inputs", []), ("param_outputs", []), ("formulas", {}),
+                          ("material", {}), ("annotations", [])):
+            if not _m.get(_k):
+                _m[_k] = dict(_dflt) if isinstance(_dflt, dict) else list(_dflt)
+        _m.setdefault("sim_result", None)
+        _m.setdefault("doe", None)
     rows = _core_runs(batch)
     by_run = {m.get("core_run_id"): m for m in mods if m.get("core_run_id")}
     id_of = {rid: m.get("id") for rid, m in by_run.items() if rid}

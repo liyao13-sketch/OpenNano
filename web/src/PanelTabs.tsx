@@ -2,9 +2,17 @@ import { useEffect, useState } from 'react'
 import { api } from './api'
 import type { Module } from './types'
 
-export default function PanelTabs({ module, onUpdate }: {
+export default function PanelTabs({ module: raw, onUpdate }: {
   module: Module; onUpdate: (p: Partial<Module>) => void }) {
   const [tab, setTab] = useState<'params'|'doe'|'opt'|'sim'>('params')
+  /* 字段归一：包/core/续做来的模块可能缺字段 ⇒ 任何子页签直接访问都会抛错并白屏 */
+  const module: Module = {
+    ...raw,
+    params: raw.params || {}, param_defs: raw.param_defs || {},
+    param_outputs: raw.param_outputs || [], param_inputs: raw.param_inputs || [],
+    key_values: raw.key_values || {}, formulas: raw.formulas || {},
+    material: raw.material || {}, annotations: raw.annotations || [],
+  }
 
   return (
     <div>

@@ -8,6 +8,7 @@ import Settings from './Settings'
 import KbBrowser from './KbBrowser'
 import BatchPanel from './BatchPanel'
 import Dock from './Dock'
+import ErrorBoundary from './ErrorBoundary'
 import PanelTabs from './PanelTabs'
 import type { Module, Library, CatalogItem, Equipment } from './types'
 
@@ -810,7 +811,17 @@ export default function App() {
     } finally { setSending(false) }
   }
 
-  const m: Module | undefined = selectedNode?.data.module
+  /* 面板用的模块：**字段归一**。模块可能来自包/core/续做，形状不一定一致
+     （2026-09-13：续做生成的模块缺 `key_values` ⇒ 面板 `m.key_values[k]` 抛错 ⇒ 整屏变白）。
+     这里把结构性字段统一补成空值，语义不变（空就是空），但渲染永远安全。 */
+  const rawM: Module | undefined = selectedNode?.data.module
+  const m: Module | undefined = rawM && {
+    ...rawM,
+    params: rawM.params || {}, param_defs: rawM.param_defs || {},
+    param_inputs: rawM.param_inputs || [], param_outputs: rawM.param_outputs || [],
+    formulas: rawM.formulas || {}, key_values: rawM.key_values || {},
+    material: rawM.material || {}, annotations: rawM.annotations || [],
+  }
   const catEquipment: Equipment[] = m && library ? library.equipment[m.subtype] || [] : []
   // 入射膜堆叠(曝光类节点 Process Link 用)
   const inStack = m ? upstreamStack(m.id) : []
@@ -829,6 +840,7 @@ export default function App() {
   const stackDesc = ['Si', ...inStack.map(l => l.film + (l.thickness ? ` (${l.thickness} nm)` : ''))].join(' / ')
 
   return (
+    <ErrorBoundary label="主界面">
     <div className="app">
       <div className="topbar">
         <h1>OpenNano</h1>
@@ -1031,6 +1043,7 @@ export default function App() {
           </ReactFlow>
         </div>
         <div className="panel">
+          <ErrorBoundary label="节点面板" onReset={() => setSelectedId(null)}>
           {!m && <div style={{ color:'var(--muted)' }}>点击画布节点查看详情<br/>（左侧点工艺添加到画布，节点上下端口拖线连接）</div>}
           {m && (
             <>
@@ -1188,6 +1201,7 @@ export default function App() {
               </div>
             </>
           )}
+          </ErrorBoundary>
         </div>
       </div>
       <Dock
@@ -1331,5 +1345,6 @@ export default function App() {
       })()}
       {edgeTip && <div style={{ position:'fixed', left: edgeTip.x + 14, top: edgeTip.y + 12, zIndex:1500, background:'var(--raise)', border:'1px solid var(--border-2)', borderRadius:10, padding:'8px 12px', fontSize:12, pointerEvents:'none', boxShadow:'var(--shadow-2)' }} dangerouslySetInnerHTML={{ __html: edgeTip.html }} />}
     </div>
+    </ErrorBoundary>
   )
 }
