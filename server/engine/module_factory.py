@@ -11,15 +11,41 @@ from .process_catalog import (CATEGORIES, CATEGORY_LABELS, METROLOGY,
 from .schema import new_id
 
 
-def module_catalog() -> list[dict]:
-    """模块目录(左栏):PROCESS(蓝,9 大类) + METROLOGY(紫,15 项)。"""
+def _family_of(subtype: str, library: LibraryStore | None) -> str:
+    """这个 subtype 造出来的模块会落到哪个**工艺族**。
+
+    左栏方块的色 = 画布上那个方块的色 ⇒ 两边必须同源（owner 2026-09-13：左栏方块按族上色）。
+    process 类要让**默认设备名**参与判族（同属 graphic，`Spin Coating` 是 resist、
+    `UV Exposure` 是 expose）；查不到默认设备就退回类别名。
+    """
+    from .process_catalog import METRO_FAMILY
+    if subtype in CATEGORIES:
+        eq_name = ""
+        if library is not None:
+            eid = library.default_equipment_id(subtype)
+            eq = library.get_equipment(eid) if eid else None
+            eq_name = (eq or {}).get("name", "") or ""
+        return family_for(eq_name or CATEGORY_LABELS[subtype], subtype)
+    return METRO_FAMILY.get(subtype, "metro")
+
+
+def module_catalog(library: LibraryStore | None = None) -> list[dict]:
+    """模块目录(左栏):PROCESS(9 大类) + METROLOGY(16 项)。
+
+    每项带上 `family/family_label` ⇒ 前端左栏方块直接用**画布同一套族色**
+    （此前是"9 个工艺全一个靛紫、16 个检测全一个紫罗兰"，看不出谁是谁）。
+    """
     items = []
     for cat in CATEGORIES:
+        fam = _family_of(cat, library)
         items.append({"group": "PROCESS", "kind": "process", "subtype": cat,
-                      "name": CATEGORY_LABELS[cat], "desc": CATEGORY_LABELS[cat]})
+                      "name": CATEGORY_LABELS[cat], "desc": CATEGORY_LABELS[cat],
+                      "family": fam, "family_label": family_label(fam)})
     for sub, name, desc in METROLOGY:
+        fam = _family_of(sub, library)
         items.append({"group": "METROLOGY", "kind": "inspect", "subtype": sub,
-                      "name": name, "desc": desc})
+                      "name": name, "desc": desc,
+                      "family": fam, "family_label": family_label(fam)})
     return items
 
 
@@ -46,7 +72,7 @@ def build_module(subtype: str, library: LibraryStore | None, name: str | None = 
                     inputs = list(eq.get("inputs", []))
                     outputs = list(eq.get("outputs", []))
                     formulas = dict(eq.get("formulas", {}))
-        fam = family_for(equipment_name or CATEGORY_LABELS[subtype], subtype)
+        fam = _family_of(subtype, library)
         return {
             "id": new_id("md"), "kind": kind, "subtype": subtype, "name": name,
             "x": x, "y": y,
@@ -58,8 +84,8 @@ def build_module(subtype: str, library: LibraryStore | None, name: str | None = 
             "doe": None, "annotations": [], "sim_result": None,
         }
     # metrology / 其它:表征节点按其测量能力输出接口参数,参与下游传递
-    from .process_catalog import METROLOGY_OUTPUTS, METRO_FAMILY
-    mfam = METRO_FAMILY.get(subtype, "metro")
+    from .process_catalog import METROLOGY_OUTPUTS
+    mfam = _family_of(subtype, library)
     meta = next((m for m in METROLOGY if m[0] == subtype), None)
     nm = name or (meta[1] if meta else subtype)
     return {

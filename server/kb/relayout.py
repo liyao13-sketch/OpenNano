@@ -25,7 +25,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-PROJECTS_DIR = Path.home() / ".opennano" / "projects"
+# 路径的唯一来源在 `opennano_config`（可用 OPENNANO_PROJECTS_DIR 覆盖）
+from opennano_config import PROJECTS_DIR
 
 _LINK_RECORDED = "recorded"
 

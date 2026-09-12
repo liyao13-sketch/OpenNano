@@ -18,9 +18,12 @@ from pathlib import Path
 from sqlalchemy import create_engine, select, func, text
 from sqlalchemy.orm import sessionmaker
 
+from opennano_config import DB_PATH as _DB_PATH
+
 from .models import Base, KnowledgeEntry
 
-DEFAULT_DB = Path.home() / ".opennano" / "opennano.db"
+#: 路径的**唯一来源**在 `opennano_config`（可用 `OPENNANO_DB` 覆盖；测试指向临时库）
+DEFAULT_DB = _DB_PATH
 
 #: 来源分档 → 允许的可靠度取值区间(闭区间)
 SOURCE_TIER_RULES = {

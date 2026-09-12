@@ -19,6 +19,7 @@ from engine import (CATEGORIES, CATEGORY_LABELS, PROCESSES, METROLOGY,
 from engine import rules as rule_engine
 from engine.process_catalog import family_for, family_label, FAMILY_LABELS
 from kb.store import KBStore
+from opennano_config import PROJECTS_DIR    # 用户数据目录的唯一来源（OPENNANO_PROJECTS_DIR 可覆盖）
 from kb.ingest import ingest_all
 from kb import core_source as core
 from kb import expack as expack_engine
@@ -30,7 +31,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 # 全局单例(读 ~/.opennano/library.json 与 ~/.opennano/opennano.db)
 LIB = LibraryStore()
 KB = KBStore()
-PROJECT_PATH = Path.home() / ".opennano" / "project.json"
+# （原 PROJECT_PATH = ~/.opennano/project.json 是**死代码**，全仓无引用 ⇒ 2026-09-13 删）
 
 
 # ---------- 请求/响应模型 ----------
@@ -93,7 +94,7 @@ def api_catalog():
         ],
         "metrology": [{"subtype": s, "name": n, "desc": d} for s, n, d in METROLOGY],
         "families": [{"key": k, "label": v} for k, v in FAMILY_LABELS.items()],
-        "module_catalog": module_catalog(),
+        "module_catalog": module_catalog(LIB),
     }
 
 
@@ -684,7 +685,6 @@ def _xlsx_response(data: bytes, stem: str):
 
 
 # ---------- P1: 工程(画布) · 多项目 ----------
-PROJECTS_DIR = Path.home() / ".opennano" / "projects"
 
 
 def _project_path(name: str) -> Path:
