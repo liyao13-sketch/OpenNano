@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -79,11 +80,46 @@ def check(verbose: bool = True) -> dict:
     return res
 
 
+def manifest_obj(res: dict | None = None) -> dict:
+    """给数据线的**跨线路径清单**（他们承诺不擅自改名/移动的那批）。
+
+    用途：数据线脚本可直接消费（例：改名前置检查），也让"14 条"从我的代码里**变成一份可核对的清单**。
+    """
+    res = res or check(verbose=False)
+    ws = _workspace()
+    return {
+        "kind": "opennano-crossline-pointers",
+        "version": 1,
+        "generated_from": "OpenNano/server/kb/pointer_check.py",
+        "workspace": str(ws),
+        "rule": ("这 14 条路径属【跨线】命名：数据线**承诺不擅自改名/移动**；"
+                 "如确需变更，请**提前通知工具线**并同步跑一次 kb/pointer_check，避免工具侧 CI 变红而无从判断。"
+                 "反向：工具线**只读**这些路径（core/*.csv 为派生物，权威在 ingest/*.py）。"),
+        "pointers": [
+            {"name": n, "path": rel, "exists": (ws / rel).exists()}
+            for n, rel in sorted(CROSSLINE_POINTERS.items())
+        ],
+        "forbidden": [{"token": k, "why": v} for k, v in FORBIDDEN.items()],
+        "check": {"ok": res["ok"], "checked": res["checked"], "missing": res["missing"],
+                  "forbidden_hits": res["forbidden_hits"]},
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="跨线指针校验（只读）")
     ap.add_argument("--strict", action="store_true", help="有失效即退出码 1")
+    ap.add_argument("--json", action="store_true", help="输出 JSON（供数据线脚本消费）")
+    ap.add_argument("--write-manifest", metavar="路径",
+                    help="把清单写成 JSON 文件（跨线**不许擅自改名/移动**的路径清单）")
     a = ap.parse_args()
-    r = check()
+    r = check(verbose=not (a.json or a.write_manifest))
+    manifest = manifest_obj(r)
+    if a.write_manifest:
+        Path(a.write_manifest).expanduser().write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"清单已写入：{a.write_manifest}（{len(manifest['pointers'])} 条）")
+    if a.json:
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 1 if (a.strict and not r["ok"]) else 0
 
 
