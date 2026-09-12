@@ -91,7 +91,9 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
             "parent_run_id": (m.get("core_parent_run_id") or m.get("parent_run_id")
                               or parent_map.get(rid) or ""),
             "sample_id": (m.get("core_sample_id") or m.get("sample_id") or ""),
-            "run_nature": (m.get("core_run_nature") or m.get("run_nature") or ""),
+            # 语义标注常只在 core 侧 ⇒ 模块没有时从 core/runs.csv 读（同 sample_id 的处理）
+            "run_nature": (m.get("core_run_nature") or m.get("run_nature")
+                           or _nature_map().get(rid) or ""),
             "status": m.get("run_state") or "planned",
             "tool_id": m.get("machine_name") or "",
             "date": (m.get("core_date") or ""),
@@ -102,6 +104,37 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
         })
     rows.sort(key=lambda r: (r["stage_seq"], r["stage"], r["seq"]))
     return rows
+
+
+_NATURE_CACHE: dict[str, str] | None = None
+
+
+def _nature_map() -> dict[str, str]:
+    """core/runs.csv 的 run_id → run_nature（契约 v0.1.4；进程内缓存，只读）。"""
+    global _NATURE_CACHE
+    if _NATURE_CACHE is not None:
+        return _NATURE_CACHE
+    out: dict[str, str] = {}
+    for r in _core_runs_rows():
+        rid = (r.get("run_id") or "").strip()
+        nat = (r.get("run_nature") or "").strip()
+        if rid and nat:
+            out[rid] = nat
+    _NATURE_CACHE = out
+    return out
+
+
+def _core_runs_rows() -> list[dict]:
+    """只读 core/runs.csv（失败返回 []，不抛）。"""
+    try:
+        import csv
+        p = core_runs_path()
+        if p and p.exists():
+            with p.open(newline="", encoding="utf-8-sig") as f:
+                return list(csv.DictReader(f))
+    except Exception:                             # noqa: BLE001
+        pass
+    return []
 
 
 _PARENT_CACHE: dict[str, str] | None = None
