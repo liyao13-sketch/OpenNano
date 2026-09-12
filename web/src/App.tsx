@@ -608,12 +608,24 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })).json()
       if (!pv.count) { alert('没有需要追加的 run（core 里都已有）\n\n' + (pv.note || '')); return }
       const purpose = prompt(`将追加 ${pv.count} 个 run：\n${pv.new_runs.join('\n')}\n\n实验目的(可空):`, '') ?? ''
-      const size = await download('/api/expack/append', { ...proj, purpose })
+      const saveDir = prompt('落盘目录（便于交《数据》验收，可空=只下载）:', '~/Downloads/opennano_append') ?? ''
+      const r = await fetch('/api/expack/append', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...proj, purpose, save_dir: saveDir }) })
+      if (!r.ok) throw new Error(`${r.status}`)
+      const info = r.headers.get('X-Append-Info') ? JSON.parse(decodeURIComponent(r.headers.get('X-Append-Info')!)) : {}
+      const blob = await r.blob()
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+      a.download = `${info.batch_id || projectName}_append.zip`; a.click()
       pushLog('edit', `导出追加包「${projectName}」：${pv.new_runs.length} 个新 run`)
-      alert(`追加包已导出（${(size / 1024).toFixed(1)} KB）\n\n`
+      const dates = Object.entries(info.date_source || {}).map(([k, v]: any) => `  ${k}: ${v}`).join('\n')
+      const samples = Object.entries(info.sample_id_source || {}).map(([k, v]: any) => `  ${k}: ${v}`).join('\n')
+      alert(`追加包已导出（${(blob.size / 1024).toFixed(1)} KB）\n\n`
         + `含 ${pv.new_runs.length} 个新 run：${pv.new_runs.join(', ')}\n`
-        + `manifest.source=tool-append ⇒ **不会被 core-slice 规则跳过**；既有源优先，老行不会被覆盖。\n\n`
-        + `入库：交《数据》会话跑 datasets_folder.py --dry-run → build_core.py。`)
+        + (samples ? `\nsample_id 来源（继承 core，不凭空造号）:\n${samples}\n` : '')
+        + (dates ? `\nrun 日期来源:\n${dates}\n` : '')
+        + (info.saved_to ? `\n已落盘: ${info.saved_to}\n` : '')
+        + `\nmanifest.source=tool-append ⇒ 不会被 core-slice 规则跳过；既有源优先，老行不会被覆盖。`)
     } catch (e: any) { alert('导出失败: ' + e.message) }
   }
 

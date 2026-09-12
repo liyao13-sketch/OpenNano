@@ -73,6 +73,21 @@ def _csv_bytes(header: list[str], rows: list[list]) -> bytes:
     return buf.getvalue().encode()
 
 
+def core_facts(run_id: str) -> dict:
+    """从 core/runs.csv 取该 run 的**真实归属**（只读、零推断）。
+
+    用途：画布模块不带 sample/die 时（包内模块往往没有 `core_sample_id`），
+    应当**继承 core 里该 run 的真实 sample_id**，而不是留空；**绝不凭空造 die 号**
+    （数据线 2026-09-12：补 die 编号有真实性代价，须owner拍板）。
+    """
+    for r in read_core_table("runs"):
+        if (r.get("run_id") or "").strip() == run_id:
+            return {k: (r.get(k) or "") for k in
+                    ("sample_id", "stage_seq", "date", "tool_id", "recipe_id",
+                     "batch_id", "stage", "env_temp_c", "env_rh_pct", "status")}
+    return {}
+
+
 def _module_by_run(project: dict) -> dict[str, dict]:
     return {m.get("core_run_id"): m for m in (project.get("modules") or []) if m.get("core_run_id")}
 
@@ -94,17 +109,40 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
     now = datetime.now().strftime("%Y-%m-%d")
 
     # ---- runs：只带新 run；parent/stage_seq 照画布（工具算好的值）
-    run_rows = []
+    run_rows, date_src, sample_src = [], {}, {}
     for rid in new:
         m = mods.get(rid) or {}
         parts = rid.rsplit("-", 2)
         stage = parts[1] if len(parts) == 3 else ""
+        parent = m.get("core_parent_run_id") or ""
+        # ① sample_id：模块上没有时，**继承 core 里该 run（或它的上游）的真实归属**
+        sample = (m.get("core_sample_id") or m.get("sample_id") or "").strip()
+        if not sample:
+            src = m.get("core_run_id") or rid
+            sample = (core_facts(src).get("sample_id") or core_facts(parent).get("sample_id") or "")
+            if sample:
+                sample_src[rid] = f"继承自 core:{src if core_facts(src).get('sample_id') else parent}"
+        # ② stage_seq：模块没给就取 core 里同 stage 的权威值
+        if not m.get("core_stage_seq"):
+            for r in read_core_table("runs"):
+                if ((r.get("batch_id") or "").strip() == batch
+                        and (r.get("stage") or "").strip() == stage
+                        and (r.get("stage_seq") or "").strip()):
+                    m["core_stage_seq"] = r["stage_seq"]
+                    break
+        # ③ date：**用画布上该 run 的计划日期**；缺失才退回今天，并标注来源
+        date = (m.get("core_date") or "").strip()
+        if date:
+            date_src[rid] = "画布计划日期"
+        else:
+            date = now
+            date_src[rid] = "**未设计划日期 ⇒ 退回导出当天，请核对**"
         run_rows.append([rid, m.get("core_batch_id") or batch,
-                         m.get("core_sample_id") or "", stage,
-                         m.get("core_stage_seq", ""), m.get("core_date") or now,
+                         sample, stage,
+                         m.get("core_stage_seq", ""), date,
                          "", "", m.get("equipment_name") or stage, m.get("machine_name") or "",
                          m.get("core_recipe_id") or "", operator or "",
-                         purpose or "", m.get("core_parent_run_id") or "",
+                         purpose or "", parent,
                          "", "", "planned", m.get("comment") or ""])
 
     # ---- steps：菜单灌入的步优先；否则用模块 params 生成的组
@@ -153,6 +191,7 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
         "project": project.get("name", ""), "purpose": purpose, "operator": operator,
         "new_runs": new, "runs": len(new),
         "only_new_rows": True,
+        "sample_id_source": sample_src, "date_source": date_src,
         "note": ("追加包：只含尚未入 core 的行；batches/samples/recipes 留空。"
                  "按既有通道增量并入（既有源优先，老行不会被覆盖）。"
                  "**禁止**把它当第二权威去改老行。"),
@@ -192,6 +231,7 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
             z.writestr(f"{batch}_append/{n}", d)
     return buf.getvalue(), {
         "ok": True, "batch_id": batch, "new_runs": new,
+        "sample_id_source": sample_src, "date_source": date_src,
         "runs": len(run_rows), "steps": len(step_rows),
         "measurements": len(meas_rows), "observations": len(obs_rows),
         "skipped_obs": skipped_obs,
