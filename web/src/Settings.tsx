@@ -34,7 +34,7 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
           {(['equipment','params','machines','defaults','rules'] as const).map(t => (
             <div key={t} onClick={() => setTab(t)}
               style={{ padding:'8px 18px', cursor:'pointer', fontWeight: tab===t ? 700 : 400,
-                color: tab===t ? 'var(--accent)' : 'var(--muted)', borderBottom: tab===t ? '2px solid var(--accent)' : '2px solid transparent' }}>
+                color: tab===t ? 'var(--accent-text)' : 'var(--muted)', borderBottom: tab===t ? '2px solid var(--accent)' : '2px solid transparent' }}>
               {{equipment:'工艺模板',params:'参数',machines:'机台',defaults:'默认',rules:'影响规则'}[t]}
             </div>
           ))}
@@ -117,7 +117,7 @@ function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
         <div key={r.id || i} style={{ border:'1px solid var(--border)', borderRadius:10, padding:'8px 10px', marginBottom:8, background:'var(--surface)' }}>
           <div className="row">
             <input list="rule-params" value={r.from || ''} placeholder="源(参数/属性)" onChange={e => upd(i, { from: e.target.value })} />
-            <span style={{ color:'var(--accent)' }}>→</span>
+            <span style={{ color:'var(--accent-text)' }}>→</span>
             <input list="rule-params" value={r.to || ''} placeholder="目标参数" onChange={e => upd(i, { to: e.target.value })} />
             <select value={r.sign || ''} onChange={e => upd(i, { sign: e.target.value })} style={{ width:86 }}>
               <option value="">定性?</option><option value="+">正影响</option>

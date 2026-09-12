@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- OpenNano 图标：把「节点方块」本身画成图标（左色条 + 两条信息线），与画布/左栏同一套语言 -->
+  <rect x="1" y="1" width="30" height="30" rx="8" fill="#0e0f11"/>
+  <rect x="1" y="1" width="30" height="30" rx="8" fill="none" stroke="#2a2c33"/>
+  <rect x="1" y="9" width="3" height="14" rx="1.5" fill="#6d78dc"/>
+  <rect x="7" y="10" width="17" height="3.2" rx="1.6" fill="#f7f8f8"/>
+  <rect x="7" y="16" width="12" height="2.6" rx="1.3" fill="#8a8f98"/>
+  <rect x="7" y="21" width="7" height="2.6" rx="1.3" fill="#4cb782"/>
+</svg>

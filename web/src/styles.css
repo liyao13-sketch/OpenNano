@@ -17,7 +17,7 @@
   --text:    #f7f8f8;
   --text-2:  #d0d1d3;
   --muted:   #8a8f98;
-  --faint:   #62666d;
+  --faint:   #7d818a;   /* 2026-09-13：原 #62666d 对比度只 3.3 ⇒ 按owner「所有文本 ≥4.5:1」提亮 */
 
   /* —— 强调色(Linear 靛紫) —— */
   --accent:      #5e6ad2;
@@ -25,6 +25,10 @@
   --accent-soft: rgba(94, 106, 210, .16);
   --accent-ring: rgba(94, 106, 210, .38);
   --accent-fg:   #ffffff;
+  /* —— 强调色三态（Linear 原则④ 默认/悬浮提亮/激活压暗）+ 文字专用档 ——
+     文字**不能**直接用 --accent（#5e6ad2 on 面板只有 4.08 < 4.5）⇒ 文字用 --accent-text —— */
+  --accent-lo:   #4c56b4;
+  --accent-text: #6d78dc;
 
   /* —— 语义色 —— */
   --ok:   #4cb782;
@@ -43,7 +47,7 @@
 
   /* 工艺族配色(低饱和,Linear 风) */
   --fam-resist:#d4a24e; --fam-expose:#7d8ce0; --fam-etch:#e5645c; --fam-dep:#4cb782;
-  --fam-wet:#4ea7fc; --fam-dope:#c9b04e; --fam-bond:#d98a5c; --fam-pack:#6b7280;
+  --fam-wet:#4ea7fc; --fam-dope:#c9b04e; --fam-bond:#d98a5c; --fam-pack:#7a808c;   /* pack 原 #6b7280 当文字只有 3.97 ⇒ 提亮到 4.5 */
   --fam-thermal:#c96a6a; --fam-assist:#7c8598; --fam-metro:#a78bfa;
   --fam-metro-form:#45b8ac; --fam-metro-comp:#d678ad; --fam-metro-opt:#a78bfa; --fam-metro-elec:#a3c76d;
   /* 节点大类 */
@@ -57,6 +61,7 @@
   --text:#ffffff; --text-2:#f2f2f2; --muted:#c9c9c9; --faint:#a6a6a6;
   --accent:#4d9fff; --accent-hi:#79bcff; --accent-soft:rgba(77,159,255,.22);
   --accent-ring:rgba(77,159,255,.65); --accent-fg:#000000;
+  --accent-lo:#2f7fd6; --accent-text:#79bcff;
   --ok:#3ddc84; --warn:#ffcc4d; --bad:#ff6b6b; --info:#6bb6ff; --violet:#c9a0ff;
   --shadow-1:0 0 0 1px rgba(255,255,255,.14); --shadow-2:0 10px 30px rgba(0,0,0,.85);
   --fam-resist:#ffb84d; --fam-expose:#7fa8ff; --fam-etch:#ff6b6b; --fam-dep:#4ddb8a;
@@ -116,7 +121,7 @@ body {
   transition: background .12s ease, border-color .12s ease, opacity .12s ease;
 }
 .btn:hover { background: var(--accent-hi); }
-.btn:active { transform: translateY(.5px); }
+.btn:active { background: var(--accent-lo); transform: translateY(.5px); }   /* 原则④：激活压暗 */
 .btn:disabled { opacity: .45; cursor: default; }
 .btn.ghost {
   background: var(--surface);
@@ -548,13 +553,14 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   --border-2:rgba(15,23,42,.22);
   --text:    #0f172a;
   --text-2:  #334155;
-  --muted:   #64748b;
-  --faint:   #94a3b8;
+  --muted:   #5e6d84;   /* 原 #64748b：画布底 4.39 / 悬浮层 4.20 ⇒ 压深到 ≥4.5 */
+  --faint:   #677281;   /* 原 #94a3b8 在白底上只有 2.56 ⇒ 压深到 4.5 */
   --accent:      #4f46e5;
   --accent-hi:   #4338ca;
   --accent-soft: rgba(79,70,229,.10);
   --accent-ring: rgba(79,70,229,.26);
   --accent-fg:   #ffffff;
+  --accent-lo:   #3730a3; --accent-text: #4f46e5;
   --ok:#0e7a4d; --warn:#b45309; --bad:#c0362c; --info:#1d4ed8; --violet:#6d28d9;
   --shadow-1: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04);
   --shadow-2: 0 16px 40px rgba(15,23,42,.14);
@@ -734,26 +740,32 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 .sidebar h3 .dim { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 9.5px; }
 .lib-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 
-/* —— 长方块：与画布节点**同形**（左边色条 + 圆角 + 渐变 + 顶部高光）—— */
+/* —— 长方块：与画布节点**同形**（左边色条 + 圆角 + 渐变 + 顶部高光）
+   2026-09-13 owner：①去掉中文小字（名字进 tooltip）②缩写**居中** ③方块按**工艺族**上色
+   （族的判法在后端 `_family_of`，与画布方块同一个 family ⇒ 两边同色）。—— */
 .lib-tile {
   position: relative; overflow: hidden; cursor: grab; user-select: none;
-  display: flex; flex-direction: column; justify-content: center; gap: 0;
-  min-height: 38px; padding: 4px 7px 4px 9px;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 34px; padding: 0 6px;
   border-radius: 9px;
   background: var(--grad-surface);
   border: 1px solid var(--border);
-  border-left: 2px solid var(--tile-accent, var(--accent));
+  border-left: 3px solid var(--tile-accent, var(--accent));
   box-shadow: var(--top-sheen), var(--shadow-1);
   transition: transform .14s var(--ease), border-color .14s var(--ease), box-shadow .14s var(--ease);
 }
 .lib-tile:active { cursor: grabbing; }
+/* 族色只做「小面积」编码（Linear 原则④/⑦：强调/彩色不进大面积背景）——
+   一条 3px 左色条 + 7% 的极淡底染 + hover 外发光，正文仍是无彩玻璃。 */
+.lib-tile::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: var(--tile-accent, var(--accent)); opacity: .07;
+}
 .lib-tile .abbr {
+  position: relative; z-index: 1;
   font-family: var(--mono); font-size: 11.5px; font-weight: 700;
   letter-spacing: .03em; color: var(--text); white-space: nowrap;
-}
-.lib-tile .cn {
-  font-size: 9.5px; line-height: 1.25; color: var(--muted); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
+  text-align: center; line-height: 1;
 }
 .lib-tile:hover {
   transform: translateY(-1px);
@@ -775,27 +787,20 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
   .lib-grid .lib-tile:nth-child(3n)::after { animation-delay: 2.3s; }
   .lib-grid .lib-tile:nth-child(5n)::after { animation-delay: 3.4s; }
   @keyframes tile-sheen { 0% { transform: translateX(-170%); } 30%, 100% { transform: translateX(320%); } }
-  /* 两类各有自己的底色微光：工艺=靛紫 / 检测=紫罗兰 */
-  .lib-tile[data-accent="process"] { background-image: linear-gradient(135deg, rgba(94,106,210,.10), transparent 58%); }
-  .lib-tile[data-accent="metro"]   { background-image: linear-gradient(135deg, rgba(167,139,250,.10), transparent 58%); }
 }
-:root[data-theme="light"] .lib-tile[data-accent="process"] { background-image: linear-gradient(135deg, rgba(79,70,229,.09), transparent 58%); }
-:root[data-theme="light"] .lib-tile[data-accent="metro"]   { background-image: linear-gradient(135deg, rgba(109,40,217,.09), transparent 58%); }
 
 /* —— 矮窗口再收一档：25 个方块（13 行）必须**不滚动**就能看全 ——
-   基准 38px/行 ≈ 640px 总高；840px 以下收到 34px，760px 以下再收到 30px。 */
+   基准 34px/行（只有一行缩写）≈ 590px 总高；840px 以下 30px，760px 以下 26px。 */
 @media (max-height: 840px) {
-  .lib-tile { min-height: 34px; padding: 3px 6px 3px 8px; }
+  .lib-tile { min-height: 30px; }
   .lib-tile .abbr { font-size: 11px; }
-  .lib-tile .cn { font-size: 9px; }
   .lib-grid { gap: 5px; }
   .sidebar h3 { margin: 8px 4px 5px; }
   .sidebar { padding: 6px 8px 10px; }
 }
 @media (max-height: 760px) {
-  .lib-tile { min-height: 30px; padding: 2px 6px 2px 8px; border-radius: 8px; }
+  .lib-tile { min-height: 26px; border-radius: 8px; }
   .lib-tile .abbr { font-size: 10.5px; }
-  .lib-tile .cn { font-size: 9px; }
   .lib-grid { gap: 4px; }
   .sidebar h3 { margin: 6px 4px 4px; font-size: 10px; }
 }
@@ -859,6 +864,17 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
     transform: translateX(-180%); animation: node-sheen 1.3s var(--ease); pointer-events: none;
   }
 }
+/* —— 浅色主题：流光换成**深色**扫光（白底上白色流光看不见）—— */
+:root[data-theme="light"] .lib-tile::after {
+  background: linear-gradient(100deg, transparent, rgba(15,23,42,.05), transparent);
+}
+:root[data-theme="light"] .proc-node::after {
+  background: linear-gradient(100deg, transparent, rgba(15,23,42,.05), transparent);
+}
+:root[data-theme="light"] .panel .card::after {
+  background: linear-gradient(100deg, transparent, rgba(15,23,42,.04), transparent);
+}
+
 /* 详情栏定位（::before 需要它做定位上下文） */
 .panel { position: relative; }
 

@@ -22,7 +22,9 @@ export interface Module {
   /** 参数调试线归属（core v0.1.6）：同工序一次参数扫描 + 第几轮 ⇒ 画布显示 run1/run2… */
   tune_id?: string; tune_step?: number | string;
 }
-export interface CatalogItem { group: string; kind: string; subtype: string; name: string; desc: string }
+/* family/family_label：左栏方块按**工艺族**上色（须与画布节点同色）⇒ 由后端 module_catalog 给出 */
+export interface CatalogItem { group: string; kind: string; subtype: string; name: string; desc: string;
+  family?: string; family_label?: string }
 export interface Equipment { id: string; name: string; params: Record<string, ParamDef>;
   inputs: string[]; outputs: string[]; formulas: Record<string, string> }
 export interface Library {

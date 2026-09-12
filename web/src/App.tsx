@@ -32,7 +32,7 @@ function ProcessNode({ data }: any) {
   const rs = m.run_state || 'idle'
   const badge = m.disabled ? { t:'禁', c:'var(--faint)', bg:'transparent', bd:'var(--border)' }
     : isSeason       ? { t:'season', c:'var(--faint)', bg:'transparent', bd:'var(--border-2)' }
-    : rs === 'running' ? { t:'…', c:'var(--accent)', bg:'var(--accent-soft)', bd:'var(--accent)' }
+    : rs === 'running' ? { t:'…', c:'var(--accent-text)', bg:'var(--accent-soft)', bd:'var(--accent)' }
     : rs === 'ok'      ? { t:'✓', c:'var(--ok)', bg:'rgba(76,183,130,.14)', bd:'var(--ok)' }
     : rs === 'stale'   ? { t:'!', c:'var(--warn)', bg:'rgba(212,162,78,.14)', bd:'var(--warn)' }
     : { t:'○', c:'var(--faint)', bg:'transparent', bd:'var(--border)' }
@@ -1069,28 +1069,27 @@ export default function App() {
           <h3>PROCESS<span className="dim">工艺</span></h3>
           <div className="lib-grid">
             {catalog.filter(c => c.group==='PROCESS').map(c => (
-              <div key={c.subtype} className="lib-tile" data-accent="process" draggable
-                style={{ ['--tile-accent' as any]: KIND_COLOR.process }}
-                title={`${c.name} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
+              /* 2026-09-13 owner：去掉中文小字、缩写居中；方块按**工艺族**上色（与画布节点同色）。 */
+              <div key={c.subtype} className="lib-tile" draggable
+                style={{ ['--tile-accent' as any]: FAMILY_COLOR[c.family || ''] || KIND_COLOR[c.kind] }}
+                title={`${c.name}${c.family_label ? ' · ' + c.family_label : ''} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
                 onClick={() => addModule(c)}
                 onDoubleClick={() => insertAfterSelected(c)}
                 onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
                 <span className="abbr">{abbrOf(c)}</span>
-                <span className="cn">{c.name}</span>
               </div>
             ))}
           </div>
           <h3>METROLOGY<span className="dim">检测</span></h3>
           <div className="lib-grid">
             {catalog.filter(c => c.group==='METROLOGY').map(c => (
-              <div key={c.subtype} className="lib-tile" data-accent="metro" draggable
-                style={{ ['--tile-accent' as any]: KIND_COLOR.inspect }}
-                title={`${c.name} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
+              <div key={c.subtype} className="lib-tile" draggable
+                style={{ ['--tile-accent' as any]: FAMILY_COLOR[c.family || ''] || KIND_COLOR[c.kind] }}
+                title={`${c.name}${c.family_label ? ' · ' + c.family_label : ''} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
                 onClick={() => addModule(c)}
                 onDoubleClick={() => insertAfterSelected(c)}
                 onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
                 <span className="abbr">{abbrOf(c)}</span>
-                <span className="cn">{c.name}</span>
               </div>
             ))}
           </div>
@@ -1329,7 +1328,7 @@ export default function App() {
                     <div key={r.id} style={{ borderBottom:'1px dashed var(--border)', paddingBottom:6, marginBottom:6 }}>
                       <div className="row">
                         <span className="chip">{r.from}</span>
-                        <span style={{ color:'var(--accent)' }}>{r.sign || '→'}</span>
+                        <span style={{ color:'var(--accent-text)' }}>{r.sign || '→'}</span>
                         <span className="chip">{r.to}</span>
                         {r.value != null ? (
                           <>
