@@ -249,9 +249,14 @@ def api_batch_list(req: ExpackExportReq):
 
 @app.post("/api/batch/runs")
 def api_batch_runs(req: BatchRunsReq):
-    """某 batch 的 run 链（按 stage_seq 排序 + parent 链 + 状态）。"""
-    from kb import batch_runs as br
-    return br.chain_of(req.modules or [], req.batch_id)
+    """某 batch 的 run 链（parent 链 + 性质 + 并行分支）**＋样品继承树**（core 只读）。"""
+    from kb import batch_runs as br, append_pack as ap
+    res = br.chain_of(req.modules or [], req.batch_id)
+    try:
+        res["sample_tree"] = ap.sample_tree(req.batch_id)      # 契约 v0.1.4：samples.parent_sample_id
+    except Exception as e:                                      # noqa: BLE001
+        res["sample_tree"] = {"error": f"读样品树失败：{e}"}
+    return res
 
 
 @app.post("/api/run/continue")

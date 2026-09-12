@@ -24,6 +24,11 @@ type Run = {
   title: string; recipe_id: string; module_id: string; note: string
   sample_id?: string
 }
+type SNode = {
+  sample_id: string; parent_sample_id: string; position: string; role: string
+  status: string; note: string; children: string[]; runs: string[]
+  run_natures: string[]; nature_label: string
+}
 type ParallelGroup = {
   parent_run_id: string; stage: string; runs: string[]; count: number
   samples: string[]; distinct_samples: number; kind: string; hint: string
@@ -42,7 +47,9 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const [chain, setChain] = useState<{ runs: Run[]; nodes: number; edges: number; roots: string[]
     parallels?: ParallelGroup[]
     natures?: { run_id: string; nature: string; nature_label: string; why: string }[]
-    nature_needs_human?: string[] } | null>(null)
+    nature_needs_human?: string[]
+    sample_tree?: { tree: SNode[]; nodes: Record<string, SNode>; count: number
+                    orphan_parent: string[]; error?: string } } | null>(null)
   const [sample, setSample] = useState('')
   const [sel, setSel] = useState<Run | null>(null)
   const [contract, setContract] = useState<any>(null)
@@ -136,6 +143,18 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     } catch (e: any) { setMsg('❌ 取 group 失败: ' + e.message) } finally { setBusy('') }
   }
 
+  const renderTree = (nodes: SNode[], all: Record<string, SNode>, d: number): any =>
+    nodes.map(n => (
+      <div key={n.sample_id} style={{ marginLeft: d * 16, padding: '2px 0',
+                                      borderLeft: d ? '1px dashed var(--line,#8884)' : undefined,
+                                      paddingLeft: d ? 8 : 0 }}>
+        <code>{n.sample_id}</code>
+        <span style={{ opacity: .8 }}>　{n.nature_label}　runs={n.runs.length}</span>
+        {n.position && <span style={{ opacity: .55 }}>　{n.position}</span>}
+        {n.children.length > 0 && renderTree(n.children.map(c => all[c]).filter(Boolean), all, d + 1)}
+      </div>
+    ))
+
   const natMap: Record<string, { nature: string; nature_label: string; why: string }> = {}
   for (const n of (chain?.natures || [])) natMap[n.run_id] = n
   const runSteps = (sel && (ctx.modules.find(m => m.core_run_id === sel.run_id) as any)?.core_menu_steps) || []
@@ -195,6 +214,17 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 ))}
               </tbody>
             </table>
+
+            {chain?.sample_tree && !chain.sample_tree.error && chain.sample_tree.count > 0 && (
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12 }}>
+                <b>样品继承树（{chain.sample_tree.count} 个样品 · core 只读）</b>
+                <div style={{ opacity: .7, marginBottom: 4 }}>
+                  整片 → die 组 → 组内；run 挂在样品上。⚠️ 组名里的数字是<b>组内颗数</b>、不是 die 位号
+                  {chain.sample_tree.orphan_parent?.length ? ` · 悬空 parent: ${chain.sample_tree.orphan_parent.join('、')}` : ''}
+                </div>
+                {renderTree(chain.sample_tree.tree, chain.sample_tree.nodes, 0)}
+              </div>
+            )}
 
             {chain?.nature_needs_human && chain.nature_needs_human.length > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12,

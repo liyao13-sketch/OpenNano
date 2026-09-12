@@ -310,3 +310,75 @@ def load_run_chain(batch: str) -> dict:
         "skipped": {"measurements_blank": skipped_blank, "obs_out_of_vocab": sorted(set(skipped_obs))},
         "note": "id 全部照抄、未重算；env_* 空就留空（不拿 eq_state 顶替）；异常原样保留",
     }
+
+# ---------------------------------------------------------------- 样品树（core 只读）
+def sample_tree(batch: str) -> dict:
+    """**只读**从 core 建该 batch 的样品继承树（`samples.parent_sample_id` · 契约 v0.1.4）。
+
+    用途：批次视图把样品渲染成 **整片 → die 组 → 组内** 的树，run 挂在叶子上。
+    - 只用 `parent_sample_id`（纯继承），**不推断"哪一颗"**；
+    - 每片带 `children` / `runs`（含 `run_nature`，空=未标）；
+    - 悬空 parent（指向不存在的样品）单独列出，不静默丢。
+    """
+    smp = [s for s in read_core_table("samples")
+           if (s.get("batch_id") or "").strip() == batch]
+    runs = [r for r in read_core_table("runs")
+            if (r.get("batch_id") or "").strip() == batch]
+    by_run: dict[str, list[dict]] = {}
+    for r in runs:
+        by_run.setdefault((r.get("sample_id") or "").strip(), []).append(r)
+    nodes: dict[str, dict] = {}
+    for s in smp:
+        sid = (s.get("sample_id") or "").strip()
+        if not sid:
+            continue
+        my = by_run.get(sid, [])
+        nodes[sid] = {
+            "sample_id": sid,
+            "parent_sample_id": (s.get("parent_sample_id") or "").strip(),
+            "position": s.get("position", ""), "role": s.get("role", ""),
+            "status": s.get("status", ""), "note": s.get("note", ""),
+            "children": [], "runs": [r.get("run_id", "") for r in my],
+            "run_natures": sorted({(r.get("run_nature") or "（未标）") for r in my}),
+            "nature_label": _sample_nature(my),
+        }
+    dangling = []
+    roots = []
+    for sid, n in nodes.items():
+        par = n["parent_sample_id"]
+        if not par:
+            roots.append(sid)
+        elif par in nodes:
+            nodes[par]["children"].append(sid)
+        else:
+            dangling.append(sid)
+    # 组内颗数（DIE4 = 4 颗）仅作展示备注，**不当作位号**
+    for sid, n in nodes.items():
+        if n["children"]:
+            n["child_count"] = len(n["children"])
+    return {
+        "batch_id": batch, "source": "core(只读)",
+        "tree": [nodes[r] for r in sorted(roots)],
+        "nodes": nodes, "count": len(nodes),
+        "orphan_parent": dangling,
+        "note": ("样品组（如 DIE4/DIE15）的数字是**组内颗数**、不是 die 位号；"
+                 "裂片事件的「哪一颗去了哪」未记 ⇒ 工具不推断"),
+    }
+
+
+def _sample_nature(my_runs: list[dict]) -> str:
+    """该样品上 run 的总体性质（供 UI 一眼看：试验片 / 批次级 / 链）。"""
+    if not my_runs:
+        return "无 run"
+    ns = {(r.get("run_nature") or "").strip() for r in my_runs}
+    ns.discard("")
+    if ns == {"trial"}:
+        return "试验片"
+    if ns == {"chain"}:
+        return "链上样品"
+    if ns and ns <= {"batch_level"}:
+        return "批次级（整片/多片）"
+    if ns:
+        return "混合（" + "/".join(sorted(ns)) + "）"
+    return "未标（按 parent 自推）"
+
