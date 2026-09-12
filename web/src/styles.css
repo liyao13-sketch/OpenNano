@@ -657,3 +657,19 @@ body { letter-spacing: -.006em; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ----------------------------------------------------------------------------
+   2026-09-13 修：点击「视图/文件」后菜单被画布挡住
+   原因：顶栏/停靠栏加了 `backdrop-filter` ⇒ 它们各自成为**层叠上下文**，
+        菜单的 z-index:2000 只在其内部有效；而外壳本身没有 z-index，
+        于是 DOM 靠后的 `.main`（画布/面板）与 `.dock` 直接盖在菜单上。
+   修法：给外壳显式定层；并把全屏噪点降到内容之下（只铺在画布/面板上，
+        菜单与浮层保持清晰）。
+   ---------------------------------------------------------------------------- */
+/* 层级表（自下而上）：.main 1 → 噪点 2 → 状态栏 3 → 停靠栏 110 → 顶栏 120 → 模态 2000 → 右键菜单 2500
+   即：噪点只铺在画布/侧栏/右面板这类大面上，**绝不压菜单、顶栏、停靠栏、模态**。 */
+.main      { position: relative; z-index: 1; }
+body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
+.statusbar { position: relative; z-index: 3; }   /* 小字保持清晰 */
+.dock      { z-index: 110; }
+.topbar    { position: relative; z-index: 120; }
