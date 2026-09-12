@@ -496,7 +496,8 @@ def test_布局_主链一条直线_分支挂下面(tmp_path, monkeypatch):
     ldw, i2, i3, ash = (by_run[f"{BATCH}-LDW-0001"], by_run[f"{BATCH}-ICP-0002"],
                         by_run[f"{BATCH}-ICP-0003"], by_run[f"{BATCH}-ASH-0001"])
     assert i2["y"] == ldw["y"], "接棒节点应与上游同一行"
-    assert i3["y"] == i2["y"] + 170, "同工序内的链只能下移一格"
+    from kb.expack import LAYOUT_ROW
+    assert i3["y"] == i2["y"] + LAYOUT_ROW, "同工序内的链只能下移一格（行距见常量）"
     assert ash["y"] == i3["y"], "ASH 应继承 ICP-0003 的行"
 
     # ③ 独立试验（ICP-0001，无上游）挂在主线下方

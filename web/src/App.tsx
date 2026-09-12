@@ -115,9 +115,15 @@ function ProcessNode({ data }: any) {
         )}
       </div>
       {data.showComments && m.comment && (
-        <div style={{ margin:'0 6px 6px', padding:'4px 7px', fontSize:10.5, lineHeight:1.45,
+        /* ⚠️ 备注**限高 3 行**（超出省略号，悬浮看全文）：
+           以前不限高 ⇒ 长备注（DRIE 那条 767 字）把节点撑得很高，
+           与下一格（run2/run3 这类）**视觉叠压**（2026-09-13 owner报障）。 */
+        <div title={m.comment}
+          style={{ margin:'0 6px 6px', padding:'4px 7px', fontSize:10.5, lineHeight:1.45,
           color:'var(--text-2)', background:'rgba(212,162,78,.10)',
-          border:'1px solid rgba(212,162,78,.35)', borderRadius:6, whiteSpace:'pre-wrap' }}>
+          border:'1px solid rgba(212,162,78,.35)', borderRadius:6,
+          display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical',
+          overflow:'hidden', wordBreak:'break-word' }}>
           {m.comment}
         </div>
       )}
@@ -566,13 +572,29 @@ export default function App() {
       source: String(e.src ?? e.src_module), target: String(e.dst ?? e.dst_module),
       ...EDGE_BASE,
       data: { inferred },
+      /* 推断边：虚线 + 细箭头；**不挂文字标签**（一个点扇出 5 条时标签会挤成一团，
+         顶栏已有「推断连线 N 条」图例说明含义） */
       style: inferred
-        ? { strokeDasharray: '6 5', stroke: 'var(--faint)' }
+        ? { strokeDasharray: '6 5', stroke: 'var(--faint)', strokeWidth: 1.2, opacity: .75 }
         : undefined,
-      label: inferred ? '推断' : undefined,
-      labelStyle: inferred ? { fill: 'var(--muted)', fontSize: 9 } : undefined,
-      labelBgStyle: inferred ? { fill: 'transparent' } : undefined,
     }
+  }
+
+  /** 一键自动整理：调后端**同一份**布局算法，只把新坐标写回画布（边/标注不动）。 */
+  const arrangeLayout = async () => {
+    if (nodes.length === 0) return
+    try {
+      const d = await api.arrangeLayout(nodes.map(n => n.data.module as Module),
+                                        edges.map(e => ({ src: e.source, dst: e.target,
+                                                          _link: (e.data as any)?.inferred ? 'inferred' : 'recorded' })))
+      const pos = new Map(d.modules.map((m: any) => [m.id, { x: m.x, y: m.y }]))
+      setNodes(ns => ns.map(n => {
+        const p = pos.get(n.id)
+        return p ? { ...n, position: { x: p.x, y: p.y } } : n
+      }))
+      setTimeout(() => flowRef.current?.fitView({ padding: .2 }), 60)
+      pushLog('view', `自动整理布局：${d.summary?.cols ?? '?'} 列 / ${d.summary?.rows ?? '?'} 行（只改位置）`)
+    } catch (e: any) { pushLog('warn', '自动整理布局失败: ' + e.message) }
   }
 
   const loadProjectObj = (d: any) => {
@@ -886,6 +908,8 @@ export default function App() {
                 onChange={e => setLibCollapsed(e.target.checked)} /> 收起左侧工艺库</label>
               <div className="dropdown-sep" />
               <button className="dropdown-item" onClick={() => { flowRef.current?.fitView({ padding: .2 }); setViewMenu(false) }}>适配视图 (Ctrl+0)</button>
+              <button className="dropdown-item" onClick={() => { setViewMenu(false); arrangeLayout() }}
+                title="按工序列重排所有节点（只改位置，不动连线与标注）—— 方块叠在一起时一键复位">自动整理布局</button>
               <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>显示日志面板</button>
               <button className="dropdown-item" onClick={() => { setDockTab('issues'); setViewMenu(false) }}>显示问题面板 ({issues.length})</button>
               <div className="dropdown-sep" />

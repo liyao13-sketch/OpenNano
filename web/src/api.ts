@@ -43,6 +43,11 @@ export const api = {
       body: JSON.stringify({ name, modules, edges }) }),
   loadProject: (name?: string) => j<any>('/api/project' + (name ? `?name=${encodeURIComponent(name)}` : '')),
   projectList: () => j<{projects:{name:string;modules:number;edges:number;saved_at:string}[]}>('/api/project/list'),
+  /** 一键自动整理画布（只改 x/y；布局算法与后端 relayout/回灌共用同一份） */
+  arrangeLayout: (modules: Module[], edges: any[]) =>
+    j<{ok:boolean; modules: Module[]; summary:any; note:string}>('/api/layout/arrange',
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ modules, edges }) }),
   projectDelete: (name: string) => j<any>('/api/project/' + encodeURIComponent(name), { method:'DELETE' }),
   configExport: () => j<any>('/api/config/export'),
   configImport: (bundle: {library?:any; kb_entries?:any[]}) =>

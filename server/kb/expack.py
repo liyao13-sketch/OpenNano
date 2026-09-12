@@ -748,6 +748,12 @@ def parse_expack(path: Path, lib) -> dict:
     return {"name": batch, "modules": modules, "edges": edges}
 
 
+#: 画布布局常量（与前端 ProcessNode 尺寸 / `kb/layout_audit.py` 的几何假设保持一致）
+LAYOUT_COL = 300          # 列间距（节点宽 190 + 留白 110）
+LAYOUT_ROW = 200          # 行间距（节点最高约 150：含 3 行备注 + 芯片行）
+LAYOUT_X0, LAYOUT_Y0 = 140, 80
+
+
 def _layout_modules(runs_sorted: list[dict], modules: list[dict],
                     edges: list[dict] | None = None) -> None:
     """按**工艺列**摆放节点（就地改 `x`/`y`）。**主链一条直线，分支挂下面。**
@@ -825,16 +831,37 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
                 place(k, nxt)
                 nxt = rows[k] + 1
 
-    mainstream = [r for r in rid_of if nat_of.get(r) != "season"]
+    batch_of = {}
+    for rid, r in zip(rid_of, runs_sorted):
+        b = (r.get("batch_id") or "").strip()
+        if not b and rid.count("-") >= 2:
+            b = rid.rsplit("-", 2)[0]            # 回退：从 run_id 推 batch（仅用于分道）
+        batch_of[rid] = b
+    lanes: dict[str, int] = {}
+    for rid in rid_of:                           # 批次分道：同批一条"泳道"，批次之间不互相错插
+        b = batch_of.get(rid) or ""
+        if b not in lanes:
+            lanes[b] = len(lanes)
+    main_rids = [r for r in rid_of if nat_of.get(r) != "season"]
+    # 按批次分组排：每条泳道内部各自从第 0 行起排（跨批次的边本来就不存在）
+    by_batch: dict[str, list[str]] = {}
+    for rid in main_rids:
+        by_batch.setdefault(batch_of.get(rid) or "", []).append(rid)
+    for b, rids in by_batch.items():
+        lane_base = 0
+        for rid in rids:
+            if not parent.get(rid):
+                place(rid, lane_base)
+                lane_base = max(lane_base, rows[rid] + 1)
+        for rid in rids:                         # 兜底：父不在本图里（跨包续做）
+            if rid not in rows:
+                place(rid, lane_base)
+    # 多批次时给后面的泳道整体下移，避免与上一批的行号撞车
+    if len([b for b in by_batch if b]) > 1:
+        lane_shift = {b: i * (max(rows.values(), default=0) + 2) for i, b in enumerate(by_batch)}
+        for rid in main_rids:
+            rows[rid] = rows.get(rid, 0) + lane_shift.get(batch_of.get(rid) or "", 0)
     seasons = [r for r in rid_of if nat_of.get(r) == "season"]
-    root_row = 0
-    for rid in mainstream:
-        if not parent.get(rid):
-            place(rid, root_row)
-            root_row = rows[rid] + 1
-    for rid in mainstream:                       # 兜底：父不在本图里（跨包续做）
-        if rid not in rows:
-            place(rid, 0)
     # season：全部排到主流程下方（成列但不参与主线行号）
     below = max(rows.values(), default=0) + 2
     for i, rid in enumerate(seasons):
@@ -843,7 +870,7 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
 
     for m, rid in zip(modules, rid_of):
         col = max(seq_of.get(rid, 0) - 1, 0)
-        m["x"], m["y"] = 140 + col * 300, 80 + rows.get(rid, 0) * 170
+        m["x"], m["y"] = LAYOUT_X0 + col * LAYOUT_COL, LAYOUT_Y0 + rows.get(rid, 0) * LAYOUT_ROW
 
 
 #: 边的来源（**显示层要能区分**，否则"推断"会被当成"记录"）

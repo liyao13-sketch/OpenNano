@@ -568,6 +568,20 @@ def api_batch_events(req: BatchEventsReq):
             "ledger": str(be.events_path())}
 
 
+@app.post("/api/layout/arrange")
+def api_layout_arrange(req: BatchListReq):
+    """**一键自动整理画布**：只用画布已有信息重排坐标（不动边、不动标注）。
+
+    给"方块叠在一起"用：布局算法与 `relayout`/回灌**共用同一份**（`expack._layout_modules`），
+    所以不会出现"第二套排布规则"。
+    """
+    from kb.arrange import arrange_project
+    proj = {"modules": req.modules or [], "edges": req.edges or []}
+    res = arrange_project(proj)
+    return {"ok": res.get("ok", False), "modules": proj["modules"],
+            "summary": res, "note": "只改了 x/y；边与标注原样未动"}
+
+
 @app.post("/api/batch/tune_line")
 def api_batch_tune_line(req: BatchRunsReq):
     """**参数调试线**（O1 单点优化视图）—— 只读数据线的 `v_tune_line`。

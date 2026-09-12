@@ -1,0 +1,213 @@
+"""画布布局**体检**（只读，可复跑）—— 回答"这张画布画得对不对"。
+
+为什么要有它（2026-09-13 owner："run2 和 run3 两个方块会叠在一起，能否对画布绘制做一次大排查"）：
+    画布是**数据驱动的绘制**：位置来自工程文件 / 合成算法 / 用户拖拽，三者都可能产生
+    重叠、悬空边、串列错位、向上回折等问题。肉眼看不全，**必须机器查**。
+
+检查项（每条都能客观判定，不猜）：
+    ① 节点重叠/过近（按节点框：宽 190 × 高（含备注行数））
+    ② id / core_run_id 重复
+    ③ 悬空边（端点不在节点里）、自环、重复边
+    ④ **向上回折**（dst.y < src.y）—— 旧版"连线混乱"的根因
+    ⑤ 跨工序边（x 不前进）
+    ⑥ 列内错位（同工序列里混进了别的工序）
+    ⑦ 孤立节点（没有任何边，且不是 season）
+    ⑧ 隐藏 season 占位（默认不画，但仍占行号 ⇒ 留白浪费）
+    ⑨ 边标签/推断边数量（扇出标签太挤的观感来源）
+    ⑩ 两列间距是否够（≥ 节点宽 + 最小留白）
+
+用法：
+    python3 -m kb.layout_audit ~/.opennano/projects/AR50-T1-明天.json
+    python3 -m kb.layout_audit --batch AR50-T1          # 从 core 合成一份来查
+    python3 -m kb.layout_audit --file x.json --json
+"""
+from __future__ import annotations
+
+import argparse
+import itertools
+import json
+from pathlib import Path
+
+#: 与前端 ProcessNode 保持一致（改前端务必同步这里）
+NODE_W = 190
+#: 前端把备注**限高 3 行**（超出省略号）⇒ 体检必须按同一规则建模，否则会报出不存在的情况
+CLAMP_COMMENT_LINES = 3
+NODE_BASE_H = 69          # 标题+副标题+内边距
+CHIP_H = 16               # run/sample/#seq 那一行
+COMMENT_LINE_H = 15       # 备注每行
+MIN_GAP_X = 24            # 两列之间最少留白
+LAYOUT_ROW_FOR_AUDIT = 200  # 后端布局的行距（expack.LAYOUT_ROW，这里只用于报告）
+MIN_GAP_Y = 20            # 同一列相邻节点最少留白
+
+
+def _node_height(m: dict, comment_lines: int = 0) -> int:
+    """节点高度估算 —— **按前端真实渲染规则**（备注限高 3 行）。"""
+    h = NODE_BASE_H
+    if m.get("core_run_id") or m.get("run_nature"):
+        h += CHIP_H
+    lines = min(max(comment_lines, 0), CLAMP_COMMENT_LINES)
+    if lines:
+        h += 6 + lines * COMMENT_LINE_H + 10
+    return h
+
+
+def audit(project: dict, comment_lines: int = 0) -> dict:
+    """体检一个画布工程（`{modules, edges}`），返回结论 + 问题清单。"""
+    mods = project.get("modules") or []
+    edges = project.get("edges") or []
+    by_id = {m.get("id"): m for m in mods}
+    issues: list[dict] = []
+
+    #: 只报不拦的项（结构没错，属于"可优化"/"观感"）
+    WARN_KINDS = {"orphan", "fanout", "hidden_gap"}
+
+    def add(kind: str, msg: str, **extra) -> None:
+        issues.append({"kind": kind, "msg": msg,
+                       "severity": "warn" if kind in WARN_KINDS else "error", **extra})
+
+    # ① 重叠 / 过近
+    boxes = [(m, float(m.get("x") or 0), float(m.get("y") or 0), _node_height(m, comment_lines))
+             for m in mods]
+    for (a, ax, ay, ah), (b, bx, by, bh) in itertools.combinations(boxes, 2):
+        if abs(ax - bx) < NODE_W and abs(ay - by) < max(ah, bh) + MIN_GAP_Y:
+            add("overlap", f"{a.get('core_run_id') or a.get('name')} 与 "
+                           f"{b.get('core_run_id') or b.get('name')} 重叠/过近"
+                           f"（Δx={abs(ax-bx):.0f} Δy={abs(ay-by):.0f}）",
+                a=a.get("id"), b=b.get("id"))
+
+    # ② 重复 id / run
+    ids = [m.get("id") for m in mods]
+    dup_ids = sorted({k for k in ids if ids.count(k) > 1})
+    if dup_ids:
+        add("dup_id", f"节点 id 重复：{dup_ids}")
+    rids = [m.get("core_run_id") for m in mods if m.get("core_run_id")]
+    dup_runs = sorted({k for k in rids if rids.count(k) > 1})
+    if dup_runs:
+        add("dup_run", f"core_run_id 重复：{dup_runs}")
+
+    # ③④⑤ 边
+    seen_pairs: dict[tuple, int] = {}
+    label_edges = 0
+    inferred = 0
+    for e in edges:
+        src, dst = e.get("src"), e.get("dst")
+        if e.get("_link") == "inferred":
+            inferred += 1
+        if e.get("label"):
+            label_edges += 1
+        if src not in by_id or dst not in by_id:
+            add("dangling_edge", f"悬空边：{src} → {dst}（端点不在节点里）")
+            continue
+        if src == dst:
+            add("self_loop", f"自环：{src}")
+        key = (src, dst)
+        seen_pairs[key] = seen_pairs.get(key, 0) + 1
+        a, b = by_id[src], by_id[dst]
+        if float(b.get("y") or 0) < float(a.get("y") or 0):
+            add("upward_edge", f"边向上回折：{a.get('core_run_id')} → {b.get('core_run_id')}"
+                               f"（{a.get('y'):.0f} → {b.get('y'):.0f}）")
+        if float(b.get("x") or 0) < float(a.get("x") or 0):
+            add("backward_edge", f"边往左回退：{a.get('core_run_id')} → {b.get('core_run_id')}")
+    for (s, d), n in seen_pairs.items():
+        if n > 1:
+            add("dup_edge", f"重复边 {n} 次：{by_id[s].get('core_run_id')} → {by_id[d].get('core_run_id')}")
+
+    # ⑥ 列内错位（同一 x 列里出现不同 stage_seq）+ ⑦ 孤立 +
+    cols: dict[float, set] = {}
+    for m in mods:
+        cols.setdefault(float(m.get("x") or 0), set()).add(int(m.get("core_stage_seq") or 0))
+    for x, seqs in cols.items():
+        seqs = {s for s in seqs if s}
+        if len(seqs) > 1:
+            add("column_mixed", f"x={x:.0f} 这一列混了多个工序：{sorted(seqs)}")
+    touched = {e.get("src") for e in edges} | {e.get("dst") for e in edges}
+    for m in mods:
+        if m.get("id") not in touched and m.get("run_nature") != "season":
+            add("orphan", f"孤立节点（无任何边，也不是 season）：{m.get('core_run_id') or m.get('name')}")
+
+    # ⑧ 隐藏 season 占位（留白浪费）
+    hidden = [m for m in mods if m.get("run_nature") == "season"]
+    if hidden:
+        ys = sorted(float(m.get("y") or 0) for m in mods if m.get("run_nature") != "season")
+        if ys and min(float(m.get("y") or 0) for m in hidden) - max(ys) > 340:
+            add("hidden_gap", f"{len(hidden)} 个 season 节点（默认不画）在主流程下方留了"
+                              f"{min(float(m.get('y') or 0) for m in hidden) - max(ys):.0f}px 空白")
+
+    # ⑨ 列间距
+    xs = sorted({float(m.get("x") or 0) for m in mods})
+    for a, b in zip(xs, xs[1:]):
+        if b - a < NODE_W + MIN_GAP_X:
+            add("col_tight", f"两列太近：x={a:.0f} 与 x={b:.0f}（间距 {b-a:.0f} < {NODE_W + MIN_GAP_X}）")
+
+    # ⑩ 扇出标签（观感噪声来源）
+    fanout: dict[str, int] = {}
+    for e in edges:
+        fanout[e.get("src")] = fanout.get(e.get("src"), 0) + 1
+    worst = max(fanout.values(), default=0)
+    if worst >= 4:
+        who = [by_id[k].get("core_run_id") for k, v in fanout.items() if v == worst]
+        add("fanout", f"单点扇出 {worst} 条（{who}）⇒ 若每条都带标签会很挤")
+
+    kinds: dict[str, int] = {}
+    for i in issues:
+        kinds[i["kind"]] = kinds.get(i["kind"], 0) + 1
+    errs = [i for i in issues if i["severity"] == "error"]
+    warns = [i for i in issues if i["severity"] == "warn"]
+    return {
+        "ok": not errs,
+        "errors": len(errs), "warnings": len(warns),
+        "modules": len(mods), "edges": len(edges),
+        "inferred_edges": inferred, "edges_with_label": label_edges,
+        "hidden_season": len(hidden),
+        "issue_kinds": kinds, "issues": issues,
+        "geometry": {"node_w": NODE_W, "base_h": NODE_BASE_H, "chip_h": CHIP_H,
+                     "comment_lines_assumed": comment_lines,
+                     "comment_lines_used": min(max(comment_lines, 0), CLAMP_COMMENT_LINES),
+                     "comment_clamped": comment_lines > CLAMP_COMMENT_LINES,
+                     "row_gap_expected": LAYOUT_ROW_FOR_AUDIT},
+    }
+
+
+def project_from_batch(batch: str) -> dict:
+    from . import append_pack as ap
+    return ap.core_to_project(batch)
+
+
+def main() -> int:
+    ap_ = argparse.ArgumentParser(description="画布布局体检（只读）")
+    ap_.add_argument("path", nargs="?", default="", help="工程 JSON 路径")
+    ap_.add_argument("--file", default="", help="同 path")
+    ap_.add_argument("--batch", default="", help="从 core 合成该 batch 的画布来查")
+    ap_.add_argument("--comment-lines", type=int, default=0,
+                     help="模拟'显示备注'时每节点的备注行数（默认 0=不显示备注）")
+    ap_.add_argument("--json", action="store_true")
+    a = ap_.parse_args()
+
+    if a.batch:
+        proj = project_from_batch(a.batch)
+    else:
+        p = Path(a.file or a.path).expanduser()
+        if not p.exists():
+            print(f"文件不存在：{p}")
+            return 2
+        proj = json.loads(p.read_text(encoding="utf-8"))
+
+    res = audit(proj, comment_lines=a.comment_lines)
+    if a.json:
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0 if res["ok"] else 1
+    print(f"画布体检：{res['modules']} 节点 / {res['edges']} 边"
+          f"（推断 {res['inferred_edges']} · 带标签 {res['edges_with_label']} · "
+          f"隐藏 season {res['hidden_season']}）")
+    if res["ok"] and not res["warnings"]:
+        print("  ✅ 未发现问题")
+    for i in res["issues"]:
+        mark = "✗" if i["severity"] == "error" else "⚠"
+        print(f"  {mark} [{i['kind']}] {i['msg']}")
+    if res["ok"]:
+        print(f"  ✅ 无结构性问题（{res['warnings']} 条提示可忽略/可优化）")
+    return 0 if res["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

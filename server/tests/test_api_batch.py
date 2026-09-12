@@ -212,3 +212,19 @@ def test_续做产出的模块形状完整_不许缺_key_values(client, core):
         assert k in m, f"续做模块缺字段 {k}"
     assert m["key_values"] == {} and m["sim_result"] is None    # 不继承结果，但字段在
     assert isinstance(m["param_inputs"], list) and isinstance(m["formulas"], dict)
+
+
+def test_一键整理布局端点(client):
+    """`/api/layout/arrange`：只改 x/y，边与标注原样；乱的画布整完要能过体检。"""
+    from kb.layout_audit import audit
+    mods = [dict(m) for m in modules()]
+    for m in mods:                                  # 全叠在原点
+        m["x"] = m["y"] = 0
+    edges = [{"src": mods[0]["id"], "dst": mods[1]["id"]}]
+    r = client.post("/api/layout/arrange", json={"modules": mods, "edges": edges})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["ok"] is True and d["summary"]["cols"] >= 1
+    assert len(d["modules"]) == len(mods)
+    assert audit({"modules": d["modules"], "edges": edges}, comment_lines=3)["ok"] is True
+    assert "不动" in d["note"] or "只改" in d["note"]
