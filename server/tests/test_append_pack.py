@@ -227,3 +227,75 @@ def test_core_to_project_没有该批次要报错(core):
     from kb.append_pack import core_to_project
     with pytest.raises(ValueError):
         core_to_project("NO-SUCH-BATCH")
+
+
+# ------------------------------------------------------------------ 画布连线（不许编造）
+def _seed_ar50lj(core_dir):
+    """照 AR50-T1 的形状造数据：**并存试验的 parent 全为空**（这正是假直线的温床）。"""
+    from conftest import seed_core
+    return seed_core(core_dir, batches=batch_rows(), samples=sample_rows(), runs=[
+        {"run_id": f"{BATCH}-PECVD-0001", "batch_id": BATCH, "sample_id": ROOT,
+         "stage": "PECVD", "stage_seq": "1"},
+        {"run_id": f"{BATCH}-LDW-0001", "batch_id": BATCH, "sample_id": ROOT,
+         "stage": "LDW", "stage_seq": "2", "parent_run_id": ""},        # ← core 说空
+        {"run_id": f"{BATCH}-ICP-0001", "batch_id": BATCH, "sample_id": ROOT,
+         "stage": "ICP", "stage_seq": "3", "parent_run_id": ""},        # ← 并存试验
+        {"run_id": f"{BATCH}-ICP-0002", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE4",
+         "stage": "ICP", "stage_seq": "3", "parent_run_id": ""},
+        {"run_id": f"{BATCH}-ICP-0003", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE4",
+         "stage": "ICP", "stage_seq": "3", "parent_run_id": f"{BATCH}-ICP-0002"},
+        {"run_id": f"{BATCH}-ASH-0001", "batch_id": BATCH, "sample_id": ROOT,
+         "stage": "ASH", "stage_seq": "4", "parent_run_id": f"{BATCH}-ICP-0003"},
+    ])
+
+
+def test_合成画布_空_parent_不许编线(tmp_path, monkeypatch):
+    """★ 回归：画布上"DWL 后面跟着 8 个连续的 ICP 刻蚀"（owner 2026-09-13 实测）。
+
+    根因（两处同源，都在"没有 flow.json ⇒ 由 runs 合成"这条路上）：
+      · `expack._edges_from_runs`：空 parent 就接"上一条" ⇒ 并存试验被连成直线；
+      · `expack` 导出路径：`parent = core_parent or run_rows[-1]`（注释写"导出顺序即执行顺序"）
+        ⇒ 回灌时**先把假父写回模块**，再据此连边。
+    判据：core 说空就是空 —— 不连线。绝不能"看着像一条链就接上"。
+    """
+    from kb import append_pack as ap
+    d = _seed_ar50lj(tmp_path / "core")
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    proj = ap.core_to_project(BATCH, project_name="连线回归")
+    byid = {m["id"]: m for m in proj["modules"]}
+    edges = [(byid[e["src"]]["core_run_id"], byid[e["dst"]]["core_run_id"])
+             for e in (proj.get("edges") or [])]
+    assert edges == [(f"{BATCH}-ICP-0002", f"{BATCH}-ICP-0003"),
+                     (f"{BATCH}-ICP-0003", f"{BATCH}-ASH-0001")], edges
+    # 并存的那两条之间**一条边都不许有**；模块上的 core_parent_run_id 也必须是空
+    got = {m["core_run_id"]: (m.get("core_parent_run_id") or "") for m in proj["modules"]}
+    assert got[f"{BATCH}-LDW-0001"] == ""
+    assert got[f"{BATCH}-ICP-0001"] == ""
+
+
+def test_合成画布_真实链一条不丢(tmp_path, monkeypatch):
+    """反面对照：core 里**有的**父必须连上、一条不丢（别为了修假边把真边也去掉）。"""
+    from kb import append_pack as ap
+    d = _seed_ar50lj(tmp_path / "core")
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    proj = ap.core_to_project(BATCH)
+    byid = {m["id"]: m for m in proj["modules"]}
+    pairs = {(byid[e["src"]]["core_run_id"], byid[e["dst"]]["core_run_id"])
+             for e in proj["edges"]}
+    assert (f"{BATCH}-ICP-0002", f"{BATCH}-ICP-0003") in pairs
+    assert (f"{BATCH}-ICP-0003", f"{BATCH}-ASH-0001") in pairs
+
+
+def test_历史手工节点_没有_core_id_才按时序接():
+    """兜底**只**给真正的历史/手工节点：连规范 run_id 都没有的，才按导出顺序接上一条，
+    否则整张图会散成互不相连的孤岛。有 run_id 但 parent 为空 ⇒ 绝不接。"""
+    from kb.expack import _edges_from_runs
+    ms = [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]
+    legacy = [{"run_id": "", "parent_run_id": ""}, {"run_id": "", "parent_run_id": ""}]
+    assert _edges_from_runs(legacy, {}, [m["id"] for m in ms]) == [{"src": "m1", "dst": "m2"}]
+    real = [{"run_id": f"{BATCH}-PECVD-0001", "parent_run_id": ""},
+            {"run_id": f"{BATCH}-LDW-0001", "parent_run_id": ""}]
+    idmap = {r["run_id"]: m["id"] for r, m in zip(real, ms)}
+    assert _edges_from_runs(real, idmap, [m["id"] for m in ms]) == []

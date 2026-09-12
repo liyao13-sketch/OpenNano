@@ -175,9 +175,20 @@ def _parent_map_from_packs() -> dict[str, str]:
             out[rid] = (r.get("parent_run_id") or "").strip()
     try:                                           # ② 包内 runs.csv 补 core 没有的
         import csv
+        import os
         from .menu_reader import _workspace
-        base = _workspace() / "个人空间/18_工艺数据资产"
-        for p in list(base.rglob("runs.csv"))[:200]:
+        # ⚠️ 可隔离：`OPENNANO_PACKS_ROOT` 指定"只扫这一棵"（空串 = 不扫）。
+        #    ① 测试必须隔离（否则夹具会被真实验包里的父污染 ⇒ 假绿/假红都出现过）
+        #    ② 大工作区上 `rglob` 整棵树会拖慢每次点开批次面板 —— 这是它真正的代价
+        env = os.environ.get("OPENNANO_PACKS_ROOT")
+        if env is None:
+            base = _workspace() / "个人空间/18_工艺数据资产"
+        elif env == "":
+            base = None
+        else:
+            from pathlib import Path
+            base = Path(env).expanduser()
+        for p in (list(base.rglob("runs.csv"))[:200] if base else []):
             try:
                 with p.open(newline="", encoding="utf-8-sig") as f:
                     for r in csv.DictReader(f):

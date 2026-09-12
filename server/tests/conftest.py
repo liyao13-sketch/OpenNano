@@ -110,6 +110,8 @@ def _isolate_kb_state(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENNANO_CORE_DIR", str(empty_core))
     # 事件台账默认指向内存里不存在的路径 ⇒ 不读真台账
     monkeypatch.setenv("OPENNANO_BATCH_EVENTS", str(tmp_path / "batch_events.csv"))
+    # 不扫真工作区的实验包（否则夹具会被真实 parent 污染：既假绿也拖慢）
+    monkeypatch.setenv("OPENNANO_PACKS_ROOT", "")
 
     def _reset():
         for mod in (br, ap, be, li, mr):

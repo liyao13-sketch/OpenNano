@@ -169,9 +169,15 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         m.setdefault("core_stage", stage)
         m.setdefault("core_stage_seq", seq_in_stage)
         tool_id = m.get("machine_name") or ""
-        # parent：工具算好的优先，否则取同 batch 上一个 run（导出顺序即执行顺序）
-        parent = m.get("core_parent_run_id") or (run_rows[-1][0] if run_rows else "")
-        m["core_parent_run_id"] = parent
+        # parent：**core 的语义优先，空就是空**。
+        # ⚠️ 原实现是 `m.get("core_parent_run_id") or run_rows[-1][0]`（"导出顺序即执行顺序"）——
+        #    这在"一个 batch 一次导出"的旧假设下勉强成立，但对**并存试验**（如 AR50-T1 的 6 条
+        #    ICP，core 里 parent 为空）会编出一条假直线，且会被持久化 ⇒ 界面上看着像
+        #    "同一片刻了 8 次"（2026-09-13 owner实测）。呼应零号铁律：**不推断、不替记录编归属**。
+        #    兜底只剩给真正的历史/手工节点用：连 `core_run_id` 都没有的，才按导出顺序接上一条。
+        if not m.get("core_parent_run_id") and not m.get("core_run_id"):
+            m["core_parent_run_id"] = run_rows[-1][0] if run_rows else ""
+        parent = m.get("core_parent_run_id") or ""
         run_rows.append([rid, batch, m.get("core_sample_id") or "", stage,
                          m.get("core_stage_seq", seq_in_stage), now,
                          "", "", m.get("equipment_name") or stage, tool_id,
@@ -722,17 +728,42 @@ def parse_expack(path: Path, lib) -> dict:
                                               r.get("run_id") or ""))
     modules = [_module_from_run(r, i) for i, r in enumerate(runs_sorted)]
     id_by_run = {r.get("run_id"): m["id"] for r, m in zip(runs_sorted, modules)}
-    edges = []
-    for i, r in enumerate(runs_sorted):
-        src = id_by_run.get(r.get("parent_run_id") or "")
-        if not src and i > 0:
-            src = modules[i - 1]["id"]
-        dst = id_by_run.get(r.get("run_id", ""))
-        if src and dst and src != dst:
+    edges = _edges_from_runs(runs_sorted, id_by_run, [m["id"] for m in modules])
+    return {"name": batch, "modules": modules, "edges": edges}
+
+
+def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[str]) -> list[dict]:
+    """由 runs 的 `parent_run_id` 合成画布连线（**空 parent 不许编**）。
+
+    ⚠️ 这条规则是被真实数据打回来的（2026-09-13 owner："刷新后还是 DWL 后面跟着 8 个
+    连续的 ICP 刻蚀"）：AR50-T1 有 **6 条并存的 ICP 试验**（`parent_run_id` 空），
+    原实现"空 parent 就接上一条"会把它们连成一条直线 ⇒ 界面上看着像"同一片刻了 8 次"，
+    而真相是"8 个样品各做一次（其中 6 条互不隶属）"。
+
+    区分两种"没有 parent"：
+      · **core 侧的真实语义**（`run_id` 形如 `BATCH-STAGE-NNNN`）：空就是空 —— 独立试验/
+        批次级，**不连线**（批次视图另有"并行分支"提示，不靠编造边来表达）；
+      · **历史/手工 run**（没有规范 run_id，既无 parent 也无 id 可挂）：此时才按时序接上一条，
+        否则整张图会散成互不相连的孤岛。
+    """
+    edges: list[dict] = []
+    prev_legacy: str | None = None      # 上一条"历史/手工"节点（按导出顺序）
+    for idx, r in enumerate(runs_sorted):
+        rid = (r.get("run_id") or "").strip()
+        # 有规范 run_id ⇒ 用它在 id_by_run 里的模块；历史/手工节点（无 run_id）按位置认领
+        dst = id_by_run.get(rid) or (module_ids[idx] if not rid and idx < len(module_ids) else None)
+        if not dst:
+            continue
+        src = id_by_run.get((r.get("parent_run_id") or "").strip())
+        if not src and not rid and prev_legacy:
+            src = prev_legacy                        # 仅历史/手工数据才补时序边
+        if src and src != dst:
             e = {"src": src, "dst": dst}
             if e not in edges:
                 edges.append(e)
-    return {"name": batch, "modules": modules, "edges": edges}
+        if not rid:
+            prev_legacy = dst
+    return edges
 
 
 # ============================================================
