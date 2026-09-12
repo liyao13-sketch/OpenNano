@@ -178,13 +178,27 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
                          m.get("core_recipe_id") or "", operator or "", purpose or "",
                          parent, "", "", "planned",
                          m.get("comment") or ""])
-        for si, (sname, pv) in enumerate(group_params(m.get("params") or {}).items(), start=1):
+        menu_steps = m.get("core_menu_steps") or []      # 菜单直读灌入的步**优先**（含机台槽位号）
+        if menu_steps:
+            for s in menu_steps:
+                pj = dict(s.get("param_json") or {})
+                # 只有菜单步有机台槽位号（非菜单步的 param_json 里没有这个键）
+                mslot = pj.pop("machine_step", "") or s.get("machine_step", "")
+                pj.pop("phase", None)
+                step_rows.append([f"{rid}.S{s['step_order']:02d}", rid, s["step_order"], mslot,
+                                  s.get("step_name", ""), s.get("role", ""),
+                                  round(float(s.get("duration_s") or 0), 3) or "",
+                                  (pj.get("apc1_press") or ""), "Pa",
+                                  json.dumps(pj, ensure_ascii=False), ""])
+            # 菜单步已覆盖，跳过 params 生成
+        for si, (sname, pv) in enumerate([] if menu_steps else group_params(m.get("params") or {}).items(), start=1):
             dur = next((vv for kk, vv in pv.items()
                         if kk.endswith(("time_s", "duration_s"))), "")
             press = next((vv for kk, vv in pv.items() if "pressure" in kk), "")
             pj = {k: v for k, v in pv.items()
                   if not k.endswith(("time_s", "duration_s")) and "pressure" not in k}
-            step_rows.append([f"{rid}.S{si:02d}", rid, si, sname, "",
+            # 非菜单步**没有**机台槽位号 ⇒ 该列留空（step_name 仍记组名）
+            step_rows.append([f"{rid}.S{si:02d}", rid, si, "", sname, "",
                               dur, press, "", json.dumps(pj, ensure_ascii=False), ""])
         for out in (m.get("param_outputs") or []):
             q = PARAM_TO_QUANTITY.get(out, out)
@@ -222,7 +236,7 @@ def param_meta(key: str, lib, equipment_name: str = "") -> dict:
     `etch_bias_power`），故依次尝试：精确 → 去步骤前缀 → 气体令牌 → 尽力匹配。
     """
     if not key:
-        return {"label": key, "unit": ""}
+        return {"label": key, "unit": "", "known": False}
     kl = key.lower()
     parts = key.split("_", 1)
     core = parts[1].lower() if len(parts) == 2 and parts[0] + "_" in _STEP_PREFIXES else kl
@@ -249,14 +263,27 @@ def param_meta(key: str, lib, equipment_name: str = "") -> dict:
             elif gas and re.search(rf"(^|_){re.escape(gas)}($|_)", tl):
                 hit = True          # 同一种气体的流量参数
             if hit:
-                return {"label": tdef.get("label") or key, "unit": tdef.get("unit") or ""}
-    return {"label": key, "unit": ""}
+                return {"label": tdef.get("label") or key, "unit": tdef.get("unit") or "",
+                        "known": True}
+    return {"label": key, "unit": "", "known": False}
 
 
 def _fmt_num(v) -> str:
     if isinstance(v, float) and v.is_integer():
         v = int(v)
     return str(v)
+
+
+def _unpack_step(s) -> tuple:
+    """steps 表一行 → 规范 11 元组 (step_id, run_id, step_order, machine_step,
+    step_name, role, duration_s, pressure, pressure_unit, param_json, note)。
+
+    兼容 v0.1.2 的 10 列（无 `machine_step`）—— 老包/老调用不会崩。
+    """
+    if len(s) >= 11:
+        return tuple(s[:11])
+    sid, rid, order, sname, role, dur, press, pu, pj, note = (list(s) + [""] * 10)[:10]
+    return (sid, rid, order, "", sname, role, dur, press, pu, pj, note)
 
 
 def build_process_card(project: dict, purpose: str = "", operator: str = "",
@@ -328,27 +355,34 @@ def build_process_card(project: dict, purpose: str = "", operator: str = "",
         if steps:
             def _all_params(s):
                 """一条 step 行的全部参数(含 CSV 独立列 duration/pressure),返回 (步序, [(键,值,单位)])。"""
-                sid, _rid, order, sname, _role, dur, press, _pu, pj, _note = s
+                (sid, _rid, order, mslot, sname, _role, dur, press, _pu,
+                 pj, _note) = _unpack_step(s)
                 triples = [(k, v, "") for k, v in json.loads(pj or "{}").items()]
                 if dur not in ("", None):
                     triples.append(("duration_s", dur, "s"))
                 if press not in ("", None):
                     triples.append(("pressure", press, _pu or "Pa"))
-                return order, triples
+                return order, triples, mslot
 
             eq_name = m.get("equipment_name") or ""
             labels_known = any(
-                param_meta(k, lib, eq_name)["label"] != k
-                for s in steps for _o, triples in [_all_params(s)] for k, _v, _u in triples)
-            L.append("| 步 | 参数 | 值 | 单位 |" if labels_known else "| 步 | 参数 | 值 |")
-            L.append("|---|---|---|---|" if labels_known else "|---|---|---|")
+                param_meta(k, lib, eq_name).get("known")
+                for s in steps for _o, triples, _m in [_all_params(s)] for k, _v, _u in triples)
+            L.append("| 步 | 机台槽 | 参数 | 值 | 单位 |" if labels_known
+                     else "| 步 | 机台槽 | 参数 | 值 |")
+            L.append("|---|---|---|---|---|" if labels_known else "|---|---|---|---|")
             for s in steps:
-                order, triples = _all_params(s)
+                order, triples, mslot = _all_params(s)
                 first = True
                 for k, v, unit in triples:
                     meta = param_meta(k, lib, eq_name)
-                    label = meta["label"] if meta["label"] != k else f"`{k}`"
-                    cells = [f"S{order:02d}" if first else "", label, _fmt_num(v)]
+                    if not meta.get("known") and "_" in k:      # 设备名对不上模板时剥前缀再试
+                        meta2 = param_meta(k.split("_", 1)[1], lib, eq_name)
+                        if meta2.get("known"):
+                            meta = meta2
+                    label = meta["label"] if meta.get("known") else f"`{k}`"
+                    cells = [f"S{order:02d}" if first else "", (f"{mslot}" if first else ""),
+                             label, _fmt_num(v)]
                     if labels_known:
                         cells.append(unit or meta["unit"])
                     L.append("| " + " | ".join(cells) + " |")
@@ -427,8 +461,8 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
              "purpose", "parent_run_id", "env_temp_c", "env_rh_pct", "status", "note"],
             run_rows),
         "steps.csv": _csv_bytes(
-            ["step_id", "run_id", "step_order", "step_name", "role", "duration_s",
-             "pressure", "pressure_unit", "param_json", "note"], step_rows),
+            ["step_id", "run_id", "step_order", "machine_step", "step_name", "role",
+             "duration_s", "pressure", "pressure_unit", "param_json", "note"], step_rows),
         "measurements.csv": _csv_bytes(
             ["meas_id", "run_id", "sample_id", "quantity", "value", "unit",
              "method", "loc", "n", "uncertainty", "source_artifact_id",
@@ -566,6 +600,17 @@ def parse_expack(path: Path, lib) -> dict:
         m["run_state"] = "ok" if kv else "idle"
         m["core_run_id"] = r.get("run_id", "")
         m["core_batch_id"] = r.get("batch_id", batch)
+        # 把样品/die 与配方带进画布（往返不丢；老包该列为空 ⇒ 留空，不推断）
+        if r.get("sample_id"):
+            m["core_sample_id"] = r["sample_id"]
+        if r.get("recipe_id"):
+            m["core_recipe_id"] = r["recipe_id"]
+        if r.get("stage_seq"):
+            m["core_stage_seq"] = r["stage_seq"]
+        if r.get("date"):
+            m["core_date"] = r["date"]
+        if r.get("parent_run_id"):
+            m["core_parent_run_id"] = r["parent_run_id"]
         oc = _obs_of(r.get("run_id", ""))
         if oc:
             m["comment"] = oc

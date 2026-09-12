@@ -154,7 +154,11 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
         if steps:
             for s in steps:
                 pj = dict(s.get("param_json") or {})
-                step_rows.append([f"{rid}.S{s['step_order']:02d}", rid, s["step_order"],
+                # 结构键 ⇒ 升成正式列(数据线 2026-09-12 定)。
+                # 槽位号在**步对象**上（menu_reader 的 group_steps 提供），非菜单步没有 ⇒ 留空
+                mslot = pj.pop("machine_step", "") or s.get("machine_step", "")
+                pj.pop("phase", None)                    # phase 属结构：进 step_name，不进参数
+                step_rows.append([f"{rid}.S{s['step_order']:02d}", rid, s["step_order"], mslot,
                                   s.get("step_name", ""), s.get("role", ""),
                                   round(float(s.get("duration_s") or 0), 3) or "",
                                   (pj.get("apc1_press") or ""), "Pa",
@@ -204,8 +208,8 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
              "purpose", "parent_run_id", "env_temp_c", "env_rh_pct", "status", "note"],
             run_rows),
         "steps.csv": _csv_bytes(
-            ["step_id", "run_id", "step_order", "step_name", "role", "duration_s",
-             "pressure", "pressure_unit", "param_json", "note"], step_rows),
+            ["step_id", "run_id", "step_order", "machine_step", "step_name", "role",
+             "duration_s", "pressure", "pressure_unit", "param_json", "note"], step_rows),
         "measurements.csv": _csv_bytes(
             ["meas_id", "run_id", "sample_id", "quantity", "value", "unit", "method",
              "loc", "n", "uncertainty", "source_artifact_id", "measured_by",
