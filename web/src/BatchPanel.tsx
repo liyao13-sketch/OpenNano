@@ -52,6 +52,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     sample_tree?: { tree: SNode[]; nodes: Record<string, SNode>; count: number
                     orphan_parent: string[]; error?: string } } | null>(null)
   const [sample, setSample] = useState('')
+  const [events, setEvents] = useState<{ count: number; events: any[]; plan_vs_actual: any } | null>(null)
   const [sel, setSel] = useState<Run | null>(null)
   const [contract, setContract] = useState<any>(null)
   const [busy, setBusy] = useState('')
@@ -100,6 +101,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     try {
       const d = await post('/api/batch/runs', { modules: ctx.modules, batch_id: b })
       setChain(d)
+      post('/api/batch/events', { batch_id: b }).then(setEvents).catch(() => {})
       const pick = d.runs[d.runs.length - 1] || null
       setSel(pick)
       if (pick) loadFormOf(pick.run_id)
@@ -130,6 +132,25 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       setMsg(`菜单解析：recipe ${d.recipes?.length || 0} 槽（有名 ${named}）· group ${d.groups?.length || 0} 槽`
         + ` · 越界剔除 ${d.skipped_out_of_scope}` + (d.pair_warning ? `\n⚠️ ${d.pair_warning}` : ''))
     } catch (e: any) { setMsg('❌ 菜单扫描失败: ' + e.message) } finally { setBusy('') }
+  }
+
+  const proposeAllocate = async (apply = false) => {
+    const n = Number((document.getElementById('alloc-n') as HTMLInputElement)?.value || 0)
+    const to = (document.getElementById('alloc-to') as HTMLInputElement)?.value || ''
+    if (!to || !n) { setMsg('请填"取样颗数"和"到样品"'); return }
+    setBusy('alloc'); setMsg('')
+    try {
+      const d = await post('/api/batch/propose', { batch_id: batch, operator: 'owner', apply,
+        events: [{ kind: 'allocate', at: new Date().toISOString().slice(0, 10),
+                   from_sample_id: `${batch}-01`, to_sample_id: to, count: n,
+                   note: '工具侧批次面板产出' }] })
+      const chk = d.precheck || {}
+      setMsg((chk.ok ? '✅ 本地预检通过' : '❌ 本地预检未过') + `\n`
+        + (chk.errors?.length ? '错误：\n' + chk.errors.join('\n') + '\n' : '')
+        + (chk.warnings?.length ? '提示：\n' + chk.warnings.join('\n') + '\n' : '')
+        + `\n数据线脚本（${apply ? '落账' : '干跑'}）：\n` + (d.run?.stdout || d.run?.error || ''))
+      if (apply) post('/api/batch/events', { batch_id: batch }).then(setEvents).catch(() => {})
+    } catch (e: any) { setMsg('❌ 提案失败: ' + e.message) } finally { setBusy('') }
   }
 
   const rehydrate = async () => {
@@ -263,6 +284,43 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 ))}
               </tbody>
             </table>
+
+            {events && events.count > 0 && (
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12 }}>
+                <b>样品事件（裂片 / 取样分配）</b>
+                <span style={{ opacity: .7 }}>　计划 {events.plan_vs_actual.planned ?? '—'} 颗 ·
+                  实际取样 {events.plan_vs_actual.actual_allocated} 颗
+                  {events.plan_vs_actual.unallocated != null ? ` · 未用 ${events.plan_vs_actual.unallocated}` : ''}</span>
+                <table className="tbl" style={{ width: '100%', fontSize: 12, marginTop: 4 }}>
+                  <thead><tr><th>event</th><th>kind</th><th>日期</th><th>从 → 到</th><th>颗数</th><th>状态</th></tr></thead>
+                  <tbody>
+                    {events.events.map((e: any) => (
+                      <tr key={e.event_id}>
+                        <td><code>{e.event_id}</code></td>
+                        <td>{e.kind === 'split' ? '裂片' : e.kind === 'allocate' ? '取样分配' : e.kind}</td>
+                        <td>{e.at}</td>
+                        <td style={{ opacity: .8 }}>{e.from_sample_id} → {e.to_sample_id || '（组）'}</td>
+                        <td>{e.count}</td><td>{e.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ opacity: .7, marginTop: 4 }}>
+                  ⚠️ <b>split</b>=物理裂片（只 1 条×49）· <b>allocate</b>=从现有样品取样（不改总数）；
+                  「实际用量」只算 allocate。工具**只出提案**，落账走数据线 <code>propose_apply.py</code>。
+                </div>
+                <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                  <label style={{ fontSize: 12 }}>取样颗数
+                    <input id="alloc-n" defaultValue="20" style={{ width: 60, marginLeft: 4 }} /></label>
+                  <label style={{ fontSize: 12 }}>到样品
+                    <input id="alloc-to" placeholder={`${batch}-01-DIE20`} style={{ width: 190, marginLeft: 4 }} /></label>
+                  <button className="btn ghost" onClick={proposeAllocate}
+                    title="产出提案 → 本地预检 → 数据线 propose_apply.py 干跑（不落账）">生成取样提案（干跑）</button>
+                  <button className="btn ghost" onClick={() => proposeAllocate(true)}
+                    title="真正落账（由数据线脚本执行，含幂等与不推断校验）">落账（--apply）</button>
+                </div>
+              </div>
+            )}
 
             {chain?.sample_tree && !chain.sample_tree.error && chain.sample_tree.count > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12 }}>

@@ -231,6 +231,17 @@ class RehydrateReq(BaseModel):
     persist: bool = False
 
 
+class BatchEventsReq(BaseModel):
+    batch_id: str
+
+
+class ProposeReq(BaseModel):
+    batch_id: str
+    events: list[dict] = []          # [{kind,at,from_sample_id,to_sample_id,count,note,...}]
+    operator: str = ""
+    apply: bool = False              # 默认**干跑**；True 才落账（调数据线 propose_apply.py）
+
+
 class MenuCheckReq(BaseModel):
     dir: str = ""          # 缺省 = <设备菜单>/<tool>
     tool: str = "RIE-400iPB"
@@ -502,6 +513,38 @@ def api_batch_rehydrate(req: RehydrateReq):
         p.write_text(json.dumps(proj, ensure_ascii=False, indent=2), encoding="utf-8")
         proj["_saved_to"] = str(p)
     return proj
+
+
+@app.post("/api/batch/events")
+def api_batch_events(req: BatchEventsReq):
+    """批次事件（裂片/取样分配）**只读**视图 + 计划/实际比数。
+
+    `split`=物理裂片（AR50-T1 只 1 条×49）· `allocate`=取样分配（3 条 4/15/1）；
+    实际用量只算 allocate —— 混为一谈会让比数失真（数据线 2026-09-13 纠正）。
+    """
+    from kb import batch_events as be
+    evs = be.read_events(req.batch_id)
+    return {"batch_id": req.batch_id, "events": evs, "count": len(evs),
+            "plan_vs_actual": be.plan_vs_actual(req.batch_id),
+            "ledger": str(be.events_path())}
+
+
+@app.post("/api/batch/propose")
+def api_batch_propose(req: ProposeReq):
+    """工具产出**提案**（裂片/取样）→ 本地预检 → 交数据线 `propose_apply.py`（默认干跑）。
+
+    **工具不写 core、也不直接写台账**：`apply=false` 时只让对方脚本干跑；
+    `apply=true` 才真正落账（由数据线的脚本执行，含幂等与不推断校验）。
+    """
+    from kb import batch_events as be
+    prop = be.build_proposal(req.batch_id, req.events, operator=req.operator)
+    chk = be.precheck(prop)
+    out = {"proposal": prop, "precheck": chk}
+    if chk["ok"] or req.apply:           # 预检不过时默认不惊动对方脚本
+        out["run"] = be.run_proposer(prop, apply=req.apply)
+    else:
+        out["run"] = {"ok": False, "skipped": "本地预检未过 ⇒ 未调用数据线脚本"}
+    return out
 
 
 class ExpackExportReq(BaseModel):
