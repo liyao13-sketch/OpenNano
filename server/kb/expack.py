@@ -177,6 +177,13 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         #    兜底只剩给真正的历史/手工节点用：连 `core_run_id` 都没有的，才按导出顺序接上一条。
         if not m.get("core_parent_run_id") and not m.get("core_run_id"):
             m["core_parent_run_id"] = run_rows[-1][0] if run_rows else ""
+        # ⚠️ 原实现是 `m.get("core_parent_run_id") or run_rows[-1][0]`（"导出顺序即执行顺序"）——
+        #    这在"一个 batch 一次导出"的旧假设下勉强成立，但对**并存试验**（如 AR50-T1 的 6 条
+        #    ICP，core 里 parent 为空）会编出一条假直线，且会被持久化 ⇒ 界面上看着像
+        #    "同一片刻了 8 次"（2026-09-13 owner实测）。呼应零号铁律：**不推断、不替记录编归属**。
+        #    兜底只剩给真正的历史/手工节点用：连 `core_run_id` 都没有的，才按导出顺序接上一条。
+        if not m.get("core_parent_run_id") and not m.get("core_run_id"):
+            m["core_parent_run_id"] = run_rows[-1][0] if run_rows else ""
         parent = m.get("core_parent_run_id") or ""
         run_rows.append([rid, batch, m.get("core_sample_id") or "", stage,
                          m.get("core_stage_seq", seq_in_stage), now,
@@ -702,8 +709,7 @@ def parse_expack(path: Path, lib) -> dict:
         oc = _obs_of(r.get("run_id", ""))
         if oc:
             m["comment"] = oc
-        m["x"], m["y"] = 120 + (idx % 2) * 40, 60 + idx * 130
-        return m
+        return m                        # 坐标由 `_layout_modules` 统一按工艺列排
 
     # ① flow.json 存在 → 保布局,叠加实测/现象
     fj = root / "flow.json"
@@ -729,24 +735,71 @@ def parse_expack(path: Path, lib) -> dict:
     modules = [_module_from_run(r, i) for i, r in enumerate(runs_sorted)]
     id_by_run = {r.get("run_id"): m["id"] for r, m in zip(runs_sorted, modules)}
     edges = _edges_from_runs(runs_sorted, id_by_run, [m["id"] for m in modules])
+    _layout_modules(runs_sorted, modules)              # 列=工序，行=链深/分支缩进
     return {"name": batch, "modules": modules, "edges": edges}
 
 
+def _layout_modules(runs_sorted: list[dict], modules: list[dict]) -> None:
+    """按**工艺列**摆放节点（就地改 `x`/`y`）。
+
+    - **x**：`stage_seq` 决定第几列 ⇒ 左到右就是工艺顺序（PECVD → LDW → ICP → ASH → DRIE）；
+    - **y**：**有记录上游的留在主行**，无上游的分支/独立试验往下缩进。
+
+    规则只有一条，为的是"一眼看懂"：
+      主行 = 一段接一段的真实链（含收口步骤 ASH/DRIE，它们的父在 core 里有写）；
+      下缩 = 各工序的**并存试验**（AR50-T1 的 5 条独立 ICP 就是它们）。
+    这样不会被排成一条斜线假装串行（2026-09-13 owner报障的观感根因：
+    原实现 `x = 120 + (idx % 2) * 40, y = 60 + idx * 130`）。
+    """
+    chained = {(r.get("run_id") or "").strip()
+               for r in runs_sorted if (r.get("parent_run_id") or "").strip()}
+    by_stage: dict[int, list[str]] = {}
+    for r in runs_sorted:
+        by_stage.setdefault(int(r.get("stage_seq") or 0), []).append((r.get("run_id") or "").strip())
+    for m, r in zip(modules, runs_sorted):
+        rid = (r.get("run_id") or "").strip()
+        seq = int(r.get("stage_seq") or 0)
+        peers = by_stage.get(seq, [])
+        at = peers.index(rid) if rid in peers else 0
+        if rid in chained:
+            # 链内节点：同列有多条（AR50-T1 的 ICP-0006/0007/0008）就在列内往下顺排 ——
+            # 否则会**叠在同一个坐标**上（回归网抓到过）
+            row = sum(1 for x in peers[:at] if x in chained)
+        else:
+            # 并存/独立：本工序内第几条；该列上方有链内节点时**整体下移**，绝不叠上去
+            row = at + sum(1 for x in peers if x in chained)
+        col = max(seq - 1, 0)
+        m["x"], m["y"] = 140 + col * 300, 80 + row * 170
+
+
+#: 边的来源（**显示层要能区分**，否则"推断"会被当成"记录"）
+LINK_RECORDED = "recorded"      # core 的 `parent_run_id` 明确写的
+LINK_INFERRED = "inferred"      # 按工艺顺序（batches.planned_stages / stage_seq）补的**显示**边
+
+
 def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[str]) -> list[dict]:
-    """由 runs 的 `parent_run_id` 合成画布连线（**空 parent 不许编**）。
+    """由 runs 合成画布连线。**分两类，绝不混淆**：
 
-    ⚠️ 这条规则是被真实数据打回来的（2026-09-13 owner："刷新后还是 DWL 后面跟着 8 个
-    连续的 ICP 刻蚀"）：AR50-T1 有 **6 条并存的 ICP 试验**（`parent_run_id` 空），
-    原实现"空 parent 就接上一条"会把它们连成一条直线 ⇒ 界面上看着像"同一片刻了 8 次"，
-    而真相是"8 个样品各做一次（其中 6 条互不隶属）"。
+    · `recorded`（实线）：core 的 `parent_run_id` 明确写的 —— **空就是空，不编**。
+      这是被真实数据打回来的规则（2026-09-13 owner："刷新后还是 DWL 后面跟着 8 个连续的 ICP"）：
+      AR50-T1 有 **6 条并存的 ICP 试验**（parent 空），"空 parent 就接上一条"会把它们连成直线，
+      界面上看着像"同一片刻了 8 次"，而真相是"8 颗 die 各做一次"。
+    · `inferred`（虚线）：run 没写 parent 时，按**工艺顺序**补一条显示用连线
+      （上游 = 最近的上一个 stage 里、在它之前的那条 run）。它**只影响画布观感**，
+      不进 core、不改 `core_parent_run_id`、批次视图也不拿它当父。
 
-    区分两种"没有 parent"：
-      · **core 侧的真实语义**（`run_id` 形如 `BATCH-STAGE-NNNN`）：空就是空 —— 独立试验/
-        批次级，**不连线**（批次视图另有"并行分支"提示，不靠编造边来表达）；
-      · **历史/手工 run**（没有规范 run_id，既无 parent 也无 id 可挂）：此时才按时序接上一条，
-        否则整张图会散成互不相连的孤岛。
+    同 stage 的多条 run 之间**永不连线**（那是并存，不是串行）。
+    历史/手工节点（连规范 run_id 都没有）才按导出顺序接上一条。
     """
     edges: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(src: str, dst: str, link: str) -> None:
+        if not src or not dst or src == dst or (src, dst) in seen:
+            return
+        seen.add((src, dst))
+        edges.append({"src": src, "dst": dst, "_link": link})
+
     prev_legacy: str | None = None      # 上一条"历史/手工"节点（按导出顺序）
     for idx, r in enumerate(runs_sorted):
         rid = (r.get("run_id") or "").strip()
@@ -754,15 +807,26 @@ def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[
         dst = id_by_run.get(rid) or (module_ids[idx] if not rid and idx < len(module_ids) else None)
         if not dst:
             continue
-        src = id_by_run.get((r.get("parent_run_id") or "").strip())
-        if not src and not rid and prev_legacy:
-            src = prev_legacy                        # 仅历史/手工数据才补时序边
-        if src and src != dst:
-            e = {"src": src, "dst": dst}
-            if e not in edges:
-                edges.append(e)
-        if not rid:
+        if not rid:                                  # 历史/手工：按时序兜底
+            if prev_legacy:
+                _add(prev_legacy, dst, LINK_RECORDED)
             prev_legacy = dst
+            continue
+        src = id_by_run.get((r.get("parent_run_id") or "").strip())
+        if src:
+            _add(src, dst, LINK_RECORDED)             # ① core 明确写的
+            continue
+        # ② 没写 parent ⇒ 按工艺顺序补显示边：上游 = 最近的上一工序里、序号在它之前的那条
+        my_seq = int(r.get("stage_seq") or 0)
+        upstream = None
+        for cand in runs_sorted[:idx]:
+            if int(cand.get("stage_seq") or 0) >= my_seq:
+                continue
+            cid = id_by_run.get((cand.get("run_id") or "").strip())
+            if cid:
+                upstream = cid
+        if upstream:
+            _add(upstream, dst, LINK_INFERRED)
     return edges
 
 

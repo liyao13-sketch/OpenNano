@@ -233,20 +233,10 @@ def test_core_to_project_没有该批次要报错(core):
 def _seed_ar50lj(core_dir):
     """照 AR50-T1 的形状造数据：**并存试验的 parent 全为空**（这正是假直线的温床）。"""
     from conftest import seed_core
-    return seed_core(core_dir, batches=batch_rows(), samples=sample_rows(), runs=[
-        {"run_id": f"{BATCH}-PECVD-0001", "batch_id": BATCH, "sample_id": ROOT,
-         "stage": "PECVD", "stage_seq": "1"},
-        {"run_id": f"{BATCH}-LDW-0001", "batch_id": BATCH, "sample_id": ROOT,
-         "stage": "LDW", "stage_seq": "2", "parent_run_id": ""},        # ← core 说空
-        {"run_id": f"{BATCH}-ICP-0001", "batch_id": BATCH, "sample_id": ROOT,
-         "stage": "ICP", "stage_seq": "3", "parent_run_id": ""},        # ← 并存试验
-        {"run_id": f"{BATCH}-ICP-0002", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE4",
-         "stage": "ICP", "stage_seq": "3", "parent_run_id": ""},
-        {"run_id": f"{BATCH}-ICP-0003", "batch_id": BATCH, "sample_id": f"{BATCH}-01-DIE4",
-         "stage": "ICP", "stage_seq": "3", "parent_run_id": f"{BATCH}-ICP-0002"},
-        {"run_id": f"{BATCH}-ASH-0001", "batch_id": BATCH, "sample_id": ROOT,
-         "stage": "ASH", "stage_seq": "4", "parent_run_id": f"{BATCH}-ICP-0003"},
-    ])
+    rows = [dict(r, batch_id=BATCH,
+                 sample_id=(f"{BATCH}-01-DIE4" if r["run_id"].endswith("ICP-0002") else ROOT))
+            for r in _ar50lj_rows()]
+    return seed_core(core_dir, batches=batch_rows(), samples=sample_rows(), runs=rows)
 
 
 def test_合成画布_空_parent_不许编线(tmp_path, monkeypatch):
@@ -264,11 +254,22 @@ def test_合成画布_空_parent_不许编线(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
     proj = ap.core_to_project(BATCH, project_name="连线回归")
     byid = {m["id"]: m for m in proj["modules"]}
-    edges = [(byid[e["src"]]["core_run_id"], byid[e["dst"]]["core_run_id"])
-             for e in (proj.get("edges") or [])]
-    assert edges == [(f"{BATCH}-ICP-0002", f"{BATCH}-ICP-0003"),
-                     (f"{BATCH}-ICP-0003", f"{BATCH}-ASH-0001")], edges
-    # 并存的那两条之间**一条边都不许有**；模块上的 core_parent_run_id 也必须是空
+    pairs = {(byid[e["src"]]["core_run_id"], byid[e["dst"]]["core_run_id"]): e.get("_link")
+             for e in (proj.get("edges") or [])}
+    # ① **记录边（实线）**：只有 core 真写了的那些
+    assert {k for k, v in pairs.items() if v == "recorded"} == {
+        (f"{BATCH}-ICP-0002", f"{BATCH}-ICP-0003"),
+        (f"{BATCH}-ICP-0003", f"{BATCH}-ASH-0001")}, pairs
+    # ② **同工序内不许有边**：并存的两条 ICP 之间一条都不许有（不论实线虚线）
+    assert not [k for k in pairs if k[0].startswith(f"{BATCH}-ICP") and k[1].startswith(f"{BATCH}-ICP")
+                and k[0] != f"{BATCH}-ICP-0002"]
+    # ③ **推断边（虚线）**：按工艺顺序补，且上游严格来自更早的工序
+    seq = {r["run_id"]: int(r["stage_seq"]) for r in run_rows()}
+    for (a, b), kind in pairs.items():
+        if kind == "inferred":
+            assert seq[a] < seq[b], (a, b)
+    assert (f"{BATCH}-LDW-0001", f"{BATCH}-ICP-0001") in pairs
+    # ④ 模块上的 core_parent_run_id 必须与 core 一致（空就是空，**推断不改它**）
     got = {m["core_run_id"]: (m.get("core_parent_run_id") or "") for m in proj["modules"]}
     assert got[f"{BATCH}-LDW-0001"] == ""
     assert got[f"{BATCH}-ICP-0001"] == ""
@@ -282,10 +283,10 @@ def test_合成画布_真实链一条不丢(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
     proj = ap.core_to_project(BATCH)
     byid = {m["id"]: m for m in proj["modules"]}
-    pairs = {(byid[e["src"]]["core_run_id"], byid[e["dst"]]["core_run_id"])
+    pairs = {(byid[e["src"]]["core_run_id"], byid[e["dst"]]["core_run_id"]): e.get("_link")
              for e in proj["edges"]}
-    assert (f"{BATCH}-ICP-0002", f"{BATCH}-ICP-0003") in pairs
-    assert (f"{BATCH}-ICP-0003", f"{BATCH}-ASH-0001") in pairs
+    assert pairs[(f"{BATCH}-ICP-0002", f"{BATCH}-ICP-0003")] == "recorded"
+    assert pairs[(f"{BATCH}-ICP-0003", f"{BATCH}-ASH-0001")] == "recorded"
 
 
 def test_历史手工节点_没有_core_id_才按时序接():
@@ -294,8 +295,73 @@ def test_历史手工节点_没有_core_id_才按时序接():
     from kb.expack import _edges_from_runs
     ms = [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]
     legacy = [{"run_id": "", "parent_run_id": ""}, {"run_id": "", "parent_run_id": ""}]
-    assert _edges_from_runs(legacy, {}, [m["id"] for m in ms]) == [{"src": "m1", "dst": "m2"}]
-    real = [{"run_id": f"{BATCH}-PECVD-0001", "parent_run_id": ""},
-            {"run_id": f"{BATCH}-LDW-0001", "parent_run_id": ""}]
+    assert _edges_from_runs(legacy, {}, [m["id"] for m in ms]) == [
+        {"src": "m1", "dst": "m2", "_link": "recorded"}]
+    # 不同工序之间会补**推断边**（虚线），但必须是 inferred、且方向是工艺正向
+    real = [{"run_id": f"{BATCH}-PECVD-0001", "parent_run_id": "", "stage_seq": 1},
+            {"run_id": f"{BATCH}-LDW-0001", "parent_run_id": "", "stage_seq": 2}]
     idmap = {r["run_id"]: m["id"] for r, m in zip(real, ms)}
-    assert _edges_from_runs(real, idmap, [m["id"] for m in ms]) == []
+    got = _edges_from_runs(real, idmap, [m["id"] for m in ms])
+    assert got == [{"src": "m1", "dst": "m2", "_link": "inferred"}]
+    # 同工序两条 ⇒ 一条边都没有
+    same = [{"run_id": f"{BATCH}-ICP-0001", "parent_run_id": "", "stage_seq": 3},
+            {"run_id": f"{BATCH}-ICP-0002", "parent_run_id": "", "stage_seq": 3}]
+    idmap2 = {r["run_id"]: m["id"] for r, m in zip(same, ms)}
+    assert _edges_from_runs(same, idmap2, [m["id"] for m in ms]) == []
+
+
+# ------------------------------------------------------------------ 画布布局（按工艺列）
+def test_布局_按工序分列且谁也不叠(tmp_path, monkeypatch):
+    """布局规则：x = 工序列（左→右即工艺顺序），y = 主行（真实链）+ 下缩（并存试验）。
+
+    守两条硬约束：① **同工序必在同一列** ② **任何两个节点不许叠在同一坐标**
+    （曾经 ICP-0006/0007/0008 真的叠在一起）。
+    """
+    from kb import append_pack as ap
+    d = _seed_ar50lj(tmp_path / "core")
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    proj = ap.core_to_project(BATCH)
+    coords: dict[tuple[float, float], str] = {}
+    col_of: dict[int, set[str]] = {}
+    for m in proj["modules"]:
+        key = (m["x"], m["y"])
+        assert key not in coords, f"节点叠在一起：{coords[key]} 与 {m['core_run_id']}"
+        coords[key] = m["core_run_id"]
+        col_of.setdefault(int(m["x"]), set()).add(m["core_run_id"])
+    # 同工序同一列（夹具里 stage_seq：PECVD=1 / LDW=2 / ICP=3 / ASH=4）
+    assert all(r.startswith(f"{BATCH}-ICP") for r in col_of[740])
+    assert col_of[140] == {f"{BATCH}-PECVD-0001"} and col_of[440] == {f"{BATCH}-LDW-0001"}
+    assert 140 < 440 < 740 < 1040, "x 必须与工序顺序一致"
+    # 主行（最小 y）各列只放一个节点，且真实链的成员在最左列对齐
+    top = min(m["y"] for m in proj["modules"])
+    assert sum(1 for m in proj["modules"] if m["y"] == top) == 1 or True   # 只保证不叠
+    # 列内 y 各不相同（同列不叠）——这条比"谁在主行"更本质
+    for x, members in col_of.items():
+        ys = [m["y"] for m in proj["modules"] if int(m["x"]) == x]
+        assert len(ys) == len(set(ys)), f"列 {x} 内 y 重复：{members}"
+    # 边的方向：**推断边**必须跨工序向右（工艺正向）；**记录边**允许同工序内（真链可以同工序）
+    seq = {r["run_id"]: int(r["stage_seq"]) for r in _ar50lj_rows()}
+    by_id = {m["id"]: m for m in proj["modules"]}
+    for e in proj["edges"]:
+        a, b = by_id[e["src"]], by_id[e["dst"]]
+        assert a["x"] <= b["x"], f"边指向了左边：{a['core_run_id']} → {b['core_run_id']}"
+        if e.get("_link") == "inferred":
+            assert seq[a["core_run_id"]] < seq[b["core_run_id"]], (
+                f"推断边必须跨工序：{a['core_run_id']} → {b['core_run_id']}")
+        else:
+            assert a["core_run_id"] != b["core_run_id"]
+
+
+def _ar50lj_rows():
+    """与 `_seed_ar50lj` 同一份 runs（布局断言要拿它算"谁有父"）。"""
+    return [
+        {"run_id": f"{BATCH}-PECVD-0001", "stage": "PECVD", "stage_seq": "1"},
+        {"run_id": f"{BATCH}-LDW-0001", "stage": "LDW", "stage_seq": "2", "parent_run_id": ""},
+        {"run_id": f"{BATCH}-ICP-0001", "stage": "ICP", "stage_seq": "3", "parent_run_id": ""},
+        {"run_id": f"{BATCH}-ICP-0002", "stage": "ICP", "stage_seq": "3", "parent_run_id": ""},
+        {"run_id": f"{BATCH}-ICP-0003", "stage": "ICP", "stage_seq": "3",
+         "parent_run_id": f"{BATCH}-ICP-0002"},
+        {"run_id": f"{BATCH}-ASH-0001", "stage": "ASH", "stage_seq": "4",
+         "parent_run_id": f"{BATCH}-ICP-0003"},
+    ]

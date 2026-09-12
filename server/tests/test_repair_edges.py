@@ -76,8 +76,9 @@ def test_落盘要备份且同步模块字段(env):
     p, ids = _project(env / "proj.json")
     r = repair_project(p, BATCH, write=True)
     assert r["written"] is True and r.get("backup")
-    assert json.loads(p.read_text(encoding="utf-8"))["edges"] == [
-        {"src": ids["icp1"], "dst": ids["icp2"]}]
+    after = json.loads(p.read_text(encoding="utf-8"))["edges"]
+    assert [(e["src"], e["dst"], e.get("_link")) for e in after] == [
+        (ids["icp1"], ids["icp2"], "recorded")]          # 只剩真实 parent 那条
     bak = json.loads(open(r["backup"], encoding="utf-8").read())
     assert len(bak["edges"]) == 3                        # 备份是**改前**的样子
     # 模块上的 core_parent_run_id 与 core 对齐（空就是空）
@@ -127,3 +128,19 @@ def test_命令行干跑默认不落盘(env, monkeypatch, capsys):
     assert "有假边" in out and "干跑结束" in out
     assert "去掉" in out
     assert len(json.loads(p.read_text(encoding="utf-8"))["edges"]) == 3   # 没写
+
+
+def test_推断边是显示层的_修复器不许删(env):
+    """虚线（`_link=inferred`）是**工艺序显示提示**，不是假 parent ⇒ 重算时必须留住。
+    否则"按工艺顺序显示一次"会被下一次修复又打散成一堆孤岛。"""
+    from kb.repair_edges import repair_project
+    p, ids = _project(env / "proj4.json")
+    j = json.loads(p.read_text(encoding="utf-8"))
+    j["edges"] = [{"src": ids["pecvd"], "dst": ids["ldw"], "_link": "inferred"}]   # 全是推断边
+    p.write_text(json.dumps(j, ensure_ascii=False), encoding="utf-8")
+    r = repair_project(p, BATCH, write=True)
+    assert r["dropped"] == []                              # 不许把推断边算成假边
+    after = json.loads(p.read_text(encoding="utf-8"))["edges"]
+    kinds = {(e["src"], e["dst"]): e.get("_link") for e in after}
+    assert kinds[(ids["pecvd"], ids["ldw"])] == "inferred"  # 保留
+    assert kinds[(ids["icp1"], ids["icp2"])] == "recorded"  # 真 parent 照旧补上

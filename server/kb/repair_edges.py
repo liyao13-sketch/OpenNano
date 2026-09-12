@@ -63,15 +63,23 @@ def repair_project(path: Path, batch: str = "", write: bool = False) -> dict:
     for rid, m in by_run.items():
         par = parents.get(rid, m.get("core_parent_run_id") or "")
         if par and par in id_of and id_of[par] and id_of[par] != m.get("id"):
-            e = {"src": id_of[par], "dst": m.get("id")}
+            e = {"src": id_of[par], "dst": m.get("id"), "_link": "recorded"}
             if e not in want:
                 want.append(e)
 
     have = proj.get("edges") or []
     key = lambda e: (e.get("src"), e.get("dst"))                      # noqa: E731
     have_k, want_k = {key(e) for e in have}, {key(e) for e in want}
-    dropped = [e for e in have if key(e) not in want_k]
     added = [e for e in want if key(e) not in have_k]
+    # ⚠️ 两条判据**必须分开**（曾写反：拿"推断边"去比对"已记录边"集合 ⇒ 推断边反被当假边删）：
+    #    · 假边 = 标着 recorded、但 core 里 parent 为空/指向别处 ⇒ 删
+    #    · 推断边（`_link=inferred`）= 显示层工艺序提示 ⇒ **留**
+    fake, inferred_kept = [], []
+    for e in have:
+        if key(e) in want_k:
+            continue
+        (inferred_kept if (e.get("_link") or "") == "inferred" else fake).append(e)
+    dropped = fake
 
     def _label(edge: dict, side: str) -> str:
         mid = edge.get(side)
@@ -80,9 +88,11 @@ def repair_project(path: Path, batch: str = "", write: bool = False) -> dict:
 
     res = {
         "ok": True, "file": str(path), "batch": batch,
-        "modules": len(mods), "edges_before": len(have), "edges_after": len(want),
+        "modules": len(mods), "edges_before": len(have),
+        "edges_after": len(want) + len(inferred_kept),
         "dropped": [{"src": _label(e, "src"), "dst": _label(e, "dst")} for e in dropped],
         "added": [{"src": _label(e, "src"), "dst": _label(e, "dst")} for e in added],
+        "kept_inferred": [{"src": _label(e, "src"), "dst": _label(e, "dst")} for e in inferred_kept],
         "ambiguous_parents": [rid for rid in by_run
                               if (parents.get(rid) or "") and parents.get(rid) not in id_of],
         "changed": bool(dropped or added),
@@ -90,10 +100,15 @@ def repair_project(path: Path, batch: str = "", write: bool = False) -> dict:
     if write and res["changed"]:
         bak = path.with_suffix(f".json.bak-{datetime.now():%Y%m%d%H%M%S}")
         shutil.copy2(path, bak)
-        proj["edges"] = want
+        proj["edges"] = want + inferred_kept
         # 同步模块上的 core_parent_run_id（画布与 core 保持一致；空就是空）
+        # ⚠️ **只同步 core 里真实存在的 run**：尚未入库的"计划 run"（如 DRIE-0002）
+        #    在 core 里查不到 ⇒ 一律覆盖会把它的父抹掉（2026-09-13 实际踩到：
+        #    重排后 DRIE-0001→DRIE-0002 这条计划边消失）。core 没有它，就该保留原值。
         for rid, m in by_run.items():
-            m["core_parent_run_id"] = parents.get(rid, "")
+            if rid in parents:
+                m["core_parent_run_id"] = parents[rid]
+        res["parent_synced"] = [rid for rid in by_run if rid in parents]
         path.write_text(json.dumps(proj, ensure_ascii=False, indent=2), encoding="utf-8")
         res["backup"] = str(bak)
         res["written"] = True

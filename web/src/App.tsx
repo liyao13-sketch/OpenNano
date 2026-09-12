@@ -496,14 +496,31 @@ export default function App() {
     setLoadOpen(true)
   }
 
+  /* 画布连线分两类（**不许混淆**）：
+       · recorded —— core 的 parent_run_id 明确写的，实线；
+       · inferred —— run 没写 parent 时按**工艺顺序**补的显示边，虚线 + 标注。
+     两者在导出/入库口径上都不等价：inferred 只是"看起来的顺序"，不是记录下来的归属。 */
+  const edgeOf = (e: any) => {
+    const inferred = (e._link || e.link) === 'inferred'
+    return {
+      id: `e-${e.src ?? e.src_module}-${e.dst ?? e.dst_module}`,
+      source: String(e.src ?? e.src_module), target: String(e.dst ?? e.dst_module),
+      type: 'smoothstep',
+      data: { inferred },
+      style: inferred
+        ? { strokeDasharray: '6 5', stroke: 'var(--faint)' }
+        : undefined,
+      label: inferred ? '推断' : undefined,
+      labelStyle: inferred ? { fill: 'var(--muted)', fontSize: 9 } : undefined,
+      labelBgStyle: inferred ? { fill: 'transparent' } : undefined,
+    }
+  }
+
   const loadProjectObj = (d: any) => {
     setNodes((d.modules || []).map((m: Module) => ({
       id: m.id, type: 'process', position: { x: m.x ?? 0, y: m.y ?? 0 }, data: { module: m },
     })))
-    setEdges((d.edges || []).map((e: any) => ({
-      id: `e-${e.src ?? e.src_module}-${e.dst ?? e.dst_module}`,
-      source: String(e.src ?? e.src_module), target: String(e.dst ?? e.dst_module), type: 'smoothstep',
-    })))
+    setEdges((d.edges || []).map(edgeOf))
     setProjectName(d.name || 'EXP')
     setSelectedId(null)
     setTimeout(() => flowRef.current?.fitView({ padding: 0.2 }), 120)
@@ -514,10 +531,7 @@ export default function App() {
     setNodes((d.modules || []).map((m: Module) => ({
       id: m.id, type: 'process', position: { x: m.x ?? 0, y: m.y ?? 0 }, data: { module: m },
     })))
-    setEdges((d.edges || []).map((e: any) => ({
-      id: `e-${e.src ?? e.src_module}-${e.dst ?? e.dst_module}`,
-      source: String(e.src ?? e.src_module), target: String(e.dst ?? e.dst_module), type: 'smoothstep',
-    })))
+    setEdges((d.edges || []).map(edgeOf))
     setLoadOpen(false)
     loadProjectObj(d)
   }
@@ -742,6 +756,8 @@ export default function App() {
   const catEquipment: Equipment[] = m && library ? library.equipment[m.subtype] || [] : []
   // 入射膜堆叠(曝光类节点 Process Link 用)
   const inStack = m ? upstreamStack(m.id) : []
+  const inferredEdgeCount = useMemo(
+    () => edges.filter(e => (e.data as any)?.inferred).length, [edges])
   const topFilmName = inStack.length ? inStack[inStack.length - 1].film : 'Si'
   const stackDesc = ['Si', ...inStack.map(l => l.film + (l.thickness ? ` (${l.thickness} nm)` : ''))].join(' / ')
 
@@ -754,6 +770,17 @@ export default function App() {
           <span style={{ width:8, height:8, borderRadius:'50%', background: online ? 'var(--ok)' : 'var(--bad)' }} />
           {online ? '后端已连接' : '后端未连接'}
         </span>
+        {inferredEdgeCount > 0 && (
+          <span title="虚线是**按工艺顺序**补的显示连线（core 里没有记录 parent）；实线才是 core 记录的真实上游"
+            style={{ fontSize:11, color:'var(--muted)', border:'1px solid var(--line)',
+                     borderRadius:10, padding:'1px 7px' }}>
+            <svg width="26" height="8" style={{ verticalAlign:'middle', marginRight:4 }}>
+              <line x1="0" y1="4" x2="26" y2="4" stroke="var(--faint)" strokeWidth="2"
+                strokeDasharray="6 5" />
+            </svg>
+            推断连线 {inferredEdgeCount} 条（core 未记录）
+          </span>
+        )}
         <span className="spacer" />
         {/* 运行组(BEAMER: Run / Run To) */}
         <button className="btn" onClick={() => runFlow(selectedId || undefined)}
