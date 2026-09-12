@@ -131,6 +131,19 @@ function ProcessNode({ data }: any) {
     </div>
   )
 }
+/** 左侧方阵里的**英文缩写**（一眼认得出是什么工序/检测）。
+ *  表外条目回落成 subtype 大写前 6 位 —— 保证任何新增类别都有块可画。 */
+const ABBR: Record<string, string> = {
+  // 工艺族
+  graphic: 'LITHO', etch: 'ETCH', deposition: 'DEP', doping: 'DOPE', bonding: 'BOND',
+  packaging: 'PKG', wet: 'WET', thermal: 'THERM', assist: 'ASST',
+  // 检测
+  sem: 'SEM', tem: 'TEM', afm: 'AFM', xrd: 'XRD', xps: 'XPS', aes: 'AES', sims: 'SIMS',
+  ellip: 'ELLIP', profilo: 'PROF', stress: 'STRESS', fourpp: '4PP', hall: 'HALL',
+  cv: 'C-V', om: 'OM', fluor: 'FLUOR', ir: 'IR',
+}
+const abbrOf = (c: any) => ABBR[c.subtype] || String(c.subtype || c.name || '').slice(0, 6).toUpperCase()
+
 const nodeTypes = { process: ProcessNode }
 
 export default function App() {
@@ -160,7 +173,13 @@ export default function App() {
   const [issues, setIssues] = useState<{t:string;text:string}[]>([])
   const [dockTab, setDockTab] = useState<'agent'|'batch'|'log'|'issues'>('agent')
   const [fileMenu, setFileMenu] = useState(false)
-  const [machDef, setMachDef] = useState<any>(null)      // 该机台的实测默认参数
+  const [machDef, setMachDef] = useState<any>(null)
+  /* 详情栏宽度：以后内容会越来越多 ⇒ 默认加宽（420）+ 左边缘可拖拽（记忆到 localStorage） */
+  const [panelW, setPanelW] = useState<number>(() => {
+    const v = Number(localStorage.getItem('opennano.panel.width'))
+    return v >= 280 && v <= 760 ? v : 420
+  })
+  const panelDrag = useRef<{ x: number; w: number } | null>(null)      // 该机台的实测默认参数
   const [machPhase, setMachPhase] = useState('')          // 多段工艺时选哪一段
   const [showSeason, setShowSeason] = useState(false)
   const [libCollapsed, setLibCollapsed] = useState(false)
@@ -605,6 +624,26 @@ export default function App() {
       + (src?.from_run ? ` · 来源 ${src.from_run} ${src.date}` : '') + '）')
   }
 
+  /* 详情栏左边缘拖拽调宽 */
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (!panelDrag.current) return
+      const w = Math.min(760, Math.max(280, panelDrag.current.w + (panelDrag.current.x - e.clientX)))
+      setPanelW(w)
+    }
+    const up = () => {
+      if (panelDrag.current) {
+        localStorage.setItem('opennano.panel.width', String(panelW))
+        panelDrag.current = null
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+  }, [panelW])
+
   /** 一键自动整理：调后端**同一份**布局算法，只把新坐标写回画布（边/标注不动）。 */
   const arrangeLayout = async () => {
     if (nodes.length === 0) return
@@ -1022,26 +1061,35 @@ export default function App() {
           <div className="sidebar collapsed" title="展开工艺库" onClick={() => setLibCollapsed(false)}>»</div>
         )}
         <div className="sidebar" style={libCollapsed ? { display: 'none' } : undefined}>
-          <h3>PROCESS</h3>
-          {catalog.filter(c => c.group==='PROCESS').map(c => (
-            <div key={c.subtype} className="lib-item" draggable
-              title="单击添加 · 双击插入到选中节点之后"
-              onClick={() => addModule(c)}
-              onDoubleClick={() => insertAfterSelected(c)}
-              onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
-              <span className="dot" style={{ background: KIND_COLOR.process }} />{c.name}
-            </div>
-          ))}
-          <h3>METROLOGY</h3>
-          {catalog.filter(c => c.group==='METROLOGY').map(c => (
-            <div key={c.subtype} className="lib-item" draggable
-              title="单击添加 · 双击插入到选中节点之后"
-              onClick={() => addModule(c)}
-              onDoubleClick={() => insertAfterSelected(c)}
-              onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
-              <span className="dot" style={{ background: KIND_COLOR.inspect }} />{c.name}
-            </div>
-          ))}
+          {/* 形式统一：拖进去的**长方块**与画布上生成的方块同形（左边色条 + 圆角 + 渐变 + 流光） */}
+          <h3>PROCESS<span className="dim">工艺</span></h3>
+          <div className="lib-grid">
+            {catalog.filter(c => c.group==='PROCESS').map(c => (
+              <div key={c.subtype} className="lib-tile" data-accent="process" draggable
+                style={{ ['--tile-accent' as any]: KIND_COLOR.process }}
+                title={`${c.name} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
+                onClick={() => addModule(c)}
+                onDoubleClick={() => insertAfterSelected(c)}
+                onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
+                <span className="abbr">{abbrOf(c)}</span>
+                <span className="cn">{c.name}</span>
+              </div>
+            ))}
+          </div>
+          <h3>METROLOGY<span className="dim">检测</span></h3>
+          <div className="lib-grid">
+            {catalog.filter(c => c.group==='METROLOGY').map(c => (
+              <div key={c.subtype} className="lib-tile" data-accent="metro" draggable
+                style={{ ['--tile-accent' as any]: KIND_COLOR.inspect }}
+                title={`${c.name} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
+                onClick={() => addModule(c)}
+                onDoubleClick={() => insertAfterSelected(c)}
+                onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
+                <span className="abbr">{abbrOf(c)}</span>
+                <span className="cn">{c.name}</span>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="canvas-wrap">
           <ReactFlow nodes={viewNodes} edges={viewEdges} nodeTypes={nodeTypes}
@@ -1109,7 +1157,14 @@ export default function App() {
             )}
           </ReactFlow>
         </div>
-        <div className="panel">
+        <div className="panel-drag" title="拖拽调整详情栏宽度（双击复位 420）"
+          onMouseDown={e => {
+            panelDrag.current = { x: e.clientX, w: panelW }
+            document.body.style.cursor = 'col-resize'
+            document.body.style.userSelect = 'none'
+          }}
+          onDoubleClick={() => { setPanelW(420); localStorage.setItem('opennano.panel.width', '420') }} />
+        <div className="panel" style={{ width: panelW }}>
           <ErrorBoundary label="节点面板" onReset={() => setSelectedId(null)}>
           {!m && <div style={{ color:'var(--muted)' }}>点击画布节点查看详情<br/>（左侧点工艺添加到画布，节点上下端口拖线连接）</div>}
           {m && (
