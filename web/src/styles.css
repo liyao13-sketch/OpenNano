@@ -685,3 +685,29 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
   background: var(--raise); border: 1px solid var(--border); border-radius: 6px;
   padding: 6px 8px; margin-bottom: 8px; word-break: break-all; }
 .errbox-tip { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.6; }
+
+/* ----------------------------------------------------------------------------
+   2026-09-13 修：窄屏时「知识库/设置/输入…」等文字变竖排
+   原因：flex 容器把按钮/标签压到比文字还窄，中文逐字换行（DSH 不会这样）。
+   规则：**文字一律不换行**；按钮/芯片**不许被压缩**；工具条窄了就**换行**，
+        而不是把内容挤扁；状态栏/工具条允许横向滚动兜底。
+   ---------------------------------------------------------------------------- */
+.btn, .ptab, .chip, .chip-x, .dock-chev, .dropdown-item, .ctxmenu button,
+.dd-sec, .dd-hint, .card h4, .sidebar h3, .iface-sec, .statusbar > span {
+  white-space: nowrap;
+}
+/* 可压缩性：按钮/芯片保持自身宽度（否则被压到一字一行） */
+.btn, .chip, .dock-chev, .ptab { flex-shrink: 0; }
+.topbar { height: auto; min-height: 46px; padding: 6px 14px; row-gap: 6px; flex-wrap: wrap; }
+.topbar > h1, .topbar > span { flex-shrink: 0; }
+.topbar .spacer { flex: 1 1 40px; min-width: 12px; }
+/* 侧栏条目光长则省略号，不换行 */
+.lib-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 批次面板工具条：标签不换行、输入框有最小宽度 */
+.bd-toolbar label { white-space: nowrap; }
+.bd-toolbar input { min-width: 90px; }
+/* LLM 输入框：别被压成一条缝 */
+.chatbar-input input { min-width: 140px; }
+.statusbar { overflow-x: auto; }
+/* 表单标签同样不许竖排 */
+.row label { white-space: nowrap; }

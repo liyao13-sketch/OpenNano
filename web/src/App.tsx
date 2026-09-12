@@ -160,6 +160,8 @@ export default function App() {
   const [issues, setIssues] = useState<{t:string;text:string}[]>([])
   const [dockTab, setDockTab] = useState<'agent'|'batch'|'log'|'issues'>('agent')
   const [fileMenu, setFileMenu] = useState(false)
+  const [machDef, setMachDef] = useState<any>(null)      // 该机台的实测默认参数
+  const [machPhase, setMachPhase] = useState('')          // 多段工艺时选哪一段
   const [showSeason, setShowSeason] = useState(false)
   const [libCollapsed, setLibCollapsed] = useState(false)
   const [menu, setMenu] = useState<{x:number;y:number;kind:'node'|'edge';id:string}|null>(null)
@@ -580,6 +582,29 @@ export default function App() {
     }
   }
 
+  /** 套用「机台实测默认值」：把该段的值写进 params，并**补上缺失的参数行**（可在面板里改）。
+   *  只读 core 推出来的值，来源 run 与日期都会写进日志 —— 不是手编的常量。 */
+  const applyMachineDefaults = () => {
+    if (!m || !machDef || !machPhase) return
+    const blk = machDef.by_phase?.[machPhase]
+    if (!blk) return
+    const params = { ...(m.params || {}) }
+    const defs = { ...(m.param_defs || {}) }
+    for (const [k, rawV] of Object.entries<any>(blk.params || {})) {
+      const v = (typeof rawV === 'number' ? rawV : 0)
+      params[k] = v
+      if (!defs[k]) {
+        const meta: any = (blk.per_key || {})[k] || {}
+        defs[k] = { label: k, unit: '', default: v,
+                    min: Number(meta.min ?? 0), max: Number(meta.max ?? 0) }
+      }
+    }
+    updateModule({ params, param_defs: defs })
+    const src = blk.per_key ? Object.values(blk.per_key)[0] as any : null
+    pushLog('edit', `套用机台实测值：${machDef.tool_id} · ${machPhase} 段（${Object.keys(blk.params).length} 个键`
+      + (src?.from_run ? ` · 来源 ${src.from_run} ${src.date}` : '') + '）')
+  }
+
   /** 一键自动整理：调后端**同一份**布局算法，只把新坐标写回画布（边/标注不动）。 */
   const arrangeLayout = async () => {
     if (nodes.length === 0) return
@@ -837,6 +862,24 @@ export default function App() {
      （2026-09-13：续做生成的模块缺 `key_values` ⇒ 面板 `m.key_values[k]` 抛错 ⇒ 整屏变白）。
      这里把结构性字段统一补成空值，语义不变（空就是空），但渲染永远安全。 */
   const rawM: Module | undefined = selectedNode?.data.module
+  /* 机台实测默认参数：选中节点换了机台就去拉一次（只读 core） */
+  useEffect(() => {
+    const mid = rawM?.machine_id
+    const nm = rawM?.machine_name
+    const st = rawM?.core_stage || rawM?.subtype || ''
+    if (!rawM || (!mid && !nm)) { setMachDef(null); return }
+    let alive = true
+    api.machineDefaults(/drie/i.test(String(st)) ? 'DRIE' : '').then(d => {
+      if (!alive || !d?.available) { setMachDef(null); return }
+      const g = (d.groups || []).find((x: any) => x.machine_id && x.machine_id === mid)
+        || (d.groups || []).find((x: any) => x.tool_id === nm || x.model === nm)
+        || null
+      setMachDef(g)
+      setMachPhase(g?.phases?.length === 1 ? g.phases[0] : '')
+    }).catch(() => setMachDef(null))
+    return () => { alive = false }
+  }, [rawM?.id, rawM?.machine_id, rawM?.machine_name])
+
   const m: Module | undefined = rawM && {
     ...rawM,
     params: rawM.params || {}, param_defs: rawM.param_defs || {},
@@ -1097,6 +1140,35 @@ export default function App() {
                       ))}
                   </select>
                 </div>
+                {/* 机台实测默认值（只读 core 推出来的；按段分开） */}
+                {machDef && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                    <div className="bd-sec-head">
+                      <span className="dim">实测默认值</span>
+                      <span className="dim">{machDef.tool_id} · {machDef.n_runs} 次
+                        {machDef.as_of ? ` · 最近 ${machDef.as_of}` : ''}</span>
+                    </div>
+                    <div className="row" style={{ gap: 6 }}>
+                      {machDef.phases?.length > 1 && (
+                        <select value={machPhase} onChange={e => setMachPhase(e.target.value)}
+                          title="该机台是**多段工艺**（chuck/etch/dechuck…）⇒ 选一段套用；完整步序列在 steps 里">
+                          <option value="">— 选一段 —</option>
+                          {machDef.phases.map((p: string) => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      )}
+                      <button className="btn ghost" disabled={!machPhase} onClick={applyMachineDefaults}
+                        title="把该段实测值写进本节点参数（并补上缺失的参数行）；不覆盖你没动过的其它键之外的东西">
+                        套用实测值{machPhase ? `（${machPhase}）` : ''}
+                      </button>
+                    </div>
+                    {machDef.phases?.length === 1 && (
+                      <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                        {Object.keys(machDef.by_phase[machDef.phases[0]]?.params || {}).length} 个键
+                        （来源 {machDef.from_run}）
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               {m.family === 'dep' && (
                 <div className="card">

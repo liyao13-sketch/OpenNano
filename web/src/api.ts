@@ -43,6 +43,10 @@ export const api = {
       body: JSON.stringify({ name, modules, edges }) }),
   loadProject: (name?: string) => j<any>('/api/project' + (name ? `?name=${encodeURIComponent(name)}` : '')),
   projectList: () => j<{projects:{name:string;modules:number;edges:number;saved_at:string}[]}>('/api/project/list'),
+  /** 各机台实测默认参数（只读 core；按段 chuck/etch/dechuck 分开） */
+  machineDefaults: (stage?: string) =>
+    j<{available:boolean; groups:any[]; note?:string; unmatched_tool_ids?:string[]; reason?:string}>(
+      '/api/machine/defaults' + (stage ? `?stage=${encodeURIComponent(stage)}` : '')),
   /** 一键自动整理画布（只改 x/y；布局算法与后端 relayout/回灌共用同一份） */
   arrangeLayout: (modules: Module[], edges: any[]) =>
     j<{ok:boolean; modules: Module[]; summary:any; note:string}>('/api/layout/arrange',

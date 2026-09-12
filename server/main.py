@@ -568,6 +568,16 @@ def api_batch_events(req: BatchEventsReq):
             "ledger": str(be.events_path())}
 
 
+@app.get("/api/machine/defaults")
+def api_machine_defaults(stage: str = ""):
+    """各机台的**实测默认参数**（只读 core 推出来；按段 chuck/etch/dechuck 分开）。
+
+    用途：画布节点"套用机台实测值"，以及回答"我们这台机器平时到底用什么参数"。
+    """
+    from kb import machine_defaults as md
+    return md.machine_defaults(stage)
+
+
 @app.post("/api/layout/arrange")
 def api_layout_arrange(req: BatchListReq):
     """**一键自动整理画布**：只用画布已有信息重排坐标（不动边、不动标注）。
