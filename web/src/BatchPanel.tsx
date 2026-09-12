@@ -52,7 +52,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     sample_tree?: { tree: SNode[]; nodes: Record<string, SNode>; count: number
                     orphan_parent: string[]; error?: string } } | null>(null)
   const [sample, setSample] = useState('')
-  const [events, setEvents] = useState<{ count: number; events: any[]; plan_vs_actual: any } | null>(null)
+  const [events, setEvents] = useState<{ count: number; events: any[]; plan_vs_actual: any
+    consistency?: { violations: number; authority: string; note: string } } | null>(null)
   const [sel, setSel] = useState<Run | null>(null)
   const [contract, setContract] = useState<any>(null)
   const [busy, setBusy] = useState('')
@@ -338,6 +339,18 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   ⚠️ <b>split</b>=物理裂片（只 1 条×49）· <b>allocate</b>=从现有样品取样（不改总数）；
                   「实际用量」只算 allocate。工具**只出提案**，落账走数据线 <code>propose_apply.py</code>。
                 </div>
+                <div style={{ opacity: .7, marginTop: 2, fontSize: 11 }}>
+                  ⚠️ <b>split 只登记事件、不建样品行</b> —— 子样品由 <code>allocate</code> 建；
+                  所以裂片后样品表**不会**自动多出 N 行（没登记位号的「59 颗」不硬塞进样品表）。
+                </div>
+                {events.consistency && (
+                  <div style={{ marginTop: 4, fontSize: 11,
+                                color: events.consistency.violations ? 'var(--warn,#e8a33d)' : undefined }}>
+                    一致性预览（事件 ↔ 样品树）：
+                    <b>{events.consistency.violations ? `${events.consistency.violations} 项待查` : '✓ 0 项'}</b>
+                    <span style={{ opacity: .6 }}>　{events.consistency.authority}</span>
+                  </div>
+                )}
                 <div className="row" style={{ gap: 8, marginTop: 6 }}>
                   <label style={{ fontSize: 12 }}>取样颗数
                     <input id="alloc-n" defaultValue="20" style={{ width: 60, marginLeft: 4 }} /></label>

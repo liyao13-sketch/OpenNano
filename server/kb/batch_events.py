@@ -206,3 +206,41 @@ def run_proposer(proposal: dict, apply: bool = False, timeout: int = 120) -> dic
                 "proposal_file": str(tmp)}
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"超时（{timeout}s）", "proposal_file": str(tmp)}
+
+def consistency_preview(batch: str) -> dict:
+    """**提前预警**：事件台账 ↔ 样品树 一致性（对齐数据线 QA 关 `[11]` 的三项）。
+
+    ⚠️ 权威判定在数据线的 `data_qa.py [11]`（计入违约、在 build_core 里跑）；
+    这里只是**只读预览**，让工具在落账前/后就地给个提示，不替代它。
+
+    三项：① `to_sample_id` 悬空 ② `status=done` 的 `allocate` 未产出样品行 ③ `from_sample_id` 悬空。
+    """
+    evs = read_events(batch)
+    known = {s.get("sample_id", "").strip() for s in read_core_table("samples")}
+    dangling_to, dangling_from, missing_rows = [], [], []
+    alloc_to = set()
+    for e in evs:
+        frm, to = e["from_sample_id"], e["to_sample_id"]
+        if to and to not in known:
+            dangling_to.append({"event_id": e["event_id"], "to_sample_id": to})
+        if frm and frm not in known:
+            dangling_from.append({"event_id": e["event_id"], "from_sample_id": frm})
+        if e["kind"] == "allocate" and e["status"] == "done" and to:
+            alloc_to.add(to)
+            if to not in known:
+                missing_rows.append({"event_id": e["event_id"], "to_sample_id": to})
+    # 「done 的 allocate 却没建样品行」= missing_rows（to 不在 samples 里）
+    return {
+        "batch_id": batch,
+        "checked": len(evs),
+        "violations": len(dangling_to) + len(dangling_from) + len(missing_rows),
+        "dangling_to": dangling_to, "dangling_from": dangling_from,
+        "allocate_done_without_sample": missing_rows,
+        "source": "core(只读) 预览",
+        "authority": ("权威判定在数据线 data_qa.py 的 QA 关 [11]（计入违约、随 build_core 跑）；"
+                      "本预览仅供工具侧提前预警"),
+        "note": ("⚠️ `split` **只登记事件、不建样品行** —— 子样品由 `allocate` 建。"
+                 "所以裂片之后样品表**不会**自动多出 N 行，这是设计如此"
+                 "（没登记位号的「59 颗」不该硬塞进样品表）。"),
+    }
+

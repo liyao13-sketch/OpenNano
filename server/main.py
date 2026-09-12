@@ -526,6 +526,7 @@ def api_batch_events(req: BatchEventsReq):
     evs = be.read_events(req.batch_id)
     return {"batch_id": req.batch_id, "events": evs, "count": len(evs),
             "plan_vs_actual": be.plan_vs_actual(req.batch_id),
+            "consistency": be.consistency_preview(req.batch_id),
             "ledger": str(be.events_path())}
 
 
