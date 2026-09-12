@@ -1232,16 +1232,25 @@ export default function App() {
             document.body.style.userSelect = 'none'
           }}
           onDoubleClick={() => { setPanelW(420); localStorage.setItem('opennano.panel.width', '420') }} />
-        <div className="panel" style={{ width: panelW }}>
+        {/* 详情栏上色（2026-09-13）：整栏跟随**选中节点的工艺族色** —— 与画布方块、左栏方块同一套色，
+            一眼对上「这个节点属于哪一族」；没选中节点时不染色。 */}
+        <div className={`panel${m ? ' has-fam' : ''}`}
+          style={{ width: panelW, ['--fam' as any]: m ? (FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || '#6b7280') : undefined } as any}>
           <ErrorBoundary label="节点面板" onReset={() => setSelectedId(null)}>
           {!m && <div style={{ color:'var(--muted)' }}>点击画布节点查看详情<br/>（左侧点工艺添加到画布，节点上下端口拖线连接）</div>}
           {m && (
             <>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <h2 style={{ margin:0 }}>{m.name}</h2>
-                <button className="btn ghost" onClick={deleteSelected} style={{ fontSize:12, padding:'4px 10px' }}>🗑 删除选中</button>
+              <div className="panel-head">
+                <div className="ph-top">
+                  <h2 style={{ margin:0 }}>{m.name}</h2>
+                  <button className="btn ghost" onClick={deleteSelected} style={{ fontSize:12, padding:'4px 10px' }}>🗑 删除选中</button>
+                </div>
+                <div className="ph-meta">
+                  <span className="fam-dot" />
+                  <span className="fam-label">{m.family_label || m.family || m.kind}</span>
+                  <span className="dim">{m.kind} · {m.subtype}</span>
+                </div>
               </div>
-              <div className="sub">{m.kind} · {m.subtype}</div>
               <div className="card">
                 <h4>工艺模板 / 机台</h4>
                 <select value={m.equipment_id} onChange={e => onEquipment(e.target.value)}>

@@ -729,17 +729,17 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 :root[data-theme="light"] .panel:hover::-webkit-scrollbar-thumb { background: rgba(15,23,42,.20); background-clip: content-box; }
 
 /* —— 方阵 —— */
-.sidebar { width: 264px; padding: 10px 10px 16px; }
-.sidebar h3 { display: flex; align-items: baseline; gap: 6px; margin: 12px 4px 7px; }
-.sidebar h3 .dim { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 10px; }
-.lib-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.sidebar { width: 252px; padding: 8px 8px 12px; }
+.sidebar h3 { display: flex; align-items: baseline; gap: 6px; margin: 10px 4px 6px; }
+.sidebar h3 .dim { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 9.5px; }
+.lib-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 
 /* —— 长方块：与画布节点**同形**（左边色条 + 圆角 + 渐变 + 顶部高光）—— */
 .lib-tile {
   position: relative; overflow: hidden; cursor: grab; user-select: none;
-  display: flex; flex-direction: column; justify-content: center; gap: 1px;
-  min-height: 46px; padding: 6px 8px 6px 10px;
-  border-radius: 10px;
+  display: flex; flex-direction: column; justify-content: center; gap: 0;
+  min-height: 38px; padding: 4px 7px 4px 9px;
+  border-radius: 9px;
   background: var(--grad-surface);
   border: 1px solid var(--border);
   border-left: 2px solid var(--tile-accent, var(--accent));
@@ -748,11 +748,11 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 }
 .lib-tile:active { cursor: grabbing; }
 .lib-tile .abbr {
-  font-family: var(--mono); font-size: 12.5px; font-weight: 700;
-  letter-spacing: .04em; color: var(--text); white-space: nowrap;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+  letter-spacing: .03em; color: var(--text); white-space: nowrap;
 }
 .lib-tile .cn {
-  font-size: 10px; color: var(--muted); white-space: nowrap;
+  font-size: 9.5px; line-height: 1.25; color: var(--muted); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
 .lib-tile:hover {
@@ -781,6 +781,24 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 }
 :root[data-theme="light"] .lib-tile[data-accent="process"] { background-image: linear-gradient(135deg, rgba(79,70,229,.09), transparent 58%); }
 :root[data-theme="light"] .lib-tile[data-accent="metro"]   { background-image: linear-gradient(135deg, rgba(109,40,217,.09), transparent 58%); }
+
+/* —— 矮窗口再收一档：25 个方块（13 行）必须**不滚动**就能看全 ——
+   基准 38px/行 ≈ 640px 总高；840px 以下收到 34px，760px 以下再收到 30px。 */
+@media (max-height: 840px) {
+  .lib-tile { min-height: 34px; padding: 3px 6px 3px 8px; }
+  .lib-tile .abbr { font-size: 11px; }
+  .lib-tile .cn { font-size: 9px; }
+  .lib-grid { gap: 5px; }
+  .sidebar h3 { margin: 8px 4px 5px; }
+  .sidebar { padding: 6px 8px 10px; }
+}
+@media (max-height: 760px) {
+  .lib-tile { min-height: 30px; padding: 2px 6px 2px 8px; border-radius: 8px; }
+  .lib-tile .abbr { font-size: 10.5px; }
+  .lib-tile .cn { font-size: 9px; }
+  .lib-grid { gap: 4px; }
+  .sidebar h3 { margin: 6px 4px 4px; font-size: 10px; }
+}
 
 /* —— 详情栏拖手 —— */
 .panel-drag {
@@ -843,3 +861,49 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 }
 /* 详情栏定位（::before 需要它做定位上下文） */
 .panel { position: relative; }
+
+/* ============================================================================
+   2026-09-13 · 详情栏上色（owner：「只有详情栏没有彩色」）—— 整栏跟随**选中节点的工艺族色**，
+   与画布方块、左栏方块**同一套色**（`--fam` 由 App.tsx 按 `m.family` 注入）。
+   克制原则不变：只染「边框 / 头部 / 小标题标记 / 顶部流光」，正文数值仍走语义色。
+   ============================================================================ */
+.panel.has-fam { border-left: 2px solid var(--fam, var(--accent)); }
+
+/* 头部：族色淡染 + 底部族色渐隐描边（族色小方块 / 族名 / 类型 三段） */
+.panel-head {
+  position: relative; overflow: hidden;
+  margin: -14px -14px 12px; padding: 13px 14px 11px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-head::before {
+  content: ""; position: absolute; inset: 0;
+  background: var(--fam, var(--accent)); opacity: .10; pointer-events: none;
+}
+.panel-head::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+  background: linear-gradient(90deg, var(--fam, var(--accent)) 0%, transparent 78%);
+  opacity: .75; pointer-events: none;
+}
+.panel-head > * { position: relative; }
+.ph-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ph-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11.5px; }
+.ph-meta .dim { color: var(--muted); }
+.fam-dot {
+  width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0;
+  background: var(--fam, var(--accent));
+  box-shadow: 0 0 9px -1px var(--fam, var(--accent));
+}
+.fam-label { color: var(--fam, var(--accent)); font-weight: 620; letter-spacing: .01em; }
+
+/* 每张卡片的小标题前一枚族色小方块：整栏于是「有颜色」但仍不花 */
+.panel.has-fam .card h4::before {
+  content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px;
+  border-radius: 1.5px; background: var(--fam, var(--accent)); opacity: .8;
+  vertical-align: 1px;
+}
+/* 顶部那道慢流光也跟着族色走（原来固定靛紫） */
+@media (prefers-reduced-motion: no-preference) {
+  .panel.has-fam::before {
+    background: linear-gradient(90deg, transparent, var(--fam, var(--accent-hi)), transparent);
+  }
+}
