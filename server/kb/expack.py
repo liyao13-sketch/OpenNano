@@ -748,10 +748,10 @@ def parse_expack(path: Path, lib) -> dict:
     return {"name": batch, "modules": modules, "edges": edges}
 
 
-#: 画布布局常量（与前端 ProcessNode 尺寸 / `kb/layout_audit.py` 的几何假设保持一致）
-LAYOUT_COL = 300          # 列间距（节点宽 190 + 留白 110）
-LAYOUT_ROW = 200          # 行间距（节点最高约 150：含 3 行备注 + 芯片行）
-LAYOUT_X0, LAYOUT_Y0 = 140, 80
+#: 画布几何**唯一来源**在 `kb/canvas_geom.py`（前端尺寸 / 后端布局 / 体检器三处对齐）。
+#: 这里只把常用名字引进来，别在本文件里再写死尺寸。
+from .canvas_geom import GAP as LAYOUT_GAP, COL_PITCH as LAYOUT_COL   # noqa: E402
+from .canvas_geom import X0 as LAYOUT_X0, Y0 as LAYOUT_Y0, node_height as _node_h  # noqa: E402
 
 
 def _layout_modules(runs_sorted: list[dict], modules: list[dict],
@@ -863,14 +863,28 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
             rows[rid] = rows.get(rid, 0) + lane_shift.get(batch_of.get(rid) or "", 0)
     seasons = [r for r in rid_of if nat_of.get(r) == "season"]
     # season：全部排到主流程下方（成列但不参与主线行号）
-    below = max(rows.values(), default=0) + 2
+    below = max(rows.values(), default=0) + 1
     for i, rid in enumerate(seasons):
         col = max(seq_of.get(rid, 0) - 1, 0)
         rows[rid] = take(col, below + i)
 
+    # ── 落点：**横纵间距等宽 + 行高自适应** ──
+    # 横向：列距 = 节点宽 + GAP（等距）；
+    # 纵向：第 k 行的行距 = 该行**最高节点**的高度 + GAP ⇒ 有备注的行自动变高、没备注的保持紧凑，
+    #       且因为按"备注限高 3 行"的最坏情况算，用户开关「显示备注」都不会压到下一格。
+    row_h: dict[int, int] = {}
+    for m, rid in zip(modules, rid_of):
+        k = rows.get(rid, 0)
+        row_h[k] = max(row_h.get(k, 0), _node_h(m))
+    row_y: dict[int, float] = {}
+    y = float(LAYOUT_Y0)
+    for k in sorted(row_h):
+        row_y[k] = y
+        y += row_h[k] + LAYOUT_GAP
     for m, rid in zip(modules, rid_of):
         col = max(seq_of.get(rid, 0) - 1, 0)
-        m["x"], m["y"] = LAYOUT_X0 + col * LAYOUT_COL, LAYOUT_Y0 + rows.get(rid, 0) * LAYOUT_ROW
+        m["x"] = float(LAYOUT_X0) + col * LAYOUT_COL
+        m["y"] = row_y.get(rows.get(rid, 0), float(LAYOUT_Y0))
 
 
 #: 边的来源（**显示层要能区分**，否则"推断"会被当成"记录"）

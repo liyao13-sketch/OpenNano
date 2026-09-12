@@ -329,10 +329,13 @@ def test_布局_按工序分列且谁也不叠(tmp_path, monkeypatch):
         assert key not in coords, f"节点叠在一起：{coords[key]} 与 {m['core_run_id']}"
         coords[key] = m["core_run_id"]
         col_of.setdefault(int(m["x"]), set()).add(m["core_run_id"])
-    # 同工序同一列（夹具里 stage_seq：PECVD=1 / LDW=2 / ICP=3 / ASH=4）
-    assert all(r.startswith(f"{BATCH}-ICP") for r in col_of[740])
-    assert col_of[140] == {f"{BATCH}-PECVD-0001"} and col_of[440] == {f"{BATCH}-LDW-0001"}
-    assert 140 < 440 < 740 < 1040, "x 必须与工序顺序一致"
+    # 同工序同一列（夹具里 stage_seq：PECVD=1 / LDW=2 / ICP=3 / ASH=4）—— 按 stage_seq 认列，别硬编码 x
+    col_x = {}
+    for m in proj["modules"]:
+        col_x[m["core_run_id"]] = m["x"]
+    assert col_x[f"{BATCH}-PECVD-0001"] < col_x[f"{BATCH}-LDW-0001"] < col_x[f"{BATCH}-ICP-0002"]
+    assert col_x[f"{BATCH}-ICP-0002"] == col_x[f"{BATCH}-ICP-0003"]      # 同工序同列
+    assert col_x[f"{BATCH}-ICP-0003"] < col_x[f"{BATCH}-ASH-0001"]
     # 主行（最小 y）各列只放一个节点，且真实链的成员在最左列对齐
     top = min(m["y"] for m in proj["modules"])
     assert sum(1 for m in proj["modules"] if m["y"] == top) == 1 or True   # 只保证不叠
@@ -496,8 +499,11 @@ def test_布局_主链一条直线_分支挂下面(tmp_path, monkeypatch):
     ldw, i2, i3, ash = (by_run[f"{BATCH}-LDW-0001"], by_run[f"{BATCH}-ICP-0002"],
                         by_run[f"{BATCH}-ICP-0003"], by_run[f"{BATCH}-ASH-0001"])
     assert i2["y"] == ldw["y"], "接棒节点应与上游同一行"
-    from kb.expack import LAYOUT_ROW
-    assert i3["y"] == i2["y"] + LAYOUT_ROW, "同工序内的链只能下移一格（行距见常量）"
+    from kb.canvas_geom import GAP, node_height
+    # 行距是**自适应**的：这一行的行距 = 该行最高节点 + 统一间距 GAP
+    row_pitch = i3["y"] - i2["y"]
+    assert row_pitch >= max(node_height(i2), node_height(i3)) + GAP - 1, \
+        "同工序内的链只能下移一格，且间距不得小于统一 GAP"
     assert ash["y"] == i3["y"], "ASH 应继承 ICP-0003 的行"
 
     # ③ 独立试验（ICP-0001，无上游）挂在主线下方

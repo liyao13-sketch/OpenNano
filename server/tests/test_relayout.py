@@ -92,7 +92,8 @@ def test_重排_未入库的计划_run_父边不许丢(env):
     assert r["planned_only"] == 1
     plan = next(m for m in j["modules"] if m["core_run_id"] == f"{BATCH}-DRIE-0001")
     assert plan["core_parent_run_id"] == f"{BATCH}-ASH-0001"
-    assert plan["x"] > byid["md_ASH"]["x"]                     # 摆在父的右边
+    # 未入库的计划 run 现在也走**同一套栅格**（不再另起一列）：与同工序的节点同列、排在下一行
+    assert plan["y"] > byid["md_ASH"]["y"]
 
 
 def test_重排_干跑不落盘(env):

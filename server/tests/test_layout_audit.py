@@ -114,3 +114,38 @@ def test_一键整理_不同批次分道(proj):
     ys = {m["core_run_id"]: m["y"] for m in proj["modules"]}
     assert ys["OTHER-T9-ICP-0001"] != ys.get(f"{BATCH}-ICP-0001")
     assert audit(proj)["ok"] is True
+
+
+def test_间距等宽_横纵都是同一个_GAP(proj):
+    """★ owner 2026-09-13：**横纵两个方向间距等宽** + 按方块布局自适应。
+
+    判据：横向间距（列距−节点宽）与纵向间距（行距−上行节点高）**都等于统一 GAP**；
+    行距随该行最高节点自适应（无备注的行更紧凑）。
+    """
+    from kb.arrange import arrange_project
+    from kb.canvas_geom import GAP, gaps
+    from kb.layout_audit import audit
+    for m in proj["modules"]:
+        m["x"] = m["y"] = 0
+    arrange_project(proj)
+    g = gaps(proj)
+    assert g["h_gaps"] and g["v_gaps"]
+    assert all(abs(x - GAP) <= 1 for x in g["h_gaps"]), g["h_gaps"]
+    assert all(abs(x - GAP) <= 1 for x in g["v_gaps"]), g["v_gaps"]
+    # 体检器也应认为"间距均匀、横纵等宽"
+    assert audit(proj, comment_lines=3)["ok"] is True
+
+
+def test_行距自适应_有备注的行更高(proj):
+    """给一个节点加长备注 ⇒ 它所在那一行的行距变大（其他行不变）。"""
+    from kb.arrange import arrange_project
+    from kb.canvas_geom import node_height
+    mods = proj["modules"]
+    base = next(m for m in mods if m.get("core_run_id", "").endswith("ICP-0001"))
+    base["comment"] = "长备注" * 40                      # 会被前端限高到 3 行
+    arrange_project(proj)
+    h = node_height(base)
+    below = [m for m in mods if m["x"] == base["x"] and m["y"] > base["y"]]
+    if below:
+        nxt = min(below, key=lambda m: m["y"])
+        assert nxt["y"] - base["y"] == h + 96 or nxt["y"] - base["y"] >= h

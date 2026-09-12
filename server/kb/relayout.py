@@ -76,8 +76,17 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
     # ① 连线先算（布局要按它认"谁接谁的棒"）
     core_mods = [by_run[r["run_id"]] for r in present]
     edges = _edges_from_runs(present, id_of, [m["id"] for m in core_mods])
-    # ② 坐标：主链一条直线、分支挂下（只对 core 里有的 run；计划 run 保留相对位置）
-    _layout_modules(present, core_mods, edges)
+    # ② 坐标：**整张画布走同一套栅格**（含尚未入库的"计划 run"）——
+    #    否则计划节点会按旧的 `+300` 另起一列，横纵间距就不等宽了（体检器会报 gap_uneven）。
+    seen_rid = {r["run_id"] for r in present}
+    layout_runs = list(present) + [
+        {"run_id": rid, "batch_id": (m.get("core_batch_id") or batch),
+         "stage_seq": m.get("core_stage_seq") or 0,
+         "run_nature": (m.get("run_nature") or ""),
+         "parent_run_id": (m.get("core_parent_run_id") or "")}
+        for rid, m in by_run.items() if rid not in seen_rid]
+    layout_mods = [by_run[r["run_id"]] for r in layout_runs]
+    _layout_modules(layout_runs, layout_mods, edges)
     # 同步 core 的**语义标注**回模块（教训：标注常只在 core 侧，画布不回读就看不到）
     for r in present:
         m = by_run[r["run_id"]]
@@ -89,23 +98,9 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
                 m[key] = int(val) if key in ("core_stage_seq", "tune_step") and val.isdigit() else val
             elif key == "run_nature" and key in m:
                 del m[key]
-    # season 节点：挪到主流程**下方**的独立区（同列对齐其工序，y 压到所有主行之下）——
-    # 数据保留、视觉上不占流程线（owner：season 不画；这里给的是"收起来"的位置）
-    main_rows = [float(m.get("y") or 0) for m in core_mods
-                 if (m.get("run_nature") or "") != "season"]
-    season_y = (max(main_rows) if main_rows else 0) + 260
-    seasons = [m for m in core_mods if (m.get("run_nature") or "") == "season"]
-    for i, m in enumerate(seasons):                     # 逐条错开，不许叠在一起
-        m["y"] = season_y + i * 170
-    # 计划 run：挂在父的右侧一列（保持"下一步"的视觉位置）
-    for rid, m in by_run.items():
-        if rid in {r["run_id"] for r in present}:
-            continue
-        par = id_of.get((m.get("core_parent_run_id") or "").strip())
-        pm = next((x for x in mods if x["id"] == par), None)
-        if pm:
-            m["x"], m["y"] = float(pm.get("x") or 0) + 300, float(pm.get("y") or 0)
-
+    # season 节点由 `_layout_modules` 排进同一套栅格（主流程之下、间距同样等于 GAP）——
+    # ⚠️ 这里**不要**再另设"season 区"补偿：曾经硬编码 `+260 / 每格 170`，把均匀间距覆盖成
+    #    114/85/85，体检器立刻报 `gap_uneven`（2026-09-13 实测）。
     # ③ 再补上"计划 run"的原有父边（core 里没有它，不能丢）
     keys = {(e["src"], e["dst"]) for e in edges}
     core_parent = {(r.get("run_id") or "").strip(): (r.get("parent_run_id") or "").strip()

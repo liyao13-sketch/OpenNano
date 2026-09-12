@@ -28,27 +28,17 @@ import itertools
 import json
 from pathlib import Path
 
-#: 与前端 ProcessNode 保持一致（改前端务必同步这里）
-NODE_W = 190
-#: 前端把备注**限高 3 行**（超出省略号）⇒ 体检必须按同一规则建模，否则会报出不存在的情况
-CLAMP_COMMENT_LINES = 3
-NODE_BASE_H = 69          # 标题+副标题+内边距
-CHIP_H = 16               # run/sample/#seq 那一行
-COMMENT_LINE_H = 15       # 备注每行
-MIN_GAP_X = 24            # 两列之间最少留白
-LAYOUT_ROW_FOR_AUDIT = 200  # 后端布局的行距（expack.LAYOUT_ROW，这里只用于报告）
-MIN_GAP_Y = 20            # 同一列相邻节点最少留白
+#: 几何**唯一来源**在 `kb/canvas_geom.py`（前端尺寸 / 后端布局 / 本体检器三处对齐）
+from .canvas_geom import (CHIP_H, CLAMP_COMMENT_LINES, COMMENT_LINE_H, GAP,  # noqa: E402
+                          NODE_BASE_H, NODE_W, gaps as geom_gaps, node_height)
+
+MIN_GAP_X = 24            # 两列之间最少留白（小于它报"列太近"）
+MIN_GAP_Y = 20            # 同列相邻节点最少留白（小于它报"重叠/过近"）
 
 
 def _node_height(m: dict, comment_lines: int = 0) -> int:
-    """节点高度估算 —— **按前端真实渲染规则**（备注限高 3 行）。"""
-    h = NODE_BASE_H
-    if m.get("core_run_id") or m.get("run_nature"):
-        h += CHIP_H
-    lines = min(max(comment_lines, 0), CLAMP_COMMENT_LINES)
-    if lines:
-        h += 6 + lines * COMMENT_LINE_H + 10
-    return h
+    """节点高度估算 —— 直接问几何模块（按前端真实规则：备注限高 3 行）。"""
+    return node_height(m, comments_shown=bool(comment_lines))
 
 
 def audit(project: dict, comment_lines: int = 0) -> dict:
@@ -59,7 +49,7 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
     issues: list[dict] = []
 
     #: 只报不拦的项（结构没错，属于"可优化"/"观感"）
-    WARN_KINDS = {"orphan", "fanout", "hidden_gap"}
+    WARN_KINDS = {"orphan", "fanout", "hidden_gap", "gap_uneven"}
 
     def add(kind: str, msg: str, **extra) -> None:
         issues.append({"kind": kind, "msg": msg,
@@ -139,6 +129,18 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
         if b - a < NODE_W + MIN_GAP_X:
             add("col_tight", f"两列太近：x={a:.0f} 与 x={b:.0f}（间距 {b-a:.0f} < {NODE_W + MIN_GAP_X}）")
 
+    # ⑪ **横纵间距是否等宽**（owner 2026-09-13 要求「横纵两个方向间距等宽」）
+    g = geom_gaps({"modules": mods}, comments_shown=bool(comment_lines))
+    if g["h_gaps"] and g["v_gaps"]:
+        hs, vs = g["h_gaps"], g["v_gaps"]
+        spread_h = max(hs) - min(hs)
+        spread_v = max(vs) - min(vs)
+        if spread_h > 6 or spread_v > 6:
+            add("gap_uneven", f"间距不均匀：横向 {hs}（差 {spread_h:.0f}）· 纵向 {vs}（差 {spread_v:.0f}）")
+        elif abs(sum(hs) / len(hs) - sum(vs) / len(vs)) > 6:
+            add("gap_uneven", f"横纵间距不等宽：横向均值 {sum(hs)/len(hs):.0f} vs 纵向均值 "
+                              f"{sum(vs)/len(vs):.0f}（GAP={GAP}）")
+
     # ⑩ 扇出标签（观感噪声来源）
     fanout: dict[str, int] = {}
     for e in edges:
@@ -164,7 +166,7 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
                      "comment_lines_assumed": comment_lines,
                      "comment_lines_used": min(max(comment_lines, 0), CLAMP_COMMENT_LINES),
                      "comment_clamped": comment_lines > CLAMP_COMMENT_LINES,
-                     "row_gap_expected": LAYOUT_ROW_FOR_AUDIT},
+                     "gap": GAP},
     }
 
 
