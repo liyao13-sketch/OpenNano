@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """文献 KnowledgeItem → 知识条目 导入器(v0.2 契约实现)。
 
-契约: `个人空间/19_工艺资料/项目文档/知识条目Schema与录入规范_v0.2_20260912.md` §四之二~之五
+契约: `个人空间/19_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md` §四之二~之五
 
 用法:
     python3 kb/lit_ingest.py <抽取文件.md> --batch D29-20260912 [--dry-run] [--db <path>]

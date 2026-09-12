@@ -4,7 +4,7 @@
   个人空间/18_工艺数据资产/03_实验数据/cl_rie/{steps,data}.csv  → RIE_Cl (RIE200NL)
   个人空间/18_工艺数据资产/03_实验数据/f_rie/{steps,data}.csv   → RIE_F  (RIE10NR)
 
-映射规范见 OpenNano/项目文档/知识条目Schema与录入规范_v0.1_20260909.md §四。
+映射规范见 个人空间/19_工艺资料/契约/归档/知识条目Schema与录入规范_v0.1_20260909.md §四。
 """
 from __future__ import annotations
 

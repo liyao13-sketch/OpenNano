@@ -6,7 +6,7 @@ v0.2(2026-09-12,跨线定案) 三处改动:
    (source 相同、loc 不同)的多条知识会互相覆盖。
 3. `resolve_reliability()` 来源分档守卫:非 core 来源缺省不再冒充 4 分,
    一律落 2 并写 reliability_basis 留痕。契约见
-   `19_工艺资料/项目文档/知识条目Schema与录入规范_v0.2_20260912.md` §二。
+   `19_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md` §二。
 """
 from __future__ import annotations
 
