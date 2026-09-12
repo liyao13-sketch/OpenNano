@@ -91,6 +91,7 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
             "parent_run_id": (m.get("core_parent_run_id") or m.get("parent_run_id")
                               or parent_map.get(rid) or ""),
             "sample_id": (m.get("core_sample_id") or m.get("sample_id") or ""),
+            "run_nature": (m.get("core_run_nature") or m.get("run_nature") or ""),
             "status": m.get("run_state") or "planned",
             "tool_id": m.get("machine_name") or "",
             "date": (m.get("core_date") or ""),
@@ -241,8 +242,8 @@ def parallels(modules: list[dict], batch: str) -> list[dict]:
             "kind": ("同一上游下的并发（分片/多片并行做同一工序）" if same_parent
                      else "无共同上游的同 stage 并发（疑似分片未记 die）"),
             "hint": ("" if len(samples) >= 2 else
-                     "这些 run 未区分 sample/die ⇒ 只能画成直线；"
-                     "补 samples(die 层) + runs.sample_id 后即可渲染为并行分支"),
+                     ("这些 run 的 sample 是**同一个**（可能是样品组）⇒ 组内区分未记；"
+                      "若组内每颗各做一次，请标 `core_run_nature=trial`")),
         })
     out.sort(key=lambda x: (-x["count"], x["stage"]))
     return out
@@ -255,6 +256,11 @@ NATURE_LABEL = {
     "batch_level": "批次级(多片同做)",  # 无父 + 与兄弟同 stage/sample ⇒ season 或"多 die 一起做"
     "unclassified": "未分类",
 }
+
+
+#: "整片级"工序：这些步骤通常做整片（还没裂片或不分到具体 die），
+#: 与"某颗 die 上的一次试验"性质不同 ⇒ 分类时优先判 batch_level。
+WHOLE_WAFER_STAGES = ("PECVD", "LDW", "EBL", "UV", "MA6", "ASH", "EVAP", "SPUT", "LITHO")
 
 
 def classify(modules: list[dict], batch: str) -> list[dict]:
@@ -276,23 +282,38 @@ def classify(modules: list[dict], batch: str) -> list[dict]:
     out, needs_human = [], []
     for r in rows:
         m = by_run.get(r["run_id"]) or {}
-        override = (m.get("core_run_nature") or m.get("run_nature") or "").strip()
+        # 标注优先级：画布模块 → core/runs.csv 的 run_nature 列（与 sample_id 同理：标注常只在 core 侧）
+        override = (m.get("core_run_nature") or m.get("run_nature")
+                    or r.get("run_nature") or "").strip()
         same_stage = by_stage[r["stage"]]
         if override in NATURE_LABEL:
             nature, why = override, "人工标注（域知识优先）"
         elif r["parent_run_id"]:
             nature, why = "chain", f"上游 = {r['parent_run_id']}"
+        elif (r["stage"] in WHOLE_WAFER_STAGES and "-DIE" not in (r["sample_id"] or "").upper()
+              and any("-DIE" in (x["sample_id"] or "").upper() for x in rows)):
+            # 该批已有 die 归属的 run，而这一条仍挂在**整片**上 ⇒ 未分到具体 die
+            # （例：AR50-T1 的 PECVD/LDW 做整片；ASH 在多片同炉后仍写整片）
+            nature = "batch_level"
+            why = ("无上游、挂在**整片**上；本批已有 die 归属的 run ⇒ "
+                   "此 run 未分到具体 die（整片 / 多片同炉）")
         elif len(same_stage) == 1:
             nature, why = "trial", "该 stage 只有这一条"
         else:
             peers = [x for x in same_stage if x["run_id"] != r["run_id"]]
             same_sample = [x for x in peers if r["sample_id"] and x["sample_id"] == r["sample_id"]]
-            if same_sample:
-                nature, why = "batch_level", "无上游且与同 stage 的其它 run 共享 sample（多片一起做）"
+            if not r["sample_id"]:
+                nature = "batch_level"
+                why = "无上游、未标 sample ⇒ 疑为 season 或批次级（待人工确认）"
+            elif same_sample:
+                # ⚠️ 关键：sample 也可能是**样品组**（如 DIE4 = 4 颗一组）。
+                # 同组多条 run **不等于**同一样品做多次，也不等于独立试验 —— 工具不猜。
+                nature = "batch_level"
+                why = (f"无上游、与同 stage 的 {len(same_sample)} 条 run 共享"
+                       f" sample「{r['sample_id']}」；若该 sample 是**样品组**（组内每颗各做一次），"
+                       f"应标 `core_run_nature=trial` 以区分")
             else:
                 nature, why = "trial", "无上游、sample 在同 stage 内唯一 ⇒ 独立试验"
-                if not r["sample_id"]:
-                    why += "；**但本 run 未标 sample ⇒ 疑似 season/批次级，待人工确认**"
         item = {"run_id": r["run_id"], "stage": r["stage"], "sample_id": r["sample_id"],
                 "parent_run_id": r["parent_run_id"], "nature": nature,
                 "nature_label": NATURE_LABEL[nature], "why": why,
