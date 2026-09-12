@@ -109,10 +109,15 @@ def plan_vs_actual(batch: str) -> dict:
         "planned": planned,
         "planned_ids": _ids(spec.get("id_pattern", ""), planned or 0)[:8] + (["…"] if (planned or 0) > 8 else []),
         "id_pattern": spec.get("id_pattern", ""),
-        "actual_allocated": actual,          # 兼容旧字段（= top + inner）
-        "used_from_wafer": top,              # ★ 顶层用量（从整片取）—— 数据线口径的"19"
-        "used_from_group": inner,            # ★ 组内取用（从某个组里再取）
+        # ★ 正式口径（契约 v0.1.5 §十六之补，数据线 2026-09-13 裁定）：
+        #   used_top 顶层实际用量 = allocate 且 from = 整片/池子
+        #   used_within 组内再取用 = allocate 且 from = 已分配组（同一物理对象的更细粒度，**不得与顶层相加**）
+        #   sum_all 粗粒度总和 —— **仅兼容旧字段，不得当"实际用量"展示**
+        "used_top": top, "used_within": inner, "sum_all": actual,
+        # 旧字段名保留（兼容），语义同新名
+        "used_from_wafer": top, "used_from_group": inner, "actual_allocated": actual,
         "root_sample_id": root_id,
+        "usage_rule": ((spec.get("planned_use") or {}).get("usage_rule") or ""),
         "splits": [{"at": e["at"], "count": e["count"], "status": e["status"],
                     "after_stage": e["after_stage"], "note": e["note"][:40]} for e in splits],
         "allocations": [{"at": e["at"], "from": e["from_sample_id"], "to": e["to_sample_id"],
@@ -121,7 +126,7 @@ def plan_vs_actual(batch: str) -> dict:
         "source": "core(只读) + batch_events.csv(只读)",
         "note": ("`split`=物理裂片（只 1 条×49）；`allocate`=取样分配（3 条 4/15/1）。"
                  "二者不可混为一谈；实际用量只算 allocate。"),
-        "unallocated": unallocated,          # 未用 = 计划 − 顶层用量（不含组内取用）
+        "unallocated": unallocated,          # = grid.count − used_top（不含组内取用）
     }
 
 

@@ -134,16 +134,22 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     } catch (e: any) { setMsg('❌ 菜单扫描失败: ' + e.message) } finally { setBusy('') }
   }
 
-  const proposeAllocate = async (apply = false) => {
+  /** 统一的事件提案（kind=allocate 取样分配 / split 物理裂片）。
+   *  ⚠️ 两者不可混：split 是"1 片 → N 颗"的物理事件，allocate 是"从现有样品取 N 颗"（不改总数）。 */
+  const proposeEvent = async (kind: 'allocate' | 'split', apply = false) => {
     const n = Number((document.getElementById('alloc-n') as HTMLInputElement)?.value || 0)
     const to = (document.getElementById('alloc-to') as HTMLInputElement)?.value || ''
     if (!to || !n) { setMsg('请填"取样颗数"和"到样品"'); return }
     setBusy('alloc'); setMsg('')
     try {
       const d = await post('/api/batch/propose', { batch_id: batch, operator: 'owner', apply,
-        events: [{ kind: 'allocate', at: new Date().toISOString().slice(0, 10),
-                   from_sample_id: `${batch}-01`, to_sample_id: to, count: n,
-                   note: '工具侧批次面板产出' }] })
+        events: [{ kind, at: new Date().toISOString().slice(0, 10),
+                   from_sample_id: `${batch}-01`,
+                   to_sample_id: kind === 'split' ? '' : to, count: n,
+                   after_stage: kind === 'split' ? 'LDW' : '',
+                   id_pattern: kind === 'split' ? `${batch}-01-D{n:02d}` : '',
+                   note: kind === 'split' ? '工具侧：物理裂片（1 片 → N 颗）'
+                                          : '工具侧：取样分配（从现有样品取 N 颗）' }] })
       const chk = d.precheck || {}
       setMsg((chk.ok ? '✅ 本地预检通过' : '❌ 本地预检未过') + `\n`
         + (chk.errors?.length ? '错误：\n' + chk.errors.join('\n') + '\n' : '')
@@ -291,8 +297,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 <div style={{ marginTop: 2 }}>
                   计划 <b>{events.plan_vs_actual.planned ?? '—'}</b> 颗
                   {events.plan_vs_actual.id_pattern ? `（${events.plan_vs_actual.id_pattern}）` : ''}
-                  · 实际用量 <b>{events.plan_vs_actual.used_from_wafer ?? 0}</b> 颗（从整片取）
-                  {events.plan_vs_actual.used_from_group ? ` · 组内另取 ${events.plan_vs_actual.used_from_group} 颗` : ''}
+                  · 实际用量 <b>{events.plan_vs_actual.used_top ?? 0}</b> 颗（顶层：from=整片）
+                  {events.plan_vs_actual.used_within ? ` · 组内再取 ${events.plan_vs_actual.used_within} 颗` : ''}
                   {events.plan_vs_actual.unallocated != null ? ` · 未用 ${events.plan_vs_actual.unallocated} 颗` : ''}
                 </div>
                 {events.plan_vs_actual.planned_ids?.length > 0 && (
@@ -303,6 +309,12 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 )}
                 {events.plan_vs_actual.spec?.source_gds && (
                   <div style={{ opacity: .6, fontSize: 11 }}>版图来源：{events.plan_vs_actual.spec.source_gds}</div>
+                )}
+                {events.plan_vs_actual.usage_rule && (
+                  <div style={{ opacity: .6, fontSize: 11 }} title={events.plan_vs_actual.usage_rule}>
+                    计量规则（来自 core 的 <code>sample_spec_json.planned_use.usage_rule</code>）：
+                    {events.plan_vs_actual.usage_rule.slice(0, 78)}…
+                  </div>
                 )}
                 <table className="tbl" style={{ width: '100%', fontSize: 12, marginTop: 4 }}>
                   <thead><tr><th>event</th><th>kind</th><th>日期</th><th>从 → 到</th><th>颗数</th><th>状态</th></tr></thead>
@@ -331,9 +343,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                     <input id="alloc-n" defaultValue="20" style={{ width: 60, marginLeft: 4 }} /></label>
                   <label style={{ fontSize: 12 }}>到样品
                     <input id="alloc-to" placeholder={`${batch}-01-DIE20`} style={{ width: 190, marginLeft: 4 }} /></label>
-                  <button className="btn ghost" onClick={proposeAllocate}
-                    title="产出提案 → 本地预检 → 数据线 propose_apply.py 干跑（不落账）">生成取样提案（干跑）</button>
-                  <button className="btn ghost" onClick={() => proposeAllocate(true)}
+                  <button className="btn ghost" onClick={() => proposeEvent('allocate', false)}
+                    title="产出**取样分配**提案 → 本地预检 → 数据线 propose_apply.py 干跑（不落账）">取样提案（干跑）</button>
+                  <button className="btn ghost" onClick={() => proposeEvent('split', false)}
+                    title="产出**物理裂片**提案（split，1 片 → N 颗）→ 干跑">裂片提案（干跑）</button>
+                  <button className="btn ghost" onClick={() => proposeEvent('allocate', true)}
                     title="真正落账（由数据线脚本执行，含幂等与不推断校验）">落账（--apply）</button>
                 </div>
               </div>
