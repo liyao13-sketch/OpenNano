@@ -155,13 +155,28 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         stage = resolve_stage(m, lib)
         if not stage:
             continue
-        stage_counter[stage] = stage_counter.get(stage, 0) + 1
-        rid = f"{batch}-{stage}-{stage_counter[stage]:04d}"
-        m["core_run_id"] = rid
+        # ⚠️ 已有 core_run_id 的模块**一律沿用**（续做时工具已算好序号）；
+        #    只有全新节点才按 stage 计数分配。否则重导出会把 DRIE-0002 重编号回 0001。
+        if not m.get("core_run_id"):
+            stage_counter[stage] = stage_counter.get(stage, 0) + 1
+            rid = f"{batch}-{stage}-{stage_counter[stage]:04d}"
+            m["core_run_id"] = rid
+        rid = m["core_run_id"]
+        parsed = rid.rsplit("-", 2)
+        seq_in_stage = int(parsed[2]) if len(parsed) == 3 and parsed[2].isdigit() else \
+            stage_counter.get(stage, 1)
+        m.setdefault("core_batch_id", batch)
+        m.setdefault("core_stage", stage)
+        m.setdefault("core_stage_seq", seq_in_stage)
         tool_id = m.get("machine_name") or ""
-        run_rows.append([rid, batch, "", stage, stage_counter[stage], now,
+        # parent：工具算好的优先，否则取同 batch 上一个 run（导出顺序即执行顺序）
+        parent = m.get("core_parent_run_id") or (run_rows[-1][0] if run_rows else "")
+        m["core_parent_run_id"] = parent
+        run_rows.append([rid, batch, "", stage, m.get("core_stage_seq", seq_in_stage), now,
                          "", "", m.get("equipment_name") or stage, tool_id,
-                         "", operator or "", purpose or "", "", "", "", "planned", ""])
+                         m.get("core_recipe_id") or "", operator or "", purpose or "",
+                         parent, "", "", "planned",
+                         m.get("comment") or ""])
         for si, (sname, pv) in enumerate(group_params(m.get("params") or {}).items(), start=1):
             dur = next((vv for kk, vv in pv.items()
                         if kk.endswith(("time_s", "duration_s"))), "")

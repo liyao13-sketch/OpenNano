@@ -170,6 +170,161 @@ def api_export_data(req: ExportDataReq):
     return _xlsx_response(data, "opennano_core")
 
 
+# ---------- P0: 批次管理 · 续做 · 表单契约 · 菜单直读 ----------
+class BatchRunsReq(BaseModel):
+    modules: list[dict] = []
+    batch_id: str
+
+
+class RunContinueReq(BaseModel):
+    project_name: str = ""
+    batch_id: str
+    stage: str
+    modules: list[dict] = []
+    edges: list[dict] = []
+    parent_run_id: str = ""          # 空 = 取该 stage 最后一个 run（续做语义）
+    menu_group: int | None = None    # 给了就是用 group N 灌参
+    menu_dir: str = ""
+    title: str = ""
+    date: str = ""
+    persist: bool = False
+
+
+class MenuScanReq(BaseModel):
+    dir: str = ""
+    tool: str = "RIE-400iPB"
+
+
+class MenuGroupReq(BaseModel):
+    group: int
+    dir: str = ""
+    tool: str = "RIE-400iPB"
+
+
+@app.get("/api/form/contract")
+def api_form_contract():
+    """表单用枚举/键表（全部读自 schema 与受控词表，工具侧不另编一份）。"""
+    from kb import form_contract as fc
+    try:
+        return fc.contract()
+    except Exception as e:                       # noqa: BLE001
+        raise HTTPException(500, f"读契约失败（schema/词表/解析器不可达）：{e}") from e
+
+
+@app.post("/api/batch/list")
+def api_batch_list(req: ExpackExportReq):
+    """画布上的 batch 概览（含节点/连线数）。"""
+    from kb import batch_runs as br
+    mods = req.modules or []
+    return {"batches": [{**b, "chain_nodes": b["runs"]} for b in br.batches_of(mods)]}
+
+
+@app.post("/api/batch/runs")
+def api_batch_runs(req: BatchRunsReq):
+    """某 batch 的 run 链（按 stage_seq 排序 + parent 链 + 状态）。"""
+    from kb import batch_runs as br
+    return br.chain_of(req.modules or [], req.batch_id)
+
+
+@app.post("/api/run/continue")
+def api_run_continue(req: RunContinueReq):
+    """**续做**：算 run_id / parent_run_id / stage_seq，可选直接用 group N 灌参。
+
+    - 序号由工具算（该 batch 该 stage 已有最大序号 +1），**禁手输**；stage_seq 沿用已入库值。
+    - `menu_group` 给了 ⇒ 调共享解析器灌三段 recipe 的 steps（数据线权威口径）。
+    - `persist=true` 时把新节点+连线写回工程文件（画布刷新即见）。
+    """
+    import copy
+    import uuid as _uuid
+    from kb import batch_runs as br
+    mods = req.modules or []
+    nxt = br.next_run(mods, req.batch_id, req.stage, req.parent_run_id or None)
+    src = next((m for m in mods if m.get("core_run_id") == nxt["parent_run_id"]), None)
+
+    menu_info = None
+    steps: list[dict] = []
+    if req.menu_group:
+        from kb import menu_reader as mr
+        export = req.menu_dir or str(mr.default_menu_dir() / "RIE-400iPB")
+        g = mr.group_steps(int(req.menu_group), export)
+        steps = g["steps"]
+        menu_info = {"group": g["group"], "group_seq": g["group_seq"],
+                     "segments": g["segments"], "total_steps": g["total_steps"],
+                     "defined_total": g["defined_total"], "skipped_slots": g["skipped_slots"],
+                     "recipe_id": f"RCP-400iPB-G{int(req.menu_group):03d}", "dir": export}
+
+    base = copy.deepcopy(src) if src else {}
+    new_mod = {
+        **{k: v for k, v in base.items()
+           if k not in ("core_run_id", "core_parent_run_id", "core_recipe_id",
+                        "key_values", "sim_result", "core_date", "id")},
+        "id": f"md_{_uuid.uuid4().hex[:8]}",
+        "name": (req.title or (base.get("name") or "") or f"{req.stage} 续做"),
+        "x": float(base.get("x") or 0) + 260,
+        "y": float(base.get("y") or 0),
+        "core_run_id": nxt["run_id"],
+        "core_parent_run_id": nxt["parent_run_id"],
+        "core_batch_id": nxt["batch_id"],
+        "core_stage": nxt["stage"],
+        "core_stage_seq": nxt["stage_seq"],
+        "core_date": req.date or "",
+        "run_state": "planned",
+        "annotations": [],
+    }
+    if menu_info:
+        new_mod["core_recipe_id"] = menu_info["recipe_id"]
+        new_mod["core_menu_steps"] = steps          # 灌入的 steps（与 CSV 同口径）
+
+    edge = ({"src": src["id"], "dst": new_mod["id"]} if src else None)
+    project = {"name": req.project_name or req.batch_id,
+               "modules": mods + [new_mod],
+               "edges": (req.edges or []) + ([edge] if edge else [])}
+    if req.persist:
+        p = _project_path(project["name"])
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(project, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    issues: list[str] = []
+    if steps:
+        from kb import form_contract as fc
+        issues = fc.check_steps(steps, strict=True, stage=nxt["stage"])
+    return {"run": nxt, "module": new_mod, "edge": edge, "menu": menu_info,
+            "project": project, "issues": issues,
+            "saved": bool(req.persist),
+            "summary": (f"{nxt['run_id']}（parent={nxt['parent_run_id'] or '—'} · "
+                        f"stage_seq={nxt['stage_seq']}）"
+                        + (f" · 灌入 {len(steps)} 步" if steps else ""))}
+
+
+@app.get("/api/menu/zones")
+def api_menu_zones():
+    from kb import menu_reader as mr
+    return {"zones": mr.slot_zones(), "scope_max": mr.SCOPE_MAX,
+            "default_dir": str(mr.default_menu_dir()), "pair_tol_min": mr.PAIR_TOL_MIN}
+
+
+@app.post("/api/menu/scan")
+def api_menu_scan(req: MenuScanReq):
+    """解析一个设备菜单导出目录（.grp/.rcp）→ 预览（不写任何文件）。"""
+    from kb import menu_reader as mr
+    d = req.dir or str(mr.default_menu_dir() / req.tool)
+    try:
+        return mr.load_menu(d)
+    except (FileNotFoundError, mr.MenuParserUnavailable) as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/menu/group")
+def api_menu_group(req: MenuGroupReq):
+    """取 group N 的三段步骤（**预览**；实际灌参走 /api/run/continue）。"""
+    from kb import menu_reader as mr
+    d = req.dir or str(mr.default_menu_dir() / req.tool)
+    try:
+        return mr.group_steps(int(req.group), d)
+    except (FileNotFoundError, mr.MenuParserUnavailable, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+
+
 class ExpackExportReq(BaseModel):
     name: str = "EXP"
     modules: list[dict] = []

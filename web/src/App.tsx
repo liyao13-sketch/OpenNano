@@ -6,6 +6,7 @@ import ReactFlow, {
 import { api, download } from './api'
 import Settings from './Settings'
 import KbBrowser from './KbBrowser'
+import BatchPanel from './BatchPanel'
 import PanelTabs from './PanelTabs'
 import type { Module, Library, CatalogItem, Equipment } from './types'
 
@@ -86,6 +87,7 @@ export default function App() {
   const [sending, setSending] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
   const [projectName, setProjectName] = useState('未命名项目')
   const [loadOpen, setLoadOpen] = useState(false)
   const [projects, setProjects] = useState<{name:string;modules:number;edges:number;saved_at:string}[]>([])
@@ -763,6 +765,7 @@ export default function App() {
         <button className="btn ghost" onClick={openLoad}>载入</button>
         <button className="btn ghost" onClick={save}>保存</button>
         <span className="topbar-sep" />
+        <button className="btn ghost" onClick={() => setBatchOpen(true)} title="批次管理：run 链 / 续做 / 表单填写 / DRIE 菜单直读">批次</button>
         <button className="btn ghost" onClick={exportExpack} title="画布流程 → 实验数据包(core 格式,含人读流程卡.md)">导出实验包</button>
         <button className="btn ghost" onClick={exportCard} title="画布流程 → 实验流程卡(Markdown,人读,可打印上机)">导出流程卡</button>
         <button className="btn ghost" onClick={importExpack} title="实验数据包(文件夹/zip) → 画布流程">导入实验包</button>
@@ -1093,6 +1096,11 @@ export default function App() {
         <span style={{ color: online ? 'var(--ok)' : 'var(--bad)' }}>{online ? '后端已连接' : '后端未连接'}</span>
       </div>
       {kbOpen && <KbBrowser onClose={() => setKbOpen(false)} />}
+      {batchOpen && <BatchPanel onClose={() => setBatchOpen(false)} ctx={{
+        projectName, modules: nodes.map(n => n.data.module as Module),
+        edges: edges.map(e => ({ src: e.source, dst: e.target })),
+        onApply: (p, log) => { loadProjectObj(p); pushLog('run', `批次续做：${log}`) },
+      }} />}
       {loadOpen && (
         <div style={{ position:'fixed', inset:0, background:'rgba(8,9,10,.72)', backdropFilter:'blur(2px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
           <div style={{ width:520, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
