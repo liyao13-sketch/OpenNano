@@ -467,3 +467,42 @@ def test_relayout_season_不叠在一起(tmp_path, monkeypatch):
     j = _json.loads(p.read_text(encoding="utf-8"))
     seasons = [(m["x"], m["y"]) for m in j["modules"] if m.get("run_nature") == "season"]
     assert len(seasons) == 2 and len(set(seasons)) == 2
+
+
+def test_布局_主链一条直线_分支挂下面(tmp_path, monkeypatch):
+    """★ 回归：owner"从 DWL 到 ICP etch 的连线仍然混乱"。
+
+    本质不变量（比"全在同一行"更准）：
+      ① **任何边都不许往上走**（down 或平）—— 旧的乱正是"接棒那条被排到底部、又斜着往上接 ASH"；
+      ② 脊柱子节点**继承父的行号**（同列放不下时才下移一格，例如同工序内的链 ICP-0002→0003）；
+      ③ 分支一律挂在主线**下方**；④ 同列不叠。
+    """
+    from kb import append_pack as ap
+    d = _seed_ar50lj(tmp_path / "core")
+    monkeypatch.setattr(ap, "CORE_DIR", d)
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    proj = ap.core_to_project(BATCH)
+    byid = {m["id"]: m for m in proj["modules"]}
+    by_run = {m["core_run_id"]: m for m in proj["modules"]}
+
+    # ① 边不许往上走
+    for e in proj["edges"]:
+        a, b = byid[e["src"]], byid[e["dst"]]
+        assert b["y"] >= a["y"], f"边往上走了：{a['core_run_id']} → {b['core_run_id']}"
+        if e.get("_link") == "inferred":
+            assert b["x"] > a["x"], f"推断边必须跨工序：{a['core_run_id']} → {b['core_run_id']}"
+
+    # ② 脊柱继承：LDW 的接棒是 ICP-0002（同工序内再续 0003 ⇒ 只下移一格）
+    ldw, i2, i3, ash = (by_run[f"{BATCH}-LDW-0001"], by_run[f"{BATCH}-ICP-0002"],
+                        by_run[f"{BATCH}-ICP-0003"], by_run[f"{BATCH}-ASH-0001"])
+    assert i2["y"] == ldw["y"], "接棒节点应与上游同一行"
+    assert i3["y"] == i2["y"] + 170, "同工序内的链只能下移一格"
+    assert ash["y"] == i3["y"], "ASH 应继承 ICP-0003 的行"
+
+    # ③ 独立试验（ICP-0001，无上游）挂在主线下方
+    assert by_run[f"{BATCH}-ICP-0001"]["y"] > i2["y"]
+
+    # ④ 同列不叠
+    for x in {m["x"] for m in proj["modules"]}:
+        col = [m["y"] for m in proj["modules"] if m["x"] == x]
+        assert len(col) == len(set(col))

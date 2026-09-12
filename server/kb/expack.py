@@ -738,41 +738,106 @@ def parse_expack(path: Path, lib) -> dict:
     modules = [_module_from_run(r, i) for i, r in enumerate(runs_sorted)]
     id_by_run = {r.get("run_id"): m["id"] for r, m in zip(runs_sorted, modules)}
     edges = _edges_from_runs(runs_sorted, id_by_run, [m["id"] for m in modules])
-    _layout_modules(runs_sorted, modules)              # 列=工序，行=链深/分支缩进
+    _layout_modules(runs_sorted, modules, edges)       # 列=工序，主链一行、分支挂下
     return {"name": batch, "modules": modules, "edges": edges}
 
 
-def _layout_modules(runs_sorted: list[dict], modules: list[dict]) -> None:
-    """按**工艺列**摆放节点（就地改 `x`/`y`）。
+def _layout_modules(runs_sorted: list[dict], modules: list[dict],
+                    edges: list[dict] | None = None) -> None:
+    """按**工艺列**摆放节点（就地改 `x`/`y`）。**主链一条直线，分支挂下面。**
 
-    - **x**：`stage_seq` 决定第几列 ⇒ 左到右就是工艺顺序（PECVD → LDW → ICP → ASH → DRIE）；
-    - **y**：**有记录上游的留在主行**，无上游的分支/独立试验往下缩进。
+    - **x** = 工序列（`stage_seq`）⇒ 左到右就是工艺顺序；
+    - **y** = 主线固定第 1 行（y=80）：**链一路向右，不再上下跳**；并存的分支/独立试验往下排。
 
-    规则只有一条，为的是"一眼看懂"：
-      主行 = 一段接一段的真实链（含收口步骤 ASH/DRIE，它们的父在 core 里有写）；
-      下缩 = 各工序的**并存试验**（AR50-T1 的 5 条独立 ICP 就是它们）。
-    这样不会被排成一条斜线假装串行（2026-09-13 owner报障的观感根因：
-    原实现 `x = 120 + (idx % 2) * 40, y = 60 + idx * 130`）。
+    为什么这么改（2026-09-13 owner："从 DWL 到 ICP etch 的连线仍然混乱"）：
+      旧规则让"有记录父"的节点在各列内顺排 ⇒ AR50-T1 里真正接棒的 `ICP-0008` 被排到第 3 行，
+      而 ASH/DRIE 在第 1 行 ⇒ 画面成了"DWL 扇出 5 条 + 一条从底部斜着往上接 ASH"，看着就乱。
+      **判据换成"谁接着往下走"**：每个父节点挑一个**子树最深的子节点当脊柱**（= 继续流向后续工序的那条），
+      它**继承父的行号**；其余子节点是分支，依次往下挂。于是主链永远是一条直线、分支像扇子展开 ——
+      既看得出流程，也看得出"哪几条是并存的"。
+    season（热机）**单独最后摆**（本就不入流程，`relayout` 还会把它们挪到独立区）。
     """
-    chained = {(r.get("run_id") or "").strip()
-               for r in runs_sorted if (r.get("parent_run_id") or "").strip()}
-    by_stage: dict[int, list[str]] = {}
-    for r in runs_sorted:
-        by_stage.setdefault(int(r.get("stage_seq") or 0), []).append((r.get("run_id") or "").strip())
-    for m, r in zip(modules, runs_sorted):
-        rid = (r.get("run_id") or "").strip()
-        seq = int(r.get("stage_seq") or 0)
-        peers = by_stage.get(seq, [])
-        at = peers.index(rid) if rid in peers else 0
-        if rid in chained:
-            # 链内节点：同列有多条（AR50-T1 的 ICP-0006/0007/0008）就在列内往下顺排 ——
-            # 否则会**叠在同一个坐标**上（回归网抓到过）
-            row = sum(1 for x in peers[:at] if x in chained)
-        else:
-            # 并存/独立：本工序内第几条；该列上方有链内节点时**整体下移**，绝不叠上去
-            row = at + sum(1 for x in peers if x in chained)
-        col = max(seq - 1, 0)
-        m["x"], m["y"] = 140 + col * 300, 80 + row * 170
+    rid_of = [(r.get("run_id") or "").strip() for r in runs_sorted]
+    seq_of = {rid: int(r.get("stage_seq") or 0) for rid, r in zip(rid_of, runs_sorted)}
+    nat_of = {rid: (r.get("run_nature") or "").strip() for rid, r in zip(rid_of, runs_sorted)}
+    mid_of = {rid: m["id"] for m, rid in zip(modules, rid_of) if rid}
+    rid_by_mid = {mid: rid for rid, mid in mid_of.items()}
+
+    # 有效父：记录边优先，其次推断边（同 `_edges_from_runs` 的产物）
+    parent: dict[str, str] = {}
+    inferred: dict[str, bool] = {}
+    for e in (edges or []):
+        rid, src = rid_by_mid.get(e.get("dst")), rid_by_mid.get(e.get("src"))
+        if not rid or not src or rid == src:
+            continue
+        is_inf = e.get("_link") == "inferred"
+        if rid not in parent or (inferred.get(rid) and not is_inf):
+            parent[rid], inferred[rid] = src, is_inf
+    children: dict[str, list[str]] = {}
+    for rid in rid_of:
+        p = parent.get(rid)
+        if p:
+            children.setdefault(p, []).append(rid)
+
+    memo: dict[str, int] = {}
+
+    def reach(rid: str, seen: frozenset = frozenset()) -> int:
+        """该节点子树能走到的最远工序号 ⇒ 用来挑脊柱（继续往下走的那条）。"""
+        if rid in memo:
+            return memo[rid]
+        if rid in seen:
+            return seq_of.get(rid, 0)
+        best = seq_of.get(rid, 0)
+        for c in children.get(rid, []):
+            best = max(best, reach(c, seen | {rid}))
+        memo[rid] = best
+        return best
+
+    rows: dict[str, int] = {}
+    used: dict[int, set[int]] = {}
+
+    def take(col: int, want: int) -> int:
+        got, busy = max(want, 0), used.setdefault(col, set())
+        while got in busy:
+            got += 1
+        busy.add(got)
+        return got
+
+    def place(rid: str, want: int) -> None:
+        if rid in rows:
+            return
+        col = max(seq_of.get(rid, 0) - 1, 0)
+        rows[rid] = take(col, want)
+        kids = children.get(rid, [])
+        if not kids:
+            return
+        spine = max(kids, key=lambda k: (reach(k), kids.index(k)))   # 并列时取后者（run 序靠后=真正的接棒）
+        place(spine, rows[rid])                                      # 脊柱继承行号 ⇒ 主线直线
+        nxt = rows[rid] + 1
+        for k in kids:
+            if k != spine:
+                place(k, nxt)
+                nxt = rows[k] + 1
+
+    mainstream = [r for r in rid_of if nat_of.get(r) != "season"]
+    seasons = [r for r in rid_of if nat_of.get(r) == "season"]
+    root_row = 0
+    for rid in mainstream:
+        if not parent.get(rid):
+            place(rid, root_row)
+            root_row = rows[rid] + 1
+    for rid in mainstream:                       # 兜底：父不在本图里（跨包续做）
+        if rid not in rows:
+            place(rid, 0)
+    # season：全部排到主流程下方（成列但不参与主线行号）
+    below = max(rows.values(), default=0) + 2
+    for i, rid in enumerate(seasons):
+        col = max(seq_of.get(rid, 0) - 1, 0)
+        rows[rid] = take(col, below + i)
+
+    for m, rid in zip(modules, rid_of):
+        col = max(seq_of.get(rid, 0) - 1, 0)
+        m["x"], m["y"] = 140 + col * 300, 80 + rows.get(rid, 0) * 170
 
 
 #: 边的来源（**显示层要能区分**，否则"推断"会被当成"记录"）

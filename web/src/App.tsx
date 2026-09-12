@@ -36,6 +36,14 @@ function ProcessNode({ data }: any) {
     : rs === 'stale'   ? { t:'!', c:'var(--warn)', bg:'rgba(212,162,78,.14)', bd:'var(--warn)' }
     : { t:'○', c:'var(--faint)', bg:'transparent', bd:'var(--border)' }
   const kv = Object.entries(m.key_values || {}).slice(0, 3)
+  /* —— 数据桥标识（每个模块都要能一眼看出"我是哪个 run"）——
+     name/equipment_name 往往同型号重复（8 个 ICP 全叫 "ICP Etch"），没有 run 号就分不清谁是谁。
+     短名只去批次前缀：`AR50-T1-ICP-0008` → `ICP-0008`（省地方，又保留工序+序号）。 */
+  const runId = m.core_run_id || ''
+  const batchId = m.core_batch_id || (runId.match(/^(.*)-[A-Za-z]+-\d{4}$/)?.[1] || '')
+  const strip = (s: string) => (batchId && s.startsWith(batchId + '-') ? s.slice(batchId.length + 1) : s)
+  const shortRun = runId ? strip(runId) : ''
+  const shortSample = m.core_sample_id ? strip(m.core_sample_id) : ''
   return (
     <div style={{ width:190, background:'var(--surface)', border:'1px solid var(--border)',
       borderLeft:`2px solid ${m.disabled || isSeason ? 'var(--faint)' : color}`, borderRadius:10,
@@ -56,6 +64,33 @@ function ProcessNode({ data }: any) {
               padding: isSeason ? '0 4px' : undefined }}>{badge.t}</span>
         </div>
         <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{secondary}</div>
+        {(shortRun || shortSample) && (
+          <div style={{ marginTop:5, display:'flex', flexWrap:'wrap', gap:4 }}>
+            {shortRun && (
+              <span title={`core run：${runId}`}
+                style={{ fontSize:10, fontFamily:'var(--mono)', fontWeight:600,
+                  color:'var(--accent-hi)', background:'var(--accent-soft)',
+                  border:'1px solid var(--accent-ring)', borderRadius:4, padding:'0 4px' }}>
+                {shortRun}
+              </span>
+            )}
+            {shortSample && (
+              <span title={`样品/die：${m.core_sample_id}`}
+                style={{ fontSize:10, fontFamily:'var(--mono)', color:'var(--text-2)',
+                  background:'var(--raise)', border:'1px solid var(--border)',
+                  borderRadius:4, padding:'0 4px' }}>
+                {shortSample}
+              </span>
+            )}
+            {m.core_stage_seq != null && (
+              <span title={`工序序号 stage_seq=${m.core_stage_seq}`}
+                style={{ fontSize:10, fontFamily:'var(--mono)', color:'var(--faint)',
+                  border:'1px solid var(--border)', borderRadius:4, padding:'0 4px' }}>
+                #{m.core_stage_seq}
+              </span>
+            )}
+          </div>
+        )}
         {kv.length > 0 && (
           <div style={{ marginTop:5, display:'flex', flexWrap:'wrap', gap:4 }}>
             {kv.map(([k, v]) => (

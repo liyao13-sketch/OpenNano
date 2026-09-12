@@ -63,17 +63,22 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
     id_of = {rid: m.get("id") for rid, m in by_run.items() if rid}
     present = [r for r in rows if (r.get("run_id") or "") in by_run]
 
-    # ① 坐标：只对 core 里有的 run 重排（未入库的计划 run 保留原坐标与相对位置）
+    # ① 连线先算（布局要按它认"谁接谁的棒"）
     core_mods = [by_run[r["run_id"]] for r in present]
-    _layout_modules(present, core_mods)
-    # 同步把 run_nature 写回模块（core 是权威；画布据此把 season 默认收起）
+    edges = _edges_from_runs(present, id_of, [m["id"] for m in core_mods])
+    # ② 坐标：主链一条直线、分支挂下（只对 core 里有的 run；计划 run 保留相对位置）
+    _layout_modules(present, core_mods, edges)
+    # 同步 core 的**语义标注**回模块（教训：标注常只在 core 侧，画布不回读就看不到）
     for r in present:
         m = by_run[r["run_id"]]
-        nat = (r.get("run_nature") or "").strip()
-        if nat:
-            m["run_nature"] = nat
-        elif "run_nature" in m:
-            del m["run_nature"]
+        for key, col in (("run_nature", "run_nature"), ("core_sample_id", "sample_id"),
+                         ("core_stage_seq", "stage_seq"), ("core_recipe_id", "recipe_id"),
+                         ("core_date", "date")):
+            val = (r.get(col) or "").strip()
+            if val:
+                m[key] = int(val) if key == "core_stage_seq" and val.isdigit() else val
+            elif key == "run_nature" and key in m:
+                del m[key]
     # season 节点：挪到主流程**下方**的独立区（同列对齐其工序，y 压到所有主行之下）——
     # 数据保留、视觉上不占流程线（owner：season 不画；这里给的是"收起来"的位置）
     main_rows = [float(m.get("y") or 0) for m in core_mods
@@ -91,8 +96,7 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
         if pm:
             m["x"], m["y"] = float(pm.get("x") or 0) + 300, float(pm.get("y") or 0)
 
-    # ② 连线：记录边 + 推断边，再补上"计划 run"的原有父边（core 里没有它，不能丢）
-    edges = _edges_from_runs(present, id_of, [m["id"] for m in core_mods])
+    # ③ 再补上"计划 run"的原有父边（core 里没有它，不能丢）
     keys = {(e["src"], e["dst"]) for e in edges}
     core_parent = {(r.get("run_id") or "").strip(): (r.get("parent_run_id") or "").strip()
                    for r in rows}
