@@ -743,6 +743,10 @@ def parse_expack(path: Path, lib) -> dict:
                                               r.get("run_id") or ""))
     modules = [_module_from_run(r, i) for i, r in enumerate(runs_sorted)]
     id_by_run = {r.get("run_id"): m["id"] for r, m in zip(runs_sorted, modules)}
+    _sri = stage_run_index(runs_sorted)                # 本工序第几次（run1/run2/…）
+    for m, r in zip(modules, runs_sorted):
+        if _sri.get(r.get("run_id")):
+            m["stage_run_index"] = _sri[r["run_id"]]
     edges = _edges_from_runs(runs_sorted, id_by_run, [m["id"] for m in modules])
     _layout_modules(runs_sorted, modules, edges)       # 列=工序，主链一行、分支挂下
     return {"name": batch, "modules": modules, "edges": edges}
@@ -752,6 +756,28 @@ def parse_expack(path: Path, lib) -> dict:
 #: 这里只把常用名字引进来，别在本文件里再写死尺寸。
 from .canvas_geom import GAP as LAYOUT_GAP, COL_PITCH as LAYOUT_COL   # noqa: E402
 from .canvas_geom import X0 as LAYOUT_X0, Y0 as LAYOUT_Y0, node_height as _node_h  # noqa: E402
+from .canvas_geom import STAGGER  # noqa: E402
+
+
+def stage_run_index(runs: list[dict]) -> dict[str, int]:
+    """每条 run 在**本批次本工序**里是第几次（**不含 season**）—— 画布上显示的 `run1/run2/…`。
+
+    为什么要有它（owner 2026-09-13）：`ICP-0008` 明明是 ICP 的第 **5** 次刻蚀
+    （前四次是 0002/0003/0005/0006），界面却只显示 core 的号 `0008` ⇒ **序号不连续时读不出"第几次"**，
+    还会让人以为是"第 8 次"甚至"T 字形那根竖是 4 条"这类误判。
+    规则：按 `(stage_seq, run_id)` 升序（core 的号本身就是顺序），**跳过 season**，从 1 数起。
+    """
+    out: dict[str, int] = {}
+    seen: dict[tuple[str, str], int] = {}
+    for r in sorted(runs, key=lambda x: (str(x.get("stage_seq") or 0), str(x.get("run_id") or ""))):
+        if (r.get("run_nature") or "").strip() == "season":
+            continue
+        key = (str(r.get("batch_id") or ""), str(r.get("stage_seq") or ""))
+        seen[key] = seen.get(key, 0) + 1
+        rid = (r.get("run_id") or "").strip()
+        if rid:
+            out[rid] = seen[key]
+    return out
 
 
 def _layout_modules(runs_sorted: list[dict], modules: list[dict],
@@ -868,6 +894,38 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
         col = max(seq_of.get(rid, 0) - 1, 0)
         rows[rid] = take(col, below + i)
 
+    # ── 并列分支**块状排布**（owner 2026-09-13："四个 ICP 能不能做成 2×2，从 5 行变 3 行，
+    #    而且要有竖直错位表示先后"）──
+    # 同一工序列里，除"接着往下走的那条"（脊柱）以外的并列分支：
+    #   1–2 条 → 照旧顺着往下摞；
+    #   **≥3 条** → 收成 **2 列子格**（每行 2 个），右列整体下错 `STAGGER`：
+    #      读序仍是"从上到下、从左到右"（1 左上 → 2 右上偏下 → 3 左下 → 4 右下偏下）。
+    # 多出来的那一列让**后面的工序列整体右移一格**（列距仍等宽 ⇒ 不会报 gap_uneven）。
+    # 收益实测：5 行 → 3 行，整图 863 → ~600px 高（同样的字，能多看清一档）。
+    sub_of: dict[str, int] = {}
+    units: dict[int, int] = {}
+    per_col: dict[int, list[str]] = {}
+    for rid in rid_of:
+        per_col.setdefault(max(seq_of.get(rid, 0) - 1, 0), []).append(rid)
+    for _col, _rids in per_col.items():
+        _ordered = sorted(_rids, key=lambda r: (rows.get(r, 0), r))
+        _branches = _ordered[1:]                     # 第 0 条 = 脊柱（继续往下走的那条）
+        units[_col] = 1
+        if len(_branches) >= 3:
+            units[_col] = 2
+            _base = rows.get(_branches[0], 1)
+            for _i, _rid in enumerate(_branches):
+                rows[_rid] = _base + _i // 2          # 每行 2 个 ⇒ 行数减半
+                sub_of[_rid] = _i % 2
+        else:
+            for _rid in _branches:
+                sub_of[_rid] = 0
+    col_x: dict[int, float] = {}
+    _x = float(LAYOUT_X0)
+    for _col in sorted(per_col):
+        col_x[_col] = _x
+        _x += units.get(_col, 1) * LAYOUT_COL
+
     # ── 落点：**横纵间距等宽 + 行高自适应** ──
     # 横向：列距 = 节点宽 + GAP（等距）；
     # 纵向：第 k 行的行距 = 该行**最高节点**的高度 + GAP ⇒ 有备注的行自动变高、没备注的保持紧凑，
@@ -875,6 +933,8 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
     row_h: dict[int, int] = {}
     for m, rid in zip(modules, rid_of):
         k = rows.get(rid, 0)
+        # ⚠️ **不要**把 STAGGER 加进行高：让它探进下方 72px 的缝里（还剩 28px 余量），
+        #    这样每条子列自身的相邻间距仍是 72，视觉节奏不被撑开（2026-09-13 实测）
         row_h[k] = max(row_h.get(k, 0), _node_h(m))
     row_y: dict[int, float] = {}
     y = float(LAYOUT_Y0)
@@ -883,8 +943,8 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
         y += row_h[k] + LAYOUT_GAP
     for m, rid in zip(modules, rid_of):
         col = max(seq_of.get(rid, 0) - 1, 0)
-        m["x"] = float(LAYOUT_X0) + col * LAYOUT_COL
-        m["y"] = row_y.get(rows.get(rid, 0), float(LAYOUT_Y0))
+        m["x"] = col_x.get(col, float(LAYOUT_X0)) + sub_of.get(rid, 0) * LAYOUT_COL
+        m["y"] = row_y.get(rows.get(rid, 0), float(LAYOUT_Y0)) + (STAGGER if sub_of.get(rid) else 0)
 
 
 #: 边的来源（**显示层要能区分**，否则"推断"会被当成"记录"）

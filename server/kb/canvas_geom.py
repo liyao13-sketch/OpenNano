@@ -73,3 +73,7 @@ def gaps(project: dict, comments_shown: bool = True) -> dict:
         for (y1, _i1, m1), (y2, _i2, _m2) in zip(items, items[1:]):
             v_gaps.append(round(y2 - y1 - node_height(m1, comments_shown), 1))
     return {"h_gaps": h_gaps, "v_gaps": v_gaps}
+
+#: 并列分支收成 2 列子格时，**右列整体下错的量**（owner 2026-09-13："要有竖直错位表示先后"）。
+#: 取行距的一小半：看得出"这条在后面"，又不至于白占一整行。
+STAGGER = 44

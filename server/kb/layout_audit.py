@@ -30,7 +30,7 @@ from pathlib import Path
 
 #: 几何**唯一来源**在 `kb/canvas_geom.py`（前端尺寸 / 后端布局 / 本体检器三处对齐）
 from .canvas_geom import (CHIP_H, CLAMP_COMMENT_LINES, COMMENT_LINE_H, GAP,  # noqa: E402
-                          NODE_BASE_H, NODE_W, gaps as geom_gaps, node_height)
+                          NODE_BASE_H, NODE_W, STAGGER, gaps as geom_gaps, node_height)
 
 MIN_GAP_X = 24            # 两列之间最少留白（小于它报"列太近"）
 MIN_GAP_Y = 20            # 同列相邻节点最少留白（小于它报"重叠/过近"）
@@ -129,17 +129,22 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
         if b - a < NODE_W + MIN_GAP_X:
             add("col_tight", f"两列太近：x={a:.0f} 与 x={b:.0f}（间距 {b-a:.0f} < {NODE_W + MIN_GAP_X}）")
 
-    # ⑪ **横纵间距是否等宽**（owner 2026-09-13 要求「横纵两个方向间距等宽」）
+    # ⑪ **间距是否规矩**（owner 2026-09-13：横纵等宽）
+    #    ⚠️ 2026-09-13 改判据：并列分支收成 2 列子格后，**右列整体下错 STAGGER** ⇒
+    #       纵向间距会出现 `GAP` 与 `GAP+STAGGER` 两种值，这是**故意的错位**、不是毛病。
+    #       所以：横向一律 == GAP；纵向只要求"不小于 GAP（不许挤）且不大于 GAP+STAGGER（不许空太多）"。
     g = geom_gaps({"modules": mods}, comments_shown=bool(comment_lines))
     if g["h_gaps"] and g["v_gaps"]:
         hs, vs = g["h_gaps"], g["v_gaps"]
-        spread_h = max(hs) - min(hs)
-        spread_v = max(vs) - min(vs)
-        if spread_h > 6 or spread_v > 6:
-            add("gap_uneven", f"间距不均匀：横向 {hs}（差 {spread_h:.0f}）· 纵向 {vs}（差 {spread_v:.0f}）")
-        elif abs(sum(hs) / len(hs) - sum(vs) / len(vs)) > 6:
-            add("gap_uneven", f"横纵间距不等宽：横向均值 {sum(hs)/len(hs):.0f} vs 纵向均值 "
-                              f"{sum(vs)/len(vs):.0f}（GAP={GAP}）")
+        bad_h = [x for x in hs if abs(x - GAP) > 2]
+        if bad_h:
+            add("gap_uneven", f"横向间距不等于 {GAP}：{hs}")
+        squeeze = [x for x in vs if x < GAP - 1]
+        waste = [x for x in vs if x > GAP + STAGGER + 1]
+        if squeeze:
+            add("gap_uneven", f"纵向间距被挤到小于 {GAP}：{squeeze}")
+        if waste:
+            add("gap_uneven", f"纵向间距超过 {GAP}+错位{STAGGER}（留白偏多）：{waste}")
 
     # ⑩ 扇出标签（观感噪声来源）
     fanout: dict[str, int] = {}

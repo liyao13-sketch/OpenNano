@@ -46,7 +46,7 @@ def _core_runs(batch: str) -> list[dict]:
 
 def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
     """就地重排一个工程文件的坐标与连线，返回摘要（不写盘，除非 `write=True`）。"""
-    from .expack import _edges_from_runs, _layout_modules
+    from .expack import _edges_from_runs, _layout_modules, stage_run_index
     path = Path(path).expanduser()
     if not path.exists():
         return {"ok": False, "error": f"工程文件不存在：{path}"}
@@ -88,6 +88,12 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
         for rid, m in by_run.items() if rid not in seen_rid]
     layout_mods = [by_run[r["run_id"]] for r in layout_runs]
     _layout_modules(layout_runs, layout_mods, edges)
+    # 「本工序第几次」（run1/run2/…）：**core 全量算**，不是只看图上有的那几条
+    # ⇒ 这样 `ICP-0008` 会显示 run5（前四次是 0002/0003/0005/0006），序号不连续也读得出"第几次"
+    sri = stage_run_index(rows)
+    for r in present:
+        if sri.get(r["run_id"]):
+            by_run[r["run_id"]]["stage_run_index"] = sri[r["run_id"]]
     # 同步 core 的**语义标注**回模块（教训：标注常只在 core 侧，画布不回读就看不到）
     for r in present:
         m = by_run[r["run_id"]]
