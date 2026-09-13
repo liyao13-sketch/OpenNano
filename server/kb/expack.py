@@ -127,6 +127,51 @@ def resolve_stage(m: dict, lib=None) -> str:
     return CATEGORY_TO_STAGE.get(cat or m.get("subtype") or "", "")
 
 
+#: 表征类 stage（core 词表里就这四个）—— 画布上"检测节点"的身份判据只有这一处
+METROLOGY_STAGES = ("SEM", "ELLIP", "PROFILE", "STRESS")
+
+
+def is_metrology_stage(stage: str) -> bool:
+    return (stage or "").upper() in METROLOGY_STAGES
+
+
+def stage_from_run_id(rid: str) -> str:
+    """从 run_id 里取 stage 段（`AR50-T2-SEM-0001` → `SEM`）。
+
+    为什么不直接读 `runs[*]["stage"]`：**计划节点**（还没入库的新节点）在 `relayout` 里是
+    由模块**合成**出来的 run dict，只有 `run_id/stage_seq/parent_run_id`、**没有 `stage` 字段** ——
+    按字段判就会漏掉正好要修的那一类节点（2026-09-13 metrology B+ 踩过）。
+    """
+    parts = (rid or "").rsplit("-", 2)
+    return parts[-2] if len(parts) == 3 else ""
+
+
+def is_metrology(m: dict, lib=None) -> bool:
+    """该模块是不是**检测节点**（表征设备）。检测节点有三条特殊待遇（见各调用处）：
+    父＝被测的那条 run、排在被测 run 右侧一列、**不给 `run{N}` 徽标**（"本工序第几次"对检测无意义）。"""
+    return is_metrology_stage(resolve_stage(m, lib))
+
+
+def _link_parents(project: dict, rid_by_mid: dict) -> dict:
+    """画布连线 → `{下游模块id: 上游 run_id}`（契约 §37：parent_run_id / 时序 = 连线）。
+
+    只认"上游模块**有 run id**"的边（没映射成工步的节点给不出 run，不参与）；
+    同一个下游有多条入边时**记录边优先**（`_link != inferred`），并列取先出现的那条 ——
+    不推断：只把用户画的那条线翻译成 core 的列。
+    """
+    out: dict[str, str] = {}
+    rank: dict[str, int] = {}
+    for e in (project.get("edges") or []):
+        src = rid_by_mid.get(e.get("src") or "")
+        dst = e.get("dst") or ""
+        if not src or not dst:
+            continue
+        score = 0 if (e.get("_link") == "inferred") else 1
+        if dst not in out or score > rank.get(dst, -1):
+            out[dst], rank[dst] = src, score
+    return out
+
+
 def unmapped_modules(project: dict, lib=None) -> list[dict]:
     """列出无法映射为工步的节点(用于**显式告警**,不再静默丢)。"""
     out = []
@@ -151,16 +196,31 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
     now = datetime.now().strftime("%Y-%m-%d")
     run_rows, step_rows, meas_rows = [], [], []
     stage_counter: dict[str, int] = {}
+
+    # ── ⓪ 预扫描：**先给所有模块定下 run id**，才能按连线算出"谁是父" ──
+    #    为什么必须先行：父要走**连线**（契约 §37「parent_run_id / 时序 = 连线」），
+    #    而连线另一端的 run id 得先存在。原地一趟循环时后面的节点还没有 id，只能退化成
+    #    "按导出顺序接上一条"——那是个猜测，对并存试验/检测节点都会编错归属。
+    #    ⚠️ 计数语义与原来**逐字一致**（按模块顺序、按 stage 各自计数），只是提前算。
+    was_in_core: dict[int, bool] = {}          # 以**对象 id** 为键：判断"这节点原本在不在 core"
+    rid_by_mid: dict[str, str] = {}
     for m in modules:
         stage = resolve_stage(m, lib)
         if not stage:
             continue
+        was_in_core[id(m)] = bool(m.get("core_run_id"))
         # ⚠️ 已有 core_run_id 的模块**一律沿用**（续做时工具已算好序号）；
         #    只有全新节点才按 stage 计数分配。否则重导出会把 DRIE-0002 重编号回 0001。
         if not m.get("core_run_id"):
             stage_counter[stage] = stage_counter.get(stage, 0) + 1
-            rid = f"{batch}-{stage}-{stage_counter[stage]:04d}"
-            m["core_run_id"] = rid
+            m["core_run_id"] = f"{batch}-{stage}-{stage_counter[stage]:04d}"
+        rid_by_mid[m.get("id") or ""] = m["core_run_id"]
+    link_parent = _link_parents(project, rid_by_mid)
+
+    for m in modules:
+        stage = resolve_stage(m, lib)
+        if not stage:
+            continue
         rid = m["core_run_id"]
         parsed = rid.rsplit("-", 2)
         seq_in_stage = int(parsed[2]) if len(parsed) == 3 and parsed[2].isdigit() else \
@@ -174,15 +234,15 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         #    这在"一个 batch 一次导出"的旧假设下勉强成立，但对**并存试验**（如 AR50-T1 的 6 条
         #    ICP，core 里 parent 为空）会编出一条假直线，且会被持久化 ⇒ 界面上看着像
         #    "同一片刻了 8 次"（2026-09-13 owner实测）。呼应零号铁律：**不推断、不替记录编归属**。
-        #    兜底只剩给真正的历史/手工节点用：连 `core_run_id` 都没有的，才按导出顺序接上一条。
-        if not m.get("core_parent_run_id") and not m.get("core_run_id"):
-            m["core_parent_run_id"] = run_rows[-1][0] if run_rows else ""
-        # ⚠️ 原实现是 `m.get("core_parent_run_id") or run_rows[-1][0]`（"导出顺序即执行顺序"）——
-        #    这在"一个 batch 一次导出"的旧假设下勉强成立，但对**并存试验**（如 AR50-T1 的 6 条
-        #    ICP，core 里 parent 为空）会编出一条假直线，且会被持久化 ⇒ 界面上看着像
-        #    "同一片刻了 8 次"（2026-09-13 owner实测）。呼应零号铁律：**不推断、不替记录编归属**。
-        #    兜底只剩给真正的历史/手工节点用：连 `core_run_id` 都没有的，才按导出顺序接上一条。
-        if not m.get("core_parent_run_id") and not m.get("core_run_id"):
+        # ⚠️ 2026-09-13（metrology B+）再补一层：**从来不在 core 里的新节点**，父取**画布连线**
+        #    （契约 §37「parent_run_id / 时序 = 连线」）—— 这才是检测节点"说得出我在测谁"的来源，
+        #    也是把老的"按导出顺序接上一条"（一个猜测）换成**用户自己画的归属**。
+        #    ⚠️ 在 core 里、只是 parent 为空的节点**绝不**因此被补父：那条空是记录本身。
+        if not m.get("core_parent_run_id") and not was_in_core.get(id(m)):
+            cand = link_parent.get(m.get("id") or "")
+            if cand:
+                m["core_parent_run_id"] = cand
+        if not m.get("core_parent_run_id") and not was_in_core.get(id(m)):
             m["core_parent_run_id"] = run_rows[-1][0] if run_rows else ""
         parent = m.get("core_parent_run_id") or ""
         run_rows.append([rid, batch, m.get("core_sample_id") or "", stage,
@@ -433,6 +493,12 @@ def build_process_card(project: dict, purpose: str = "", operator: str = "",
         L.append("")
         L.append(f"- 设备：{m.get('equipment_name') or '—'}"
                  + (f" ｜ 机台：{m.get('machine_name')}" if m.get("machine_name") else ""))
+        # 检测节点：**写清测的是哪条 run**（B+ 口径：检测 ＝ 对上游 run 的一次测量）。
+        # 这一行是"游离于体系之外"的正面回答 —— 卡上不再是一个孤零零的 SEM，而是"测的是谁"。
+        if is_metrology_stage(stage_from_run_id(rid) or m.get("core_stage") or ""):
+            par = m.get("core_parent_run_id") or ""
+            L.append("- **检测对象**：" + (f"`{par}`" if par
+                                        else "⚠️ 未连到被测 run（说不出测谁）"))
         if m.get("note"):
             L.append(f"- 备注：{m['note']}")
         L.append("")
@@ -521,8 +587,12 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
 
     包内除 core 列 CSV 外还含 **`流程_<批次>.md`**(人读流程卡,见 build_process_card)。
     """
+    # ⚠️ `lib` 必须传下去：`resolve_stage` 的三级回退里有两级要用它（经机台的设备模板）。
+    #    漏传过一次（函数收了 `lib=LIB` 却没用）⇒ 只靠回退才认得出的节点会**卡上有、CSV 里没有**，
+    #    正好打破"卡与 CSV 逐字一致"的承诺，且 `unmapped_modules(project, lib)` 用 lib 查得出、
+    #    于是**连告警都不会出**（2026-09-13 查出）。
     run_rows, step_rows, meas_rows, stage_counter, batch = extract_rows(
-        project, purpose, operator)
+        project, purpose, operator, lib)
     now = datetime.now().strftime("%Y-%m-%d")
 
     files: dict[str, bytes] = {
@@ -766,11 +836,17 @@ def stage_run_index(runs: list[dict]) -> dict[str, int]:
     （前四次是 0002/0003/0005/0006），界面却只显示 core 的号 `0008` ⇒ **序号不连续时读不出"第几次"**，
     还会让人以为是"第 8 次"甚至"T 字形那根竖是 4 条"这类误判。
     规则：按 `(stage_seq, run_id)` 升序（core 的号本身就是顺序），**跳过 season**，从 1 数起。
+
+    ⚠️ 2026-09-13（metrology B+）：**检测 run 也不给号**。`run{N}` 问的是"本工序第几次"，
+    而一个检测节点独占自己的工序列（EM/椭偏各一列）⇒ 它永远是 run1，"第几次检测"没有意义，
+    反而会让人以为"检测也参与工艺次数"。检测节点的身份由**它连到谁**表达（父＝被测 run）。
     """
     out: dict[str, int] = {}
     seen: dict[tuple[str, str], int] = {}
     for r in sorted(runs, key=lambda x: (str(x.get("stage_seq") or 0), str(x.get("run_id") or ""))):
         if (r.get("run_nature") or "").strip() == "season":
+            continue
+        if is_metrology_stage(str(r.get("stage") or "")):
             continue
         key = (str(r.get("batch_id") or ""), str(r.get("stage_seq") or ""))
         seen[key] = seen.get(key, 0) + 1
@@ -845,6 +921,23 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
         if p:
             children.setdefault(p, []).append(rid)
 
+    def _is_metro_rid(rid: str) -> bool:
+        """按 run_id 的 stage 段判检测节点（计划节点没有 `stage` 字段，见 `stage_from_run_id`）。"""
+        return is_metrology_stage(stage_from_run_id(rid))
+
+    # ── 检测节点（metrology B+）：**列从父推导**，绝不落进第 0 列 ──
+    #    病根：检测模块没有工序列号（计划节点 `stage_seq=0`）⇒ `col = max(seq-1, 0) = 0`
+    #    ⇒ 排在 x=140 的最左列、**在被测 run 的左边**（2026-09-13 owner：「游离于体系之外」，
+    #    实测 SEM 落在与 PECVD 同一列像是最早的一步，还会造出向左的边）。
+    #    规则：stage_seq 为空、但父有工序列号 ⇒ 取 `父列 + 1`（＝被测 run **右侧一列**，
+    #    与 core 里 AR50-T2 的写法一致：PECVD=1 → ELLIP=2、RIE=4 → SEM=5）。
+    for rid in rid_of:
+        if seq_of.get(rid):
+            continue
+        p = parent.get(rid)
+        if p and seq_of.get(p):
+            seq_of[rid] = seq_of[p] + 1
+
     memo: dict[str, int] = {}
 
     def reach(rid: str, seen: frozenset = frozenset()) -> int:
@@ -877,7 +970,10 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
         kids = children.get(rid, [])
         if not kids:
             return
-        spine = max(kids, key=lambda k: (reach(k), kids.index(k)))   # 并列时取后者（run 序靠后=真正的接棒）
+        # 并列时取后者（run 序靠后=真正的接棒）；**但检测节点不许抢脊柱** ——
+        # 它的工序列号是"父+1"推出来的，reach 可能跟真正的接棒者打平；真让它当了脊柱，
+        # 主线会被一条检测节点带跑，工艺链被挤到下一行（2026-09-13 metrology B+）。
+        spine = max(kids, key=lambda k: (reach(k), not _is_metro_rid(k), kids.index(k)))
         place(spine, rows[rid])                                      # 脊柱继承行号 ⇒ 主线直线
         nxt = rows[rid] + 1
         for k in kids:

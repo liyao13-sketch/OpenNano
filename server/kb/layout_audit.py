@@ -155,6 +155,21 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
         if waste:
             add("gap_uneven", f"纵向间距超过 {GAP}+错位{STAGGER}（留白偏多）：{waste}")
 
+    # ⑫ **检测节点说不出"我在测谁"**（2026-09-13 · metrology B+）
+    #    B+ 的口径：检测节点＝对**某个上游 run 的一次测量** ⇒ 它的语义全靠**入边**表达
+    #    （导出时入边写成 core 的 `parent_run_id`）。没有入边的检测节点既导不出归属、
+    #    也没法在画布上读出被测对象 —— 这正是owner说的"游离于体系之外"。
+    #    只报 warn：用户可能正画到一半（刚拖进来还没连线）。
+    from .expack import is_metrology_stage, resolve_stage, stage_from_run_id
+    has_in = {e.get("dst") for e in edges}
+    for m in mods:
+        stage = (stage_from_run_id(m.get("core_run_id") or "")
+                 or m.get("core_stage") or resolve_stage(m))
+        if is_metrology_stage(stage) and m.get("id") not in has_in:
+            add("metrology_no_input",
+                f"检测节点没有入边 ⇒ 说不出它在测哪条 run："
+                f"{m.get('core_run_id') or m.get('name') or m.get('id')}")
+
     # ⑩ 扇出标签（观感噪声来源）
     fanout: dict[str, int] = {}
     for e in edges:
