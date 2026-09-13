@@ -357,13 +357,13 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               </div>
             )}
             {tuneLine && !tuneLine.available && (
-              <div className="card" style={{ marginTop: 8, padding: 10, fontSize: 12, opacity: .75 }}>
+              <div className="card" style={{ marginTop: 8, padding: 10, fontSize: 'var(--fs-base)', opacity: .75 }}>
                 <b>参数调试线暂不可用</b>：{tuneLine.reason}
               </div>
             )}
 
             {events && events.count > 0 && (
-              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12 }}>
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)' }}>
                 <b>样品事件（裂片 / 取样分配）</b>
                 <div style={{ marginTop: 2 }}>
                   计划 <b>{events.plan_vs_actual.planned ?? '—'}</b> 颗
@@ -373,16 +373,16 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   {events.plan_vs_actual.unallocated != null ? ` · 未用 ${events.plan_vs_actual.unallocated} 颗` : ''}
                 </div>
                 {events.plan_vs_actual.planned_ids?.length > 0 && (
-                  <div style={{ opacity: .6, fontSize: 11 }}>
+                  <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }}>
                     计划位号：{events.plan_vs_actual.planned_ids.join(' ')}
                     <b>（应然规则；本批未在裂片时登记位号 ⇒ 实际只能到组级）</b>
                   </div>
                 )}
                 {events.plan_vs_actual.spec?.source_gds && (
-                  <div style={{ opacity: .6, fontSize: 11 }}>版图来源：{events.plan_vs_actual.spec.source_gds}</div>
+                  <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }}>版图来源：{events.plan_vs_actual.spec.source_gds}</div>
                 )}
                 {events.plan_vs_actual.usage_rule && (
-                  <div style={{ opacity: .6, fontSize: 11 }} title={events.plan_vs_actual.usage_rule}>
+                  <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }} title={events.plan_vs_actual.usage_rule}>
                     计量规则（来自 core 的 <code>sample_spec_json.planned_use.usage_rule</code>）：
                     {events.plan_vs_actual.usage_rule.slice(0, 78)}…
                   </div>
@@ -411,22 +411,22 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   ⚠️ <b>split</b>=物理裂片（只 1 条×49）· <b>allocate</b>=从现有样品取样（不改总数）；
                   「实际用量」只算 allocate。工具**只出提案**，落账走数据线 <code>propose_apply.py</code>。
                 </div>
-                <div style={{ opacity: .7, marginTop: 2, fontSize: 11 }}>
+                <div style={{ opacity: .7, marginTop: 2, fontSize: 'var(--fs-xs)' }}>
                   ⚠️ <b>split 只登记事件、不建样品行</b> —— 子样品由 <code>allocate</code> 建；
                   所以裂片后样品表**不会**自动多出 N 行（没登记位号的「59 颗」不硬塞进样品表）。
                 </div>
                 {events.consistency && (
-                  <div style={{ marginTop: 4, fontSize: 11,
-                                color: events.consistency.violations ? 'var(--warn,#e8a33d)' : undefined }}>
+                  <div style={{ marginTop: 4, fontSize: 'var(--fs-xs)',
+                                color: events.consistency.violations ? 'var(--warn)' : undefined }}>
                     一致性预览（事件 ↔ 样品树）：
                     <b>{events.consistency.violations ? `${events.consistency.violations} 项待查` : '✓ 0 项'}</b>
                     <span style={{ opacity: .6 }}>　{events.consistency.authority}</span>
                   </div>
                 )}
                 <div className="row" style={{ gap: 8, marginTop: 6 }}>
-                  <label style={{ fontSize: 12 }}>取样颗数
+                  <label style={{ fontSize: 'var(--fs-base)' }}>取样颗数
                     <input id="alloc-n" defaultValue="20" style={{ width: 60, marginLeft: 4 }} /></label>
-                  <label style={{ fontSize: 12 }}>到样品
+                  <label style={{ fontSize: 'var(--fs-base)' }}>到样品
                     <input id="alloc-to" placeholder={`${batch}-01-DIE20`} style={{ width: 190, marginLeft: 4 }} /></label>
                   <button className="btn ghost" onClick={() => proposeEvent('allocate', false)}
                     title="产出**取样分配**提案 → 本地预检 → 数据线 propose_apply.py 干跑（不落账）">取样提案（干跑）</button>
@@ -439,7 +439,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             )}
 
             {chain?.sample_tree && !chain.sample_tree.error && chain.sample_tree.count > 0 && (
-              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12 }}>
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)' }}>
                 <b>样品继承树（{chain.sample_tree.count} 个样品 · core 只读）</b>
                 <div style={{ opacity: .7, marginBottom: 4 }}>
                   整片 → die 组 → 组内；run 挂在样品上。⚠️ 组名里的数字是<b>组内颗数</b>、不是 die 位号
@@ -450,8 +450,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             )}
 
             {chain?.nature_needs_human && chain.nature_needs_human.length > 0 && (
-              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12,
-                                             borderLeft: '3px solid var(--warn,#e8a33d)' }}>
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)',
+                                             borderLeft: '3px solid var(--warn)' }}>
                 <b>需人工判定性质（{chain.nature_needs_human.length} 条）</b>
                 <div style={{ opacity: .8 }}>
                   这些 run 无上游、也没标 sample ⇒ 可能是 <b>season 预热</b>或<b>批次级（多片一起做）</b>，
@@ -463,8 +463,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             )}
 
             {chain?.parallels && chain.parallels.length > 0 && (
-              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 12,
-                                             borderLeft: '3px solid var(--warn,#e8a33d)' }}>
+              <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)',
+                                             borderLeft: '3px solid var(--warn)' }}>
                 <b>并行分支（{chain.parallels.length} 组）</b>
                 {chain.parallels.map((g, i) => (
                   <div key={i} style={{ marginTop: 4 }}>
@@ -487,11 +487,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   ，parent 指向 <code>{sel.run_id}</code>，stage_seq 保持 {sel.stage_seq}
                 </div>
                 <div className="row" style={{ gap: 8, margin: '6px 0' }}>
-                  <label style={{ fontSize: 12 }}>sample/die
+                  <label style={{ fontSize: 'var(--fs-base)' }}>sample/die
                     <input value={sample} placeholder={sel.sample_id || '如 AR50-T1-01-DIE3'}
                       onChange={e => setSample(e.target.value)} style={{ width: 170, marginLeft: 4 }} />
                   </label>
-                  <span style={{ fontSize: 11, opacity: .7 }}>
+                  <span style={{ fontSize: 'var(--fs-xs)', opacity: .7 }}>
                     填了 ⇒ **只认同 sample 的上一条**（并发分支下不会挂错）；留空 ⇒ 退回"该工序最后一条"
                   </span>
                 </div>
@@ -508,13 +508,13 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
           {/* 右：表单 */}
           <div className="bd-pane">
             <b>表单化填写（{sel?.run_id || '未选 run'}）</b>
-            <div style={{ opacity: .75, fontSize: 12, margin: '4px 0' }}>
+            <div style={{ opacity: .75, fontSize: 'var(--fs-base)', margin: '4px 0' }}>
               键名/量名/现象词全部来自契约（schema §十三/§三 + 受控词表）；没测留空，禁填 0/-/N/A
             </div>
 
             <div style={{ marginTop: 8 }}>
-              <b style={{ fontSize: 13 }}>步骤参数（{runSteps.length} 步{preview ? ` · 预览 group ${preview.group}` : ''}）</b>
-              {runSteps.length === 0 && <div style={{ opacity: .6, fontSize: 12 }}>该 run 尚未灌参 —— 先「续做 + 用 group N 灌参」或导入实验包</div>}
+              <b style={{ fontSize: 'var(--fs-md)' }}>步骤参数（{runSteps.length} 步{preview ? ` · 预览 group ${preview.group}` : ''}）</b>
+              {runSteps.length === 0 && <div style={{ opacity: .6, fontSize: 'var(--fs-base)' }}>该 run 尚未灌参 —— 先「续做 + 用 group N 灌参」或导入实验包</div>}
               {runSteps.length > 0 && (
                 <div className="tbl-wrap">
                   <table className="tbl" style={{ width: '100%' }}>
@@ -533,7 +533,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <b style={{ fontSize: 13 }}>测量（quantity 受控 · value 只数字）</b>
+              <b style={{ fontSize: 'var(--fs-md)' }}>测量（quantity 受控 · value 只数字）</b>
               {meas.map((m, i) => (
                 <div className="row" key={i} style={{ gap: 6, margin: '4px 0' }}>
                   <select value={m.quantity} onChange={e => setMeas(a => a.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} style={{ flex: 2 }}>
@@ -552,7 +552,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <b style={{ fontSize: 13 }}>现象（obs_type 受控 32 词）</b>
+              <b style={{ fontSize: 'var(--fs-md)' }}>现象（obs_type 受控 32 词）</b>
               {obs.map((o, i) => (
                 <div className="row" key={i} style={{ gap: 6, margin: '4px 0' }}>
                   <select value={o.obs_type} onChange={e => setObs(a => a.map((x, j) => j === i ? { ...x, obs_type: e.target.value } : x))} style={{ flex: 2 }}>
@@ -567,7 +567,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <b style={{ fontSize: 13 }}>上机环境（eq_state 一行）</b>
+              <b style={{ fontSize: 'var(--fs-md)' }}>上机环境（eq_state 一行）</b>
               <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                 <input value={env.date} onChange={e => setEnv({ ...env, date: e.target.value })} style={{ width: 110 }} title="YYYY-MM-DD" />
                 <input value={env.tool} onChange={e => setEnv({ ...env, tool: e.target.value })} style={{ width: 120 }} title="tool_id" />
@@ -581,7 +581,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               </div>
             </div>
 
-            <div style={{ marginTop: 10, opacity: .65, fontSize: 12 }}>
+            <div style={{ marginTop: 10, opacity: .65, fontSize: 'var(--fs-base)' }}>
               参数键示例：{Object.entries(contract?.param_keys || {}).slice(0, 6).map(([k, v]: any) => `${k}←${v.from}`).join(' · ')}
               {paramJson && Object.keys(paramJson).length > 0 && <>　｜　当前步示例：{Object.entries(paramJson).slice(0, 4).map(([k, v]) => `${k}=${v}`).join(' · ')}</>}
             </div>

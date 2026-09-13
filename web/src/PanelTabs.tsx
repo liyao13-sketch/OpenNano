@@ -67,9 +67,9 @@ function DoeTab({ module, onUpdate }: { module: Module; onUpdate: (p: Partial<Mo
 
   return (
     <div>
-      <div style={{ color:'var(--muted)', fontSize:12, marginBottom:8 }}>勾选要扫描的参数,设 min/max/step。</div>
+      <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:8 }}>勾选要扫描的参数,设 min/max/step。</div>
       {rows.map((r, i) => (
-        <div className="row" key={r.key} style={{ fontSize:12 }}>
+        <div className="row" key={r.key} style={{ fontSize: 'var(--fs-base)' }}>
           <label style={{ width:110, textAlign:'left' }}><input type="checkbox" checked={r.checked}
             onChange={e => setRows(rs => rs.map((x, j) => j===i ? {...x, checked:e.target.checked} : x))} /> {r.label}</label>
           <input type="number" style={{width:56}} value={r.lo} onChange={e => setRows(rs => rs.map((x,j)=>j===i?{...x,lo:parseFloat(e.target.value)||0}:x))} />
@@ -82,20 +82,20 @@ function DoeTab({ module, onUpdate }: { module: Module; onUpdate: (p: Partial<Mo
           <option value="full">全因子</option><option value="partial">部分因子</option>
           <option value="bbd">BBD(Box-Behnken)</option><option value="ccd">CCD(中心复合)</option>
         </select>
-        <label style={{ width:'auto', fontSize:12, color:'var(--muted)', cursor:'pointer' }}>
+        <label style={{ width:'auto', fontSize: 'var(--fs-base)', color:'var(--muted)', cursor:'pointer' }}>
           <input type="checkbox" checked={randomize} onChange={e => setRandomize(e.target.checked)} /> 随机化顺序
         </label>
         <button className="btn" onClick={gen}>生成矩阵</button>
       </div>
       {matrix && (
         <div style={{ marginTop:10, overflowX:'auto', maxHeight:220, overflowY:'auto', border:'1px solid var(--border)', borderRadius:8 }}>
-          <table style={{ width:'100%', fontSize:11, borderCollapse:'collapse' }}>
+          <table style={{ width:'100%', fontSize: 'var(--fs-xs)', borderCollapse:'collapse' }}>
             <thead><tr>{rows.filter(r=>r.checked).map(r => <th key={r.key} style={{ padding:4, borderBottom:'1px solid var(--border)' }}>{r.label}</th>)}</tr></thead>
             <tbody>{matrix.map((row, i) => <tr key={i}>{row.map((v, j) => <td key={j} style={{ padding:4, textAlign:'center' }}>{v}</td>)}</tr>)}</tbody>
           </table>
         </div>
       )}
-      {matrix && <div style={{ color:'var(--muted)', fontSize:11, marginTop:4 }}>共 {matrix.length} runs</div>}
+      {matrix && <div style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', marginTop:4 }}>共 {matrix.length} runs</div>}
     </div>
   )
 }
@@ -106,8 +106,8 @@ function SimTab({ module }: { module: Module }) {
     <div>
       <div style={{ color:'var(--muted)', marginBottom:8 }}>仿真功能(占位):预测本步加工结果。</div>
       <button className="btn" disabled>运行仿真(占位)</button>
-      <div style={{ marginTop:10, padding:12, background:'var(--surface)', borderRadius:8, color:'var(--muted)', fontSize:12, minHeight:80 }}>
-        结果区: 将预测 {outs}<br/><span style={{fontSize:11}}>目标: 工艺协同优化 + ML 预测(后续接入模型)</span>
+      <div style={{ marginTop:10, padding:12, background:'var(--surface)', borderRadius:8, color:'var(--muted)', fontSize: 'var(--fs-base)', minHeight:80 }}>
+        结果区: 将预测 {outs}<br/><span style={{fontSize: 'var(--fs-xs)'}}>目标: 工艺协同优化 + ML 预测(后续接入模型)</span>
       </div>
     </div>
   )
@@ -157,7 +157,7 @@ function OptTab({ module }: { module: Module }) {
 
   return (
     <div>
-      <div style={{ color:'var(--muted)', fontSize:12, marginBottom:8 }}>
+      <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:8 }}>
         用知识库实测数据拟合 GPR 代理模型(参数 → 目标),再由贝叶斯优化(EI)推荐下一轮实验。
       </div>
       <div className="row">
@@ -190,15 +190,15 @@ function OptTab({ module }: { module: Module }) {
           </>
         )}
       </div>
-      {err && <div style={{ color:'#f87171', fontSize:12, marginTop:6 }}>{err}</div>}
+      {err && <div style={{ color:'var(--bad)', fontSize: 'var(--fs-base)', marginTop:6 }}>{err}</div>}
       {fitRes && (
-        <div style={{ marginTop:10, padding:10, background:'var(--surface)', borderRadius:8, fontSize:12 }}>
+        <div style={{ marginTop:10, padding:10, background:'var(--surface)', borderRadius:8, fontSize: 'var(--fs-base)' }}>
           <b>模型 {fitRes.model_id}</b> · {fitRes.n} 样本 · CV R²={String(fitRes.cv_r2?.toFixed(3))} · train R²={String(fitRes.train_r2?.toFixed(3))}
-          {fitRes.fallback_linear && <span style={{ color:'#eab308' }}>（样本少,线性退化）</span>}
+          {fitRes.fallback_linear && <span style={{ color:'var(--warn)' }}>（样本少,线性退化）</span>}
           <div style={{ color:'var(--muted)', marginTop:4 }}>特征: {fitRes.features.join(', ')}</div>
           <div className="row" style={{ marginTop:6 }}>
-            <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }} onClick={() => setPlotKind('contour')}>响应面</button>
-            <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }} onClick={() => setPlotKind('main')}>主效应</button>
+            <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }} onClick={() => setPlotKind('contour')}>响应面</button>
+            <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }} onClick={() => setPlotKind('main')}>主效应</button>
           </div>
         </div>
       )}
@@ -208,19 +208,19 @@ function OptTab({ module }: { module: Module }) {
       )}
       {sug && (
         <div style={{ marginTop:10 }}>
-          <div style={{ fontSize:12, color:'var(--muted)', marginBottom:4 }}>
+          <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)', marginBottom:4 }}>
             下一轮建议 · {sug.strategy === 'space_filling' ? '空间填充探索' : 'EI 最大化'} · {sug.suggestions.length} 点
           </div>
-          {sug.note && <div style={{ fontSize:11, color:'var(--warn)', marginBottom:6 }}>⚠ {sug.note}</div>}
+          {sug.note && <div style={{ fontSize: 'var(--fs-xs)', color:'var(--warn)', marginBottom:6 }}>⚠ {sug.note}</div>}
           {sug.suggestions.map((s: any, i: number) => (
-            <div key={i} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'6px 10px', marginBottom:6, fontSize:12 }}>
+            <div key={i} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'6px 10px', marginBottom:6, fontSize: 'var(--fs-base)' }}>
               <div style={{ color:'var(--accent-text)', fontWeight:600 }}>#{i + 1} · 预测 {s.predicted}{s.std != null ? ` ±${s.std}` : ''}</div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:3 }}>
                 {Object.entries(s.params).map(([k, v]) => (
-                  <span key={k} className="chip" style={{ fontSize:11 }}>{k}={String(v)}</span>
+                  <span key={k} className="chip" style={{ fontSize: 'var(--fs-xs)' }}>{k}={String(v)}</span>
                 ))}
               </div>
-              <div style={{ color:'var(--muted)', fontSize:11, marginTop:3 }}>{s.reason}</div>
+              <div style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', marginTop:3 }}>{s.reason}</div>
             </div>
           ))}
         </div>

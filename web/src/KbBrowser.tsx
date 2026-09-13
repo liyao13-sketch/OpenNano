@@ -38,11 +38,11 @@ export default function KbBrowser({ onClose }: { onClose: () => void }) {
           {shown.map(e => (
             <div key={e.id} style={{ border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'var(--surface)' }}>
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-                <span style={{ background: relColor(e.reliability_score), color:'#08090a', borderRadius:6, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{e.reliability_score}/5</span>
-                <b style={{ fontSize:13 }}>{e.title}</b>
-                <span style={{ color:'var(--muted)', fontSize:11 }}>{e.process_type}</span>
+                <span style={{ background: relColor(e.reliability_score), color:'var(--bg)', borderRadius:6, padding:'1px 8px', fontSize: 'var(--fs-xs)', fontWeight:700 }}>{e.reliability_score}/5</span>
+                <b style={{ fontSize: 'var(--fs-md)' }}>{e.title}</b>
+                <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{e.process_type}</span>
               </div>
-              <div style={{ fontSize:11, color:'var(--muted)' }}>
+              <div style={{ fontSize: 'var(--fs-xs)', color:'var(--muted)' }}>
                 材料 {e.material?.material || '—'} · 来源 {e.source}
                 {Object.keys(e.results || {}).length > 0 && <> · 结果 {Object.entries(e.results).map(([k,v]) => `${k}=${v}`).join(', ')}</>}
               </div>

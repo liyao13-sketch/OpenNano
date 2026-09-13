@@ -50,10 +50,10 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
                   <div key={eq.id} style={{ marginBottom:6 }}>
                     <div className="row">
                       <span style={{ flex:1 }}>{eq.name}</span>
-                      <span style={{ color:'var(--muted)', fontSize:11 }}>{Object.keys(eq.params||{}).length} 参数 · {(eq.inputs||[]).length}←/{(eq.outputs||[]).length}→</span>
-                      <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }}
+                      <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{Object.keys(eq.params||{}).length} 参数 · {(eq.inputs||[]).length}←/{(eq.outputs||[]).length}→</span>
+                      <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
                         onClick={() => setEditEqId(editEqId === eq.id ? null : eq.id)}>{editEqId === eq.id ? '收起' : '编辑'}</button>
-                      <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }} onClick={async () => { await api.eqRemove(eq.id); refresh() }}>删</button>
+                      <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }} onClick={async () => { await api.eqRemove(eq.id); refresh() }}>删</button>
                     </div>
                     {editEqId === eq.id && <DeviceEditor key={eq.id + JSON.stringify(eq.params || {}).length} eq={eq} lib={lib} refresh={refresh} onClose={() => setEditEqId(null)} />}
                   </div>
@@ -91,7 +91,7 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
   )
 }
 
-const PARAM_CAT_COLOR: Record<string,string> = { '尺寸':'#5e6ad2', '膜厚':'#a78bfa', '材料':'#d4a24e', '质量':'#e5645c' }
+const PARAM_CAT_COLOR: Record<string,string> = { '尺寸':'var(--kind-process)', '膜厚':'var(--kind-inspect)', '材料':'var(--fam-resist)', '质量':'var(--fam-etch)' }
 
 function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
   const params: Record<string, {unit?:string;category?:string}> = lib.params || {}
@@ -107,7 +107,7 @@ function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
 
   return (
     <div>
-      <div style={{ color:'var(--muted)', fontSize:12, marginBottom:10, lineHeight:1.7 }}>
+      <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:10, lineHeight:1.7 }}>
         一条影响规则 = <b style={{color:'var(--text)'}}>源 → 目标</b> + <b style={{color:'var(--text)'}}>when 生效条件</b>（表达式，如
         <code> surface_film == 'SiO₂' </code>，留空恒生效）+ 定量 <code>expr</code> 与定性
         <code> sign / mechanism </code>（均可留空）。Compute 时定量规则自动求值写入目标参数。
@@ -194,13 +194,13 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
       </div>
 
       <div className="iface-sec">参数模板（新拖入并选此设备的节点将继承）</div>
-      <div className="row" style={{ fontSize:10, color:'var(--muted)' }}>
+      <div className="row" style={{ fontSize: 'var(--fs-micro)', color:'var(--muted)' }}>
         <span style={{ width:110 }}>参数键</span><span style={{ width:110 }}>显示名</span>
         <span style={{ width:48 }}>单位</span><span style={{ width:58 }}>默认</span>
         <span style={{ width:58 }}>min</span><span style={{ width:58 }}>max</span>
       </div>
       {rows.map(([k, d], i) => (
-        <div className="row" key={i} style={{ fontSize:11 }}>
+        <div className="row" key={i} style={{ fontSize: 'var(--fs-xs)' }}>
           <input style={{ width:110 }} value={k} placeholder="key"
             onChange={e => setRows(rs => rs.map((x, j) => j === i ? [e.target.value, x[1]] : x))} />
           <input style={{ width:110 }} value={d.label} placeholder="label"
@@ -213,7 +213,7 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
         </div>
       ))}
       <div className="row">
-        <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }}
+        <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
           onClick={() => setRows(rs => [...rs, ['', { label:'', unit:'', default:0, min:0, max:0 }]])}>+ 参数</button>
       </div>
 
@@ -223,9 +223,9 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
         const set = kind === 'in' ? setInputs : setOutputs
         return (
           <div className="row" key={kind} style={{ flexWrap:'wrap' }}>
-            <span style={{ color:'var(--muted)', fontSize:11, width:26 }}>{kind === 'in' ? '←' : '→'}</span>
+            <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', width:26 }}>{kind === 'in' ? '←' : '→'}</span>
             {list.map(x => (
-              <span key={x} className="chip" style={{ fontSize:11 }}>{x}
+              <span key={x} className="chip" style={{ fontSize: 'var(--fs-xs)' }}>{x}
                 <span className="chip-x" onClick={() => set(list.filter(y => y !== x))}>✕</span></span>
             ))}
             <select value="" style={{ width:130 }} onChange={e => { if (e.target.value) set([...list, e.target.value]) }}>
@@ -251,7 +251,7 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
         </div>
       ))}
       <div className="row">
-        <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }}
+        <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
           onClick={() => setFormulas(fs => [...fs, ['', '']])}>+ 公式</button>
       </div>
 
@@ -289,7 +289,7 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
 
   return (
     <div>
-      <div style={{ color:'var(--muted)', fontSize:12, marginBottom:10, lineHeight:1.7 }}>
+      <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:10, lineHeight:1.7 }}>
         参数有两维分类：<b style={{color:'var(--text)'}}>作用域</b>（全局 / 某工艺模板 / 某机台）与
         <b style={{color:'var(--text)'}}>语义类别</b>（尺寸、膜厚、材料、质量，可自行增删）。
       </div>
@@ -322,11 +322,11 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
       <div className="iface-sec">语义类别（点 ✕ 删除；已用于参数的类别删前请确认）</div>
       <div className="row" style={{ flexWrap:'wrap' }}>
         {cats.map(c => (
-          <span key={c} className="chip" style={{ fontSize:11 }}>{c}
+          <span key={c} className="chip" style={{ fontSize: 'var(--fs-xs)' }}>{c}
             <span className="chip-x" onClick={async () => { await api.categoryRemove(c); refresh() }}>✕</span></span>
         ))}
         <input placeholder="新类别" style={{ width:110 }} value={newCat} onChange={e => setNewCat(e.target.value)} />
-        <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }}
+        <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
           onClick={async () => { if (newCat.trim()) { await api.categoryAdd(newCat.trim()); setNewCat(''); refresh() } }}>+ 类别</button>
       </div>
 
@@ -335,7 +335,7 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
           <div className="iface-sec">{scopeLabel(sc)}（{list.length}）</div>
           <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
             {list.map(([k, v]) => (
-              <span key={k} className="chip" style={{ fontSize:11.5 }}
+              <span key={k} className="chip" style={{ fontSize: 'var(--fs-sm)' }}
                 title={`${scopeLabel(sc)} · ${v.category || ''} ${v.unit || ''}`}>
                 <span style={{ width:6, height:6, borderRadius:2, background: PARAM_CAT_COLOR[v.category] || 'var(--faint)' }} />
                 {k} <span style={{ color:'var(--muted)' }}>{v.unit}</span>
@@ -368,7 +368,7 @@ function MachinesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
 
   return (
     <div>
-      <div style={{ color:'var(--muted)', fontSize:12, marginBottom:10, lineHeight:1.7 }}>
+      <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:10, lineHeight:1.7 }}>
         机台 = <b style={{color:'var(--text)'}}>真实设备实例</b>（型号 + 编号 + 别名），挂在某个工艺模板下。
         同型号多台必须分开登记——否则机器差异会被当成工艺规律。
       </div>
@@ -407,19 +407,19 @@ function MachinesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
       {machines.map((m: any) => (
         <div key={m.id} className="row" style={{ padding:'7px 10px', border:'1px solid var(--border)', borderRadius:8, marginBottom:6 }}>
           <span style={{ flex:1 }}>
-            <b style={{ fontSize:12.5 }}>{m.name}</b>
-            <span style={{ color:'var(--muted)', fontSize:11 }}>
+            <b style={{ fontSize: 'var(--fs-md)' }}>{m.name}</b>
+            <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>
               {m.model ? ` · ${m.model}` : ''}{m.vendor ? ` · ${m.vendor}` : ''}{m.serial ? ` · #${m.serial}` : ''}{m.max_sample ? ` · ≤${m.max_sample}` : ''}
               {m.equipment_id ? ` · 模板 ${templates.find(t => t.id === m.equipment_id)?.name || '?'}` : ' · 未绑模板'}
               {m.location ? ` · ${m.location}` : ''}{m.notes ? ` · ${m.notes}` : ''}
             </span>
           </span>
-          <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }}
+          <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
             onClick={() => { setEditId(m.id); setForm({ name: m.name, model: m.model || '', vendor: m.vendor || '', serial: m.serial || '', equipment_id: m.equipment_id || '', location: m.location || '', status: m.status || 'active', max_sample: m.max_sample || '', notes: m.notes || '' }) }}>编辑</button>
           <span className="chip-x" onClick={async () => { await api.machineRemove(m.id); refresh() }}>✕</span>
         </div>
       ))}
-      {machines.length === 0 && <div style={{ color:'var(--muted)', fontSize:12 }}>（还没有机台）</div>}
+      {machines.length === 0 && <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)' }}>（还没有机台）</div>}
     </div>
   )
 }

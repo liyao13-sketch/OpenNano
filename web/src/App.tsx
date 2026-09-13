@@ -26,7 +26,7 @@ const FAMILY_COLOR: Record<string,string> = {
 function ProcessNode({ data }: any) {
   const m: Module = data.module
   const isSeason = m.run_nature === 'season'
-  const color = FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || '#6b7280'
+  const color = FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || 'var(--faint)'
   const primary = m.equipment_name || m.name
   const secondary = m.family_label || m.subtype
   const rs = m.run_state || 'idle'
@@ -44,6 +44,8 @@ function ProcessNode({ data }: any) {
   const batchId = m.core_batch_id || (runId.match(/^(.*)-[A-Za-z]+-\d{4}$/)?.[1] || '')
   const strip = (s: string) => (batchId && s.startsWith(batchId + '-') ? s.slice(batchId.length + 1) : s)
   const shortRun = runId ? strip(runId) : ''
+  /* 本工序第几次：后端按 core 全量算（`stage_run_index`）；老工程没有这个字段时退回调参轮次 */
+  const runNo = (m as any).stage_run_index ?? m.tune_step ?? null
   const shortSample = m.core_sample_id ? strip(m.core_sample_id) : ''
   return (
     <div className="proc-node" style={{ width:190, background:'var(--surface)', border:'1px solid var(--border)',
@@ -54,31 +56,34 @@ function ProcessNode({ data }: any) {
       <div style={{ padding:'6px 10px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           <span style={{ width:6, height:6, borderRadius:2, background:color, flexShrink:0 }} />
-          <span style={{ fontSize:13.5, fontWeight:620, letterSpacing:'-.01em', flex:1, lineHeight:1.35,
+          <span style={{ fontSize: 'var(--fs-lg)', fontWeight:620, letterSpacing:'-.01em', flex:1, lineHeight:1.35,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
             textDecoration: m.disabled ? 'line-through' : 'none' }}>{primary}</span>
           <span title={m.disabled ? '已禁用(不参与运行)'
                 : isSeason ? 'season 热机（不加工已登记样品；默认收起，可在「视图」里展开）'
                 : rs === 'ok' ? '已运行' : rs === 'stale' ? '上游已变,结果失效' : '未运行'}
-            style={{ fontSize:10, lineHeight:'14px', minWidth:14, textAlign:'center',
+            style={{ fontSize: 'var(--fs-micro)', lineHeight:'14px', minWidth:14, textAlign:'center',
               color:badge.c, background:badge.bg, border:`1px solid ${badge.bd}`, borderRadius:4,
               padding: isSeason ? '0 4px' : undefined }}>{badge.t}</span>
         </div>
-        <div style={{ fontSize:11.5, color:'var(--muted)', marginTop:1, lineHeight:1.3 }}>{secondary}</div>
-        {(shortRun || shortSample || m.tune_step != null) && (
+        <div style={{ fontSize: 'var(--fs-sm)', color:'var(--muted)', marginTop:1, lineHeight:1.3 }}>{secondary}</div>
+        {(shortRun || shortSample || runNo != null) && (
           <div style={{ marginTop:4, display:'flex', flexWrap:'wrap', gap:3 }}>
-            {m.tune_step != null && (
-              <span title={`参数调试线 ${m.tune_id || ''} 第 ${m.tune_step} 轮（core run：${runId}）`
-                + '　序号不连续的是 core 的 run 号，这里按扫描轮次显示'}
-                style={{ fontSize:10.5, fontFamily:'var(--mono)', fontWeight:700,
+            {/* `run{N}` = **本工序第几次**（不含 season），由 core 全量算出来 ⇒ 序号不连续（0002/0003/0005/0006/0008）
+                也一眼读得出"第 5 次"。以前只在"调参轮次"上显示，于是 ICP-0008 看着像第 8 次（owner 2026-09-13）。 */}
+            {runNo != null && (
+              <span title={`本工序第 ${runNo} 次（core run：${runId}）`
+                + (m.tune_step != null ? `　·　参数调试线 ${m.tune_id || ''} 第 ${m.tune_step} 轮` : '')
+                + '　序号不连续的是 core 的 run 号，这里按"第几次"显示'}
+                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:700,
                   color:'var(--accent-fg)', background:'var(--accent)',
                   border:'1px solid var(--accent)', borderRadius:4, padding:'0 5px' }}>
-                run{m.tune_step}
+                run{runNo}
               </span>
             )}
             {shortRun && (
               <span title={`core run：${runId}`}
-                style={{ fontSize:10.5, fontFamily:'var(--mono)', fontWeight:600,
+                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:600,
                   color: m.tune_step != null ? 'var(--muted)' : 'var(--accent-hi)',
                   background: m.tune_step != null ? 'transparent' : 'var(--accent-soft)',
                   border: `1px solid ${m.tune_step != null ? 'var(--border)' : 'var(--accent-ring)'}`,
@@ -88,7 +93,7 @@ function ProcessNode({ data }: any) {
             )}
             {shortSample && (
               <span title={`样品/die：${m.core_sample_id}`}
-                style={{ fontSize:10.5, fontFamily:'var(--mono)', color:'var(--text-2)',
+                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', color:'var(--text-2)',
                   background:'var(--raise)', border:'1px solid var(--border)',
                   borderRadius:4, padding:'0 4px' }}>
                 {shortSample}
@@ -96,7 +101,7 @@ function ProcessNode({ data }: any) {
             )}
             {m.core_stage_seq != null && (
               <span title={`工序序号 stage_seq=${m.core_stage_seq}`}
-                style={{ fontSize:10.5, fontFamily:'var(--mono)', color:'var(--faint)',
+                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', color:'var(--faint)',
                   border:'1px solid var(--border)', borderRadius:4, padding:'0 4px' }}>
                 #{m.core_stage_seq}
               </span>
@@ -106,7 +111,7 @@ function ProcessNode({ data }: any) {
         {kv.length > 0 && (
           <div style={{ marginTop:5, display:'flex', flexWrap:'wrap', gap:4 }}>
             {kv.map(([k, v]) => (
-              <span key={k} style={{ fontSize:10.5, fontFamily:'var(--mono)', color:'var(--text-2)',
+              <span key={k} style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', color:'var(--text-2)',
                 background:'var(--raise)', border:'1px solid var(--border)', borderRadius:4, padding:'0 4px' }}>
                 {k}={typeof v === 'number' ? Math.round(v * 1000) / 1000 : String(v)}
               </span>
@@ -119,7 +124,7 @@ function ProcessNode({ data }: any) {
            以前限高 3 行仍会把节点撑高 ⇒ 画布整体变高、fitView 一缩，**字就变得很小**
            （2026-09-13 owner：「中间画布不够紧凑、字体缩得很小」）。1 行 = 高度恒定、布局可紧凑。 */
         <div title={m.comment}
-          style={{ margin:'0 5px 5px', padding:'2px 6px', fontSize:11, lineHeight:'16px',
+          style={{ margin:'0 5px 5px', padding:'2px 6px', fontSize: 'var(--fs-xs)', lineHeight:'16px',
           color:'var(--text-2)', background:'rgba(212,162,78,.10)',
           border:'1px solid rgba(212,162,78,.35)', borderRadius:5,
           whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
@@ -473,7 +478,7 @@ export default function App() {
       if (typing) return
       if (e.key === 'Escape') { setMenu(null); setViewMenu(false); return }
       if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); setNodes(nds => nds.map(n => ({ ...n, selected: true }))); return }
-      if (mod && e.key === '0') { e.preventDefault(); flowRef.current?.fitView({ padding: .2 }); return }
+      if (mod && e.key === '0') { e.preventDefault(); fitMode('contain'); return }
       if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); flowRef.current?.zoomIn(); return }
       if (mod && e.key === '-') { e.preventDefault(); flowRef.current?.zoomOut(); return }
       if (mod && e.key.toLowerCase() === 'd' && selectedId) { e.preventDefault(); duplicateNode(selectedId); return }
@@ -638,11 +643,6 @@ export default function App() {
       + (src?.from_run ? ` · 来源 ${src.from_run} ${src.date}` : '') + '）')
   }
 
-  /** 适配视图但**保底 75% 缩放**：整图太散时不再把文字缩到看不清（宁可让人平移）。 */
-  const fitReadable = useCallback(() => {
-    flowRef.current?.fitView({ padding: .18, minZoom: .7, maxZoom: 1.1 })
-  }, [])
-
   /* 详情栏左边缘拖拽调宽 */
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -675,7 +675,7 @@ export default function App() {
         const p = pos.get(n.id)
         return p ? { ...n, position: { x: p.x, y: p.y } } : n
       }))
-      setTimeout(() => fitReadable(), 60)
+      setTimeout(() => fitMode('height'), 60)
       pushLog('view', `自动整理布局：${d.summary?.cols ?? '?'} 列 / ${d.summary?.rows ?? '?'} 行（只改位置）`)
     } catch (e: any) { pushLog('warn', '自动整理布局失败: ' + e.message) }
   }
@@ -687,7 +687,7 @@ export default function App() {
     setEdges((d.edges || []).map(edgeOf))
     setProjectName(d.name || 'EXP')
     setSelectedId(null)
-    setTimeout(() => fitReadable(), 120)
+    setTimeout(() => fitMode('height'), 120)
   }
 
   const loadProjectByName = async (name: string) => {
@@ -959,6 +959,48 @@ export default function App() {
     [edges, seasonIds, showSeason])
   const inferredEdgeCount = useMemo(
     () => viewEdges.filter(e => (e.data as any)?.inferred).length, [viewEdges])
+  /** 画布适配的**四种标准模式**（owner 2026-09-13 点名的那套术语）：
+   *
+   *  · `contain` 等比适应 —— 整图缩进视口，可能留白（原来只有这一种）；
+   *  · `cover`  双向铺满 —— 两个方向都填满，超出的部分靠平移（不留白）；
+   *  · `width`  宽度适应 —— 横向填满，纵向超出（可上下平移）；
+   *  · `height` 高度适应 —— 纵向填满，横向超出（可左右平移）—— 工艺是左右流动，这个最常看；
+   *
+   *  为什么要自己算：React Flow 的 `fitView` 只有 contain 一种，而且把缩放硬钳在
+   *  `[minZoom, maxZoom]` 里 —— "铺满/单向适应"必须自己求缩放与平移，再用 `setViewport` 落下去。
+   *  支点：**内容包围盒**（只算当前可见节点，season 收起时不参与）。
+   */
+  const fitMode = useCallback((mode: 'contain' | 'cover' | 'width' | 'height' | '1') => {
+    const inst = flowRef.current
+    const box = document.querySelector('.canvas-wrap') as HTMLElement | null
+    if (!inst || !box) return
+    const ns = (inst.getNodes?.() || []) as any[]
+    const vis = new Set(viewNodes.map(n => n.id))
+    const pts = ns.filter(n => vis.has(n.id))
+    if (!pts.length) return
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const n of pts) {
+      const w = n.width || n.measured?.width || 190
+      const h = n.height || n.measured?.height || 71
+      x0 = Math.min(x0, n.position.x); y0 = Math.min(y0, n.position.y)
+      x1 = Math.max(x1, n.position.x + w); y1 = Math.max(y1, n.position.y + h)
+    }
+    const W = box.clientWidth, H = box.clientHeight
+    const pad = 22
+    const sx = (W - pad * 2) / Math.max(1, x1 - x0)
+    const sy = (H - pad * 2) / Math.max(1, y1 - y0)
+    let z = mode === 'cover' ? Math.max(sx, sy)
+      : mode === 'width' ? sx
+        : mode === 'height' ? sy
+          : Math.min(sx, sy)
+    z = Math.max(0.2, Math.min(z, 1.6))
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2
+    /* 定位：等比/铺满居中；单向适应把"另一方向"对齐到起点，方便顺着工艺方向平移 */
+    const tx = mode === 'width' ? pad - x0 * z : W / 2 - cx * z
+    const ty = mode === 'height' ? pad - y0 * z : H / 2 - cy * z
+    inst.setViewport({ x: tx, y: ty, zoom: mode === '1' ? 1 : z })
+  }, [viewNodes])
+
   const topFilmName = inStack.length ? inStack[inStack.length - 1].film : 'Si'
   const stackDesc = ['Si', ...inStack.map(l => l.film + (l.thickness ? ` (${l.thickness} nm)` : ''))].join(' / ')
 
@@ -971,13 +1013,13 @@ export default function App() {
           <span className="brand-name">OpenNano</span>
         </span>
         <span style={{ color:'var(--muted)' }}>· {projectName} · 组织记忆 {kbTotal} 条</span>
-        <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, color:'var(--muted)' }}>
+        <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize: 'var(--fs-xs)', color:'var(--muted)' }}>
           <span style={{ width:8, height:8, borderRadius:'50%', background: online ? 'var(--ok)' : 'var(--bad)' }} />
           {online ? '后端已连接' : '后端未连接'}
         </span>
         {inferredEdgeCount > 0 && (
           <span title="虚线是**按工艺顺序**补的显示连线（core 里没有记录 parent）；实线才是 core 记录的真实上游"
-            style={{ fontSize:11, color:'var(--muted)', border:'1px solid var(--line)',
+            style={{ fontSize: 'var(--fs-xs)', color:'var(--muted)', border:'1px solid var(--line)',
                      borderRadius:10, padding:'1px 7px' }}>
             <svg width="26" height="8" style={{ verticalAlign:'middle', marginRight:4 }}>
               <line x1="0" y1="4" x2="26" y2="4" stroke="var(--faint)" strokeWidth="2"
@@ -1011,13 +1053,17 @@ export default function App() {
               <label><input type="checkbox" checked={libCollapsed}
                 onChange={e => setLibCollapsed(e.target.checked)} /> 收起左侧工艺库</label>
               <div className="dropdown-sep" />
-              <button className="dropdown-item" onClick={() => { fitReadable(); setViewMenu(false) }}>适配视图 (Ctrl+0 · 保底 70%)</button>
+              <button className="dropdown-item" onClick={() => { fitMode('contain'); setViewMenu(false) }}>适配视图 · 等比适应 (Ctrl+0)</button>
+              <button className="dropdown-item" onClick={() => { fitMode('cover'); setViewMenu(false) }}>适配视图 · 双向铺满</button>
+              <button className="dropdown-item" onClick={() => { fitMode('width'); setViewMenu(false) }}>适配视图 · 宽度适应</button>
+              <button className="dropdown-item" onClick={() => { fitMode('height'); setViewMenu(false) }}>适配视图 · 高度适应</button>
+              <button className="dropdown-item" onClick={() => { fitMode('1'); setViewMenu(false) }}>原始比例 100%</button>
               <button className="dropdown-item" onClick={() => { setViewMenu(false); arrangeLayout() }}
                 title="按工序列重排所有节点（只改位置，不动连线与标注）—— 方块叠在一起时一键复位">自动整理布局</button>
               <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>显示日志面板</button>
               <button className="dropdown-item" onClick={() => { setDockTab('issues'); setViewMenu(false) }}>显示问题面板 ({issues.length})</button>
               <div className="dropdown-sep" />
-              <div style={{ padding:'4px 9px 2px', fontSize:10.5, letterSpacing:'.06em',
+              <div style={{ padding:'4px 9px 2px', fontSize: 'var(--fs-micro)', letterSpacing:'.06em',
                 textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>主题</div>
               <button className="dropdown-item" onClick={() => setTheme('linear')}>
                 {theme === 'linear' ? '● ' : '○ '}Linear(默认低饱和)</button>
@@ -1140,7 +1186,9 @@ export default function App() {
               const pos = flowRef.current?.screenToFlowPosition({ x: e.clientX, y: e.clientY })
               addModule(item, { x: pos.x - 88, y: pos.y - 26 })
             }}
-            fitView fitViewOptions={{ padding: .18, minZoom: .7, maxZoom: 1.1 }} proOptions={{ hideAttribution: true }}
+            /* 不再用 React Flow 自带的 fitView：它只有 contain 一种，还会把缩放钳在
+               fitViewOptions 里 —— 四种适配模式统一走 `fitMode()`（载入时用**高度适应**）。 */
+            minZoom={0.2} maxZoom={2} proOptions={{ hideAttribution: true }}
             onInit={inst => { flowRef.current = inst }}>
             <Background color={theme === 'light' ? 'rgba(15,23,42,.10)' : theme === 'hc' ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.05)'} gap={22} />
             <Controls />
@@ -1150,12 +1198,12 @@ export default function App() {
                 background:'color-mix(in srgb, var(--panel) 88%, transparent)',
                 border:'1px solid var(--border)', borderRadius:999,
                 padding:'5px 11px', backdropFilter:'blur(6px)' }}>
-                <span style={{ fontSize:10, letterSpacing:'.06em', textTransform:'uppercase',
+                <span style={{ fontSize: 'var(--fs-micro)', letterSpacing:'.06em', textTransform:'uppercase',
                   color:'var(--faint)', fontWeight:600 }}>族</span>
                 {families.map(f => (
                   <span key={f.key} title={f.label}
                     style={{ width:9, height:9, borderRadius:3, cursor:'default',
-                      background: FAMILY_COLOR[f.key] || '#6b7280',
+                      background: FAMILY_COLOR[f.key] || 'var(--faint)',
                       transition:'transform .12s ease' }}
                     onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.35)')}
                     onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')} />
@@ -1165,16 +1213,16 @@ export default function App() {
             {(selectedNodes.length > 0 || selectedEdgeCount > 0) && (
               <div style={{ position:'absolute', top:10, left:'50%', transform:'translateX(-50%)', zIndex:10,
                 background:'var(--panel)', border:'1px solid var(--accent)', borderRadius:10,
-                padding:'6px 12px', display:'flex', alignItems:'center', gap:10, fontSize:12,
+                padding:'6px 12px', display:'flex', alignItems:'center', gap:10, fontSize: 'var(--fs-base)',
                 boxShadow:'var(--shadow-2)' }}>
                 <span>已选 <b>{selectedNodes.length}</b> 个节点{selectedEdgeCount ? ` · ${selectedEdgeCount} 条连线` : ''}</span>
-                <button className="btn" style={{ padding:'3px 12px', fontSize:12 }} onClick={deleteSelected}>🗑 删除选中</button>
-                <span style={{ color:'var(--muted)', fontSize:11 }}>或按 Backspace</span>
+                <button className="btn" style={{ padding:'3px 12px', fontSize: 'var(--fs-base)' }} onClick={deleteSelected}>🗑 删除选中</button>
+                <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>或按 Backspace</span>
               </div>
             )}
             {nodes.length === 0 && (
               <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
-                <div style={{ color:'var(--muted)', fontSize:14, textAlign:'center', lineHeight:1.8 }}>从左侧拖入工艺开始构建流程<br/><span style={{fontSize:12}}>空白处按住鼠标拖拽 = 框选一批节点 · 中键/右键拖拽 = 平移画布 · Backspace 删除选中</span></div>
+                <div style={{ color:'var(--muted)', fontSize: 'var(--fs-lg)', textAlign:'center', lineHeight:1.8 }}>从左侧拖入工艺开始构建流程<br/><span style={{fontSize: 'var(--fs-base)'}}>空白处按住鼠标拖拽 = 框选一批节点 · 中键/右键拖拽 = 平移画布 · Backspace 删除选中</span></div>
               </div>
             )}
           </ReactFlow>
@@ -1252,7 +1300,7 @@ export default function App() {
         {/* 详情栏上色（2026-09-13）：整栏跟随**选中节点的工艺族色** —— 与画布方块、左栏方块同一套色，
             一眼对上「这个节点属于哪一族」；没选中节点时不染色。 */}
         <div className={`panel${m ? ' has-fam' : ''}`}
-          style={{ width: panelW, ['--fam' as any]: m ? (FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || '#6b7280') : undefined } as any}>
+          style={{ width: panelW, ['--fam' as any]: m ? (FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || 'var(--faint)') : undefined } as any}>
           <ErrorBoundary label="节点面板" onReset={() => setSelectedId(null)}>
           {!m && <div style={{ color:'var(--muted)' }}>点击画布节点查看详情<br/>（左侧点工艺添加到画布，节点上下端口拖线连接）</div>}
           {m && (
@@ -1260,7 +1308,7 @@ export default function App() {
               <div className="panel-head">
                 <div className="ph-top">
                   <h2 style={{ margin:0 }}>{m.name}</h2>
-                  <button className="btn ghost" onClick={deleteSelected} style={{ fontSize:12, padding:'4px 10px' }}>🗑 删除选中</button>
+                  <button className="btn ghost" onClick={deleteSelected} style={{ fontSize: 'var(--fs-base)', padding:'4px 10px' }}>🗑 删除选中</button>
                 </div>
                 <div className="ph-meta">
                   <span className="fam-dot" />
@@ -1311,7 +1359,7 @@ export default function App() {
                       </button>
                     </div>
                     {machDef.phases?.length === 1 && (
-                      <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                      <div className="dim" style={{ fontSize: 'var(--fs-xs)', marginTop: 2 }}>
                         {Object.keys(machDef.by_phase[machDef.phases[0]]?.params || {}).length} 个键
                         （来源 {machDef.from_run}）
                       </div>
@@ -1338,9 +1386,9 @@ export default function App() {
               {m.family === 'expose' && (
                 <div className="card">
                   <h4>Process Link（入射膜堆叠 · 生效影响规则）</h4>
-                  <div style={{ fontSize:12, color:'var(--muted)', marginBottom:8 }}>入射膜堆: {stackDesc}</div>
+                  <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)', marginBottom:8 }}>入射膜堆: {stackDesc}</div>
                   {resolvedRules.length === 0 && (
-                    <div style={{ fontSize:12, color:'var(--muted)' }}>当前上下文（film “{topFilmName}”）无生效影响规则（可在 设置 → 影响规则 中定义）</div>
+                    <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)' }}>当前上下文（film “{topFilmName}”）无生效影响规则（可在 设置 → 影响规则 中定义）</div>
                   )}
                   {resolvedRules.map((r: any) => (
                     <div key={r.id} style={{ borderBottom:'1px dashed var(--border)', paddingBottom:6, marginBottom:6 }}>
@@ -1351,16 +1399,16 @@ export default function App() {
                         {r.value != null ? (
                           <>
                             <span style={{ fontWeight:700 }}>{r.value}</span>
-                            <button className="btn ghost" style={{ fontSize:11, padding:'3px 10px' }}
+                            <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
                               onClick={() => onParam(r.to, r.value)}>Apply</button>
                           </>
                         ) : (
-                          <span style={{ color:'var(--muted)', fontSize:11 }}>定性</span>
+                          <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>定性</span>
                         )}
-                        <span style={{ marginLeft:'auto', fontSize:10, color:'var(--muted)' }}>[{r.reliability_score}/5]</span>
+                        <span style={{ marginLeft:'auto', fontSize: 'var(--fs-micro)', color:'var(--muted)' }}>[{r.reliability_score}/5]</span>
                       </div>
                       {(r.mechanism || r.expr) && (
-                        <div style={{ fontSize:11, color:'var(--muted)' }}>
+                        <div style={{ fontSize: 'var(--fs-xs)', color:'var(--muted)' }}>
                           {r.mechanism}{r.expr ? ` · ${r.expr}` : ''}{r.source ? ` · ${r.source}` : ''}
                         </div>
                       )}
@@ -1390,9 +1438,9 @@ export default function App() {
                 <h4 style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   Process Interface（承接 ← / 影响 →）
                   {m.equipment_id ? (
-                    <button className="btn ghost" style={{ fontSize:11, padding:'3px 8px' }} onClick={saveAsTemplate}>存为设备模板</button>
+                    <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 8px' }} onClick={saveAsTemplate}>存为设备模板</button>
                   ) : (
-                    <span style={{ fontSize:10, color:'var(--muted)', fontWeight:400 }}>选设备后可存模板</span>
+                    <span style={{ fontSize: 'var(--fs-micro)', color:'var(--muted)', fontWeight:400 }}>选设备后可存模板</span>
                   )}
                 </h4>
                 <div className="iface-sec">承接 inputs（← 上游传入）</div>
@@ -1474,8 +1522,8 @@ export default function App() {
               {projects.map(p => (
                 <div key={p.name} className="row" style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:10, marginBottom:6 }}>
                   <span style={{ flex:1, fontWeight:600 }}>{p.name}
-                    <span style={{ color:'var(--muted)', fontSize:11, fontWeight:400 }}> · {p.modules} 模块 / {p.edges} 连线 · {p.saved_at?.replace('T', ' ')}</span></span>
-                  <button className="btn" style={{ fontSize:12, padding:'4px 12px' }} onClick={() => loadProjectByName(p.name)}>载入</button>
+                    <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight:400 }}> · {p.modules} 模块 / {p.edges} 连线 · {p.saved_at?.replace('T', ' ')}</span></span>
+                  <button className="btn" style={{ fontSize: 'var(--fs-base)', padding:'4px 12px' }} onClick={() => loadProjectByName(p.name)}>载入</button>
                   <span className="chip-x" title="删除" onClick={async () => { await api.projectDelete(p.name); setProjects(ps => ps.filter(x => x.name !== p.name)) }}>✕</span>
                 </div>
               ))}
@@ -1526,7 +1574,7 @@ export default function App() {
           </div>
         )
       })()}
-      {edgeTip && <div style={{ position:'fixed', left: edgeTip.x + 14, top: edgeTip.y + 12, zIndex:1500, background:'var(--raise)', border:'1px solid var(--border-2)', borderRadius:10, padding:'8px 12px', fontSize:12, pointerEvents:'none', boxShadow:'var(--shadow-2)' }} dangerouslySetInnerHTML={{ __html: edgeTip.html }} />}
+      {edgeTip && <div style={{ position:'fixed', left: edgeTip.x + 14, top: edgeTip.y + 12, zIndex:1500, background:'var(--raise)', border:'1px solid var(--border-2)', borderRadius:10, padding:'8px 12px', fontSize: 'var(--fs-base)', pointerEvents:'none', boxShadow:'var(--shadow-2)' }} dangerouslySetInnerHTML={{ __html: edgeTip.html }} />}
     </div>
     </ErrorBoundary>
   )

@@ -19,6 +19,8 @@ export interface Module {
   core_measurements?: any[]; core_observations?: any[]; core_menu_steps?: any[];
   /** core 的 runs.run_nature：chain / trial / batch_level / season（热机，画布默认收起） */
   run_nature?: string;
+  /* 本工序第几次（不含 season）：后端按 core 全量算 ⇒ 显示 `run{N}` */
+  stage_run_index?: number;
   /** 参数调试线归属（core v0.1.6）：同工序一次参数扫描 + 第几轮 ⇒ 画布显示 run1/run2… */
   tune_id?: string; tune_step?: number | string;
 }
