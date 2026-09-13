@@ -268,6 +268,51 @@ function OrthoEdge({ id, source, target, sourceX, sourceY, targetX, targetY, mar
   )
 }
 
+/** 一分多（扇出）时把"离开父节点那段竖线"**按走廊可用宽度等分**。
+ *
+ * 为什么需要它（owner 2026-09-13）：「一分多那里就会看不清，线总是贴在一起，
+ * 似乎线不知道他本来可以分的多宽」—— 路由器只会在 ±22px 内做微错开，它是**局部**判断，
+ * 不知道父节点右侧那条走廊（列间缝，宽 72px）整条都是空的。
+ * 这里把 n 条线的竖直段均匀铺在 `[父右边界+8, 下一列左边界-8]` 上（每段留安全边），
+ * 于是扇出真正"张开"，而且仍然只改一条竖线的 x ⇒ 正交性与避障都保持。
+ */
+function spreadFanout(routes: Record<string, Pt[]>, edges: any[], nodes: any[]): Record<string, Pt[]> {
+  const boxOf = (id: string) => {
+    const n = nodes.find((x: any) => x.id === id)
+    return n ? { x: n.position.x, w: (n as any).width || (n as any).measured?.width || 190 } : null
+  }
+  const bySrc: Record<string, any[]> = {}
+  for (const e of edges) (bySrc[e.source] ||= []).push(e)
+  const out = { ...routes }
+  for (const [src, list] of Object.entries(bySrc)) {
+    if (list.length < 2) continue                       // 单条线不用管
+    const sb = boxOf(src)
+    if (!sb) continue
+    const left = sb.x + sb.w + 8
+    let right = Infinity
+    for (const n of nodes) {
+      const nx = n.position.x
+      if (nx > sb.x + sb.w + 1) right = Math.min(right, nx - 8)   // 下一列的左边界
+    }
+    if (!(right > left + 8)) continue
+    const pitch = (right - left) / list.length
+    list.forEach((e, i) => {
+      const pts = out[e.id]
+      if (!pts || pts.length < 3) return
+      const laneX = left + pitch * (i + 0.5)            // 均匀分布的第 i 条车道
+      const p = pts.map(q => ({ ...q }))
+      // 常见形状：P0 -(水平)-> P1 -(竖直)-> P2 … 只挪这条竖直段
+      const firstSegHorizontal = Math.abs(p[1].y - p[0].y) < 0.5 && Math.abs(p[2].x - p[1].x) < 0.5
+      if (firstSegHorizontal) {
+        p[1] = { x: laneX, y: p[1].y }
+        p[2] = { x: laneX, y: p[2].y }
+        out[e.id] = p
+      }
+    })
+  }
+  return out
+}
+
 const edgeTypes = { ortho: OrthoEdge }
 
 const nodeTypes = { process: ProcessNode }
@@ -1139,7 +1184,7 @@ export default function App() {
         cols[e.id] = { from: colorOf(e.source), to: colorOf(e.target) }
         taken.push({ points: pts })
       }
-      setRoutes(out)
+      setRoutes(spreadFanout(out, viewEdges, viewNodes))   // 扇出按走廊宽度张开
       setEdgeColors(cols)
     }, 140)
     return () => clearTimeout(t)
