@@ -172,7 +172,17 @@ function LogoMark({ size = 17 }: { size?: number }) {
    先最少拐弯、再最短长度，多条线之间互相错开）。
    这里只做两件事：**一次算全图**（这样"已占用的线"才排得开）+ **画成圆角折线**。
    =========================================================================== */
-const RouteCtx = createContext<Record<string, Pt[]>>({})
+/* 连线的两件事（2026-09-13 owner）：
+   ① 「方块密集排布时连线看不清」—— 算法确实不撞，但**线多了就分不出谁连谁** ⇒
+      加**聚焦**：鼠标停在某个方块/某条线上时，相关的线保持原样，其余压到 10% 透明度；
+   ② 「颜色从前一个方块渐变到后一个方块」—— 每条线用自己的 `<linearGradient>`
+      （起色 = 源族色、终色 = 目标族色），走 `userSpaceOnUse`，箭头也画成目标色。 */
+interface EdgeCtx {
+  routes: Record<string, Pt[]>
+  colors: Record<string, { from: string; to: string }>
+  focus: string | null
+}
+const RouteCtx = createContext<EdgeCtx>({ routes: {}, colors: {}, focus: null })
 
 /** 折线 → 带小圆角的 SVG path（拐角处 7px 圆角，观感比硬折角柔和） */
 function roundedPath(pts: Pt[], r = 7): string {
@@ -192,14 +202,70 @@ function roundedPath(pts: Pt[], r = 7): string {
   return d + ` L ${e.x} ${e.y}`
 }
 
-/** 一条边：有路由结果就画正交折线；还没算出来（或算不出）就用原来的平滑曲线兜底 */
-function OrthoEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style }: any) {
-  const routes = useContext(RouteCtx)
+/** 一小段箭头（三角形）：自己画而不是用 marker，才能**跟着目标族色走** */
+function arrowAt(pts: Pt[], color: string) {
+  const e = pts[pts.length - 1], b = pts[pts.length - 2] || e
+  const a = Math.atan2(e.y - b.y, e.x - b.x)
+  const L = 9, W = 3.4
+  const p1 = `${e.x},${e.y}`
+  const p2 = `${e.x - L * Math.cos(a) + W * Math.sin(a)},${e.y - L * Math.sin(a) - W * Math.cos(a)}`
+  const p3 = `${e.x - L * Math.cos(a) - W * Math.sin(a)},${e.y - L * Math.sin(a) + W * Math.cos(a)}`
+  return <polygon points={`${p1} ${p2} ${p3}`} fill={color} />
+}
+
+/** 一条边：正交折线 + **源→目标族色渐变**；聚焦时把无关的线压暗 */
+function OrthoEdge({ id, source, target, sourceX, sourceY, targetX, targetY, markerEnd, style }: any) {
+  const { routes, colors, focus } = useContext(RouteCtx)
   const pts = routes[id]
-  const d = pts && pts.length > 1
-    ? roundedPath(pts)
-    : `M ${sourceX},${sourceY} C ${sourceX + 40},${sourceY} ${targetX - 40},${targetY} ${targetX},${targetY}`
-  return <path className="react-flow__edge-path" d={d} fill="none" markerEnd={markerEnd} style={style} />
+  const col = colors[id] || { from: 'var(--faint)', to: 'var(--faint)' }
+  const same = col.from === col.to
+  const inferred = (style && (style as any).strokeDasharray) ? true : false
+
+  // 聚焦：鼠标在某个方块/某条线上时，只有"沾边"的线保持原样
+  let related = true
+  if (focus) {
+    if (focus === id) related = true
+    else if (focus.startsWith('e-')) related = (source === String(focus).slice(2) || false)
+    else related = (source === focus || target === focus)
+    // 聚焦在"线"上时，同源/同目标的线一起亮（扇出看着才成组）
+    if (!related && String(focus).startsWith('e-')) related = true
+  }
+
+  if (!pts || pts.length < 2) {
+    return <path className="react-flow__edge-path" fill="none"
+      d={`M ${sourceX},${sourceY} C ${sourceX + 40},${sourceY} ${targetX - 40},${targetY} ${targetX},${targetY}`}
+      markerEnd={markerEnd} style={style} />
+  }
+
+  const d = roundedPath(pts)
+  const gid = `eg-${id}`
+  const stroke = same ? col.from : `url(#${gid})`
+  const base = {
+    fill: 'none' as const,
+    stroke,
+    strokeWidth: inferred ? 1.3 : 1.7,
+    strokeDasharray: inferred ? '6 5' : undefined,
+    opacity: related ? (inferred ? 0.85 : 1) : 0.10,
+    transition: 'opacity .15s ease',
+  }
+  return (
+    <>
+      {!same && (
+        <defs>
+          {/* `userSpaceOnUse` + 画布坐标：颜色从"源方块"方向走到"目标方块"方向 */}
+          <linearGradient id={gid} gradientUnits="userSpaceOnUse"
+            x1={pts[0].x} y1={pts[0].y} x2={pts[pts.length - 1].x} y2={pts[pts.length - 1].y}>
+            <stop offset="0%" style={{ stopColor: col.from }} />
+            <stop offset="100%" style={{ stopColor: col.to }} />
+          </linearGradient>
+        </defs>
+      )}
+      <path className="react-flow__edge-path" d={d} style={base} />
+      <g style={{ opacity: base.opacity, transition: 'opacity .15s ease' }}>
+        {arrowAt(pts, col.to)}
+      </g>
+    </>
+  )
 }
 
 const edgeTypes = { ortho: OrthoEdge }
@@ -1046,6 +1112,9 @@ export default function App() {
   /* 全图一次算路（按边 id 稳定排序 ⇒ 同一张图每次结果一样）。
      放在这里是因为"错开"需要**顺序**：后算的边要避开先算的边。 */
   const [routes, setRoutes] = useState<Record<string, Pt[]>>({})
+  /* 每条线的两端族色（渐变用）；以及"鼠标停在哪"（聚焦用） */
+  const [edgeColors, setEdgeColors] = useState<Record<string, { from: string; to: string }>>({})
+  const [hoverId, setHoverId] = useState<string | null>(null)
   useEffect(() => {
     const t = setTimeout(() => {
       const boxes: Box[] = viewNodes.map(n => ({
@@ -1057,14 +1126,21 @@ export default function App() {
       viewNodes.forEach((n, i) => byId.set(n.id, boxes[i]))
       const taken: { points: Pt[] }[] = []
       const out: Record<string, Pt[]> = {}
+      const cols: Record<string, { from: string; to: string }> = {}
+      const colorOf = (nid: string) => {
+        const m = (viewNodes.find(n => n.id === nid)?.data as any)?.module || {}
+        return FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || 'var(--faint)'
+      }
       for (const e of [...viewEdges].sort((a, b) => a.id.localeCompare(b.id))) {
         const sBox = byId.get(e.source), tBox = byId.get(e.target)
         if (!sBox || !tBox) continue
         const pts = routeEdge({ source: sBox, target: tBox, obstacles: boxes, taken })
         out[e.id] = pts
+        cols[e.id] = { from: colorOf(e.source), to: colorOf(e.target) }
         taken.push({ points: pts })
       }
       setRoutes(out)
+      setEdgeColors(cols)
     }, 140)
     return () => clearTimeout(t)
   }, [viewNodes, viewEdges])
@@ -1229,7 +1305,7 @@ export default function App() {
         </div>
         <div className="center-col">
         <div className="canvas-wrap">
-          <RouteCtx.Provider value={routes}>
+          <RouteCtx.Provider value={{ routes, colors: edgeColors, focus: hoverId || selectedId }}>
           <ReactFlow nodes={viewNodes} edges={viewEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
             defaultEdgeOptions={{ type: 'ortho' }}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
@@ -1240,13 +1316,15 @@ export default function App() {
             panOnDrag={[1, 2]}
             multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
             onNodeClick={(_, n) => { setSelectedId(n.id); setMenu(null) }}
+            onNodeMouseEnter={(_, n) => setHoverId(n.id)}
+            onNodeMouseLeave={() => setHoverId(null)}
             onPaneClick={() => setMenu(null)}
             onNodeContextMenu={(e, n) => { e.preventDefault(); setSelectedId(n.id); setMenu({ x: e.clientX, y: e.clientY, kind: 'node', id: n.id }) }}
             onEdgeContextMenu={(e, edge) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, kind: 'edge', id: edge.id }) }}
             onEdgeClick={(_, edge) => setSelectedId(null)}
-            onEdgeMouseEnter={(e, edge) => setEdgeTip({ x: e.clientX, y: e.clientY, html: edgeTipHtml(edge.id) })}
+            onEdgeMouseEnter={(e, edge) => { setHoverId(edge.id); setEdgeTip({ x: e.clientX, y: e.clientY, html: edgeTipHtml(edge.id) }) }}
             onEdgeMouseMove={(e, edge) => setEdgeTip(t => t ? { ...t, x: e.clientX, y: e.clientY } : t)}
-            onEdgeMouseLeave={() => setEdgeTip(null)}
+            onEdgeMouseLeave={() => { setHoverId(null); setEdgeTip(null) }}
             onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
             onDrop={e => {
               e.preventDefault()
