@@ -21,7 +21,7 @@ export default function PanelTabs({ module: raw, onUpdate }: {
       <div style={{ display:'flex', borderBottom:'1px solid var(--border)', marginBottom:10 }}>
         {(['params','doe','opt','sim'] as const).map(tabKey => (
           <div key={tabKey} onClick={() => setTab(tabKey)}
-            style={{ padding:'6px 16px', cursor:'pointer', fontWeight: tab===tabKey?700:400,
+            style={{ padding:'6px 16px', cursor:'pointer', fontWeight: tab===tabKey ? 'var(--fw-bold)' : 'var(--fw-normal)',
               color: tab===tabKey?'var(--accent-text)':'var(--muted)', borderBottom: tab===tabKey?'2px solid var(--accent)':'2px solid transparent' }}>
             {{params: t('pt.params'), doe:'DOE', opt:'Opt', sim:'Sim'}[tabKey]}
           </div>
@@ -220,7 +220,7 @@ function OptTab({ module }: { module: Module }) {
           {sug.note && <div style={{ fontSize: 'var(--fs-xs)', color:'var(--warn)', marginBottom:6 }}>⚠ {sug.note}</div>}
           {sug.suggestions.map((s: any, i: number) => (
             <div key={i} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'6px 10px', marginBottom:6, fontSize: 'var(--fs-base)' }}>
-              <div style={{ color:'var(--accent-text)', fontWeight:600 }}>#{i + 1} · 预测 {s.predicted}{s.std != null ? ` ±${s.std}` : ''}</div>
+              <div style={{ color:'var(--accent-text)', fontWeight:'var(--fw-semibold)' }}>#{i + 1} · 预测 {s.predicted}{s.std != null ? ` ±${s.std}` : ''}</div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:3 }}>
                 {Object.entries(s.params).map(([k, v]) => (
                   <span key={k} className="chip" style={{ fontSize: 'var(--fs-xs)' }}>{k}={String(v)}</span>

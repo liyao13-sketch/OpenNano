@@ -35,7 +35,7 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
         <div style={{ display:'flex', borderBottom:'1px solid var(--border)' }}>
           {(['equipment','params','machines','defaults','rules'] as const).map(tabKey => (
             <div key={tabKey} onClick={() => setTab(tabKey)}
-              style={{ padding:'8px 18px', cursor:'pointer', fontWeight: tab===tabKey ? 700 : 400,
+              style={{ padding:'8px 18px', cursor:'pointer', fontWeight: tab===tabKey ? 'var(--fw-bold)' : 'var(--fw-normal)',
                 color: tab===tabKey ? 'var(--accent-text)' : 'var(--muted)', borderBottom: tab===tabKey ? '2px solid var(--accent)' : '2px solid transparent' }}>
               {{equipment: tr('set.tabEquipment'), params: tr('set.tabParams'), machines: tr('set.tabMachines'), defaults: tr('set.tabDefaults'), rules: tr('set.tabRules')}[tabKey]}
             </div>

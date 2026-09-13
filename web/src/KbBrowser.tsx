@@ -40,7 +40,7 @@ export default function KbBrowser({ onClose }: { onClose: () => void }) {
           {shown.map(e => (
             <div key={e.id} style={{ border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'var(--surface)' }}>
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-                <span style={{ background: relColor(e.reliability_score), color:'var(--bg)', borderRadius:6, padding:'1px 8px', fontSize: 'var(--fs-xs)', fontWeight:700 }}>{e.reliability_score}/5</span>
+                <span style={{ background: relColor(e.reliability_score), color:'var(--bg)', borderRadius:6, padding:'1px 8px', fontSize: 'var(--fs-xs)', fontWeight:'var(--fw-bold)' }}>{e.reliability_score}/5</span>
                 <b style={{ fontSize: 'var(--fs-md)' }}>{e.title}</b>
                 <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{e.process_type}</span>
               </div>

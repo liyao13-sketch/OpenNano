@@ -59,7 +59,7 @@ function ProcessNode({ data }: any) {
       <div style={{ padding:'6px 10px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           <span style={{ width:6, height:6, borderRadius:2, background:color, flexShrink:0 }} />
-          <span style={{ fontSize: 'var(--fs-lg)', fontWeight:620, letterSpacing:'-.01em', flex:1, lineHeight:1.35,
+          <span style={{ fontSize: 'var(--fs-lg)', fontWeight:'var(--fw-semibold)', letterSpacing:'-.01em', flex:1, lineHeight:1.35,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
             textDecoration: m.disabled ? 'line-through' : 'none' }}>{primary}</span>
           <span title={m.disabled ? t('node.disabled')
@@ -78,7 +78,7 @@ function ProcessNode({ data }: any) {
               <span title={t('node.runTip', { n: runNo, run: runId })
                 + (m.tune_step != null ? ` · ${t('node.tuneTip', { id: m.tune_id || '', step: m.tune_step })}` : '')
                 + ` · ${t('node.runSeqTip')}`}
-                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:700,
+                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:'var(--fw-bold)',
                   color:'var(--accent-fg)', background:'var(--accent)',
                   border:'1px solid var(--accent)', borderRadius:4, padding:'0 5px' }}>
                 run{runNo}
@@ -86,7 +86,7 @@ function ProcessNode({ data }: any) {
             )}
             {shortRun && (
               <span title={`core run：${runId}`}
-                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:600,
+                style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:'var(--fw-semibold)',
                   color: m.tune_step != null ? 'var(--muted)' : 'var(--accent-hi)',
                   background: m.tune_step != null ? 'transparent' : 'var(--accent-soft)',
                   border: `1px solid ${m.tune_step != null ? 'var(--border)' : 'var(--accent-ring)'}`,
@@ -1261,7 +1261,7 @@ export default function App() {
               <button className="dropdown-item" onClick={() => { setDockTab('issues'); setViewMenu(false) }}>显示问题面板 ({issues.length})</button>
               <div className="dropdown-sep" />
               <div style={{ padding:'4px 9px 2px', fontSize: 'var(--fs-micro)', letterSpacing:'.06em',
-                textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>{t('view.theme')}</div>
+                textTransform:'uppercase', color:'var(--faint)', fontWeight:'var(--fw-semibold)' }}>{t('view.theme')}</div>
               <button className="dropdown-item" onClick={() => setTheme('linear')}>
                 {theme === 'linear' ? '● ' : '○ '}{t('view.themeLinear')}</button>
               <button className="dropdown-item" onClick={() => setTheme('light')}>
@@ -1401,7 +1401,7 @@ export default function App() {
                 border:'1px solid var(--border)', borderRadius:999,
                 padding:'5px 11px', backdropFilter:'blur(6px)' }}>
                 <span style={{ fontSize: 'var(--fs-micro)', letterSpacing:'.06em', textTransform:'uppercase',
-                  color:'var(--faint)', fontWeight:600 }}>{t('legend.family')}</span>
+                  color:'var(--faint)', fontWeight:'var(--fw-semibold)' }}>{t('legend.family')}</span>
                 {families.map(f => (
                   <span key={f.key} title={f.label}
                     style={{ width:9, height:9, borderRadius:3, cursor:'default',
@@ -1544,9 +1544,13 @@ export default function App() {
                 {machDef && (
                   <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
                     <div className="bd-sec-head">
-                      <span className="dim">{t('panel.measured')}</span>
-                      <span className="dim">{machDef.tool_id} · {machDef.n_runs} 次
-                        {machDef.as_of ? ` · 最近 ${machDef.as_of}` : ''}</span>
+                      <span className="dim" title={t('panel.measured')}>{t('panel.measured')}</span>
+                      {/* 元信息走 i18n（`次`/`最近` 是 2026-09-13 漏翻的硬编码中文；
+                          右边这块**不参与让位**，详情栏窄了由 CSS 负责整体换行） */}
+                      <span className="dim" title={`${machDef.tool_id} · ${machDef.n_runs}`}>
+                        {machDef.as_of
+                          ? t('panel.machMeta', { tool: machDef.tool_id, n: machDef.n_runs, date: machDef.as_of })
+                          : t('panel.machMetaNoDate', { tool: machDef.tool_id, n: machDef.n_runs })}</span>
                     </div>
                     <div className="row" style={{ gap: 6 }}>
                       {machDef.phases?.length > 1 && (
@@ -1558,13 +1562,14 @@ export default function App() {
                       )}
                       <button className="btn ghost" disabled={!machPhase} onClick={applyMachineDefaults}
                         title={t('panel.applyTip')}>
-                        {t('panel.applyMeasured')}{machPhase ? `（${machPhase}）` : ''}
+                        {t('panel.applyMeasured')}{machPhase ? ` (${machPhase})` : ''}
                       </button>
                     </div>
                     {machDef.phases?.length === 1 && (
                       <div className="dim" style={{ fontSize: 'var(--fs-xs)', marginTop: 2 }}>
-                        {Object.keys(machDef.by_phase[machDef.phases[0]]?.params || {}).length} 个键
-                        （来源 {machDef.from_run}）
+                        {t('panel.machKeys', {
+                          n: Object.keys(machDef.by_phase[machDef.phases[0]]?.params || {}).length,
+                          run: machDef.from_run })}
                       </div>
                     )}
                   </div>
@@ -1601,7 +1606,7 @@ export default function App() {
                         <span className="chip">{r.to}</span>
                         {r.value != null ? (
                           <>
-                            <span style={{ fontWeight:700 }}>{r.value}</span>
+                            <span style={{ fontWeight:'var(--fw-bold)' }}>{r.value}</span>
                             <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
                               onClick={() => onParam(r.to, r.value)}>Apply</button>
                           </>
@@ -1646,14 +1651,14 @@ export default function App() {
                   {m.equipment_id ? (
                     <button className="btn ghost sm" onClick={saveAsTemplate}>{t('panel.saveTpl')}</button>
                   ) : (
-                    <span className="dim" style={{ fontWeight: 400 }}>{t('panel.saveTplHint')}</span>
+                    <span className="dim" style={{ fontWeight: 'var(--fw-normal)' }}>{t('panel.saveTplHint')}</span>
                   )}
                 </div>
                 <div className="iface-sec">{t('panel.inputs')}</div>
                 {m.param_inputs.map(k => (
-                  <div className="row" key={k}>
-                    <span className="chip">{k}</span>
-                    <span className="kv-in">{handed[k] != null ? handed[k] : '—'}</span>
+                  <div className="row kv" key={k}>
+                    <span className="chip" title={k}>{k}</span>
+                    <span className="kv-in" title={handed[k] != null ? String(handed[k]) : '—'}>{handed[k] != null ? handed[k] : '—'}</span>
                     <span className="chip-x" onClick={() => updateModule({ param_inputs: m.param_inputs.filter(x => x !== k) })}>✕</span>
                   </div>
                 ))}
@@ -1665,8 +1670,8 @@ export default function App() {
                 </div>
                 <div className="iface-sec">{t('panel.outputs')}</div>
                 {m.param_outputs.map(k => (
-                  <div className="row" key={k}>
-                    <span className="chip">{k}</span>
+                  <div className="row kv" key={k}>
+                    <span className="chip" title={k}>{k}</span>
                     <input type="number" value={m.key_values[k] ?? 0}
                       onChange={e => onKeyValue(k, parseFloat(e.target.value) || 0)} />
                     <span className="chip-x" onClick={() => updateModule({ param_outputs: m.param_outputs.filter(x => x !== k) })}>✕</span>
@@ -1680,8 +1685,9 @@ export default function App() {
                 </div>
                 <div className="iface-sec">{t('panel.formulas')}</div>
                 {Object.entries(m.formulas).map(([out, expr]) => (
-                  <div className="row" key={out}>
-                    <span className="chip" style={{ flexShrink:0 }}>{out} =</span>
+                  <div className="row kv" key={out}>
+                    {/* 宽度归 `.row.kv` 的栅格管 —— 这里**不再内联** flexShrink（统一落在一处） */}
+                    <span className="chip" title={`${out} =`}>{out} =</span>
                     <input type="text" value={expr} placeholder={t('panel.formulaPlaceholder')}
                       onChange={e => updateModule({ formulas: { ...m.formulas, [out]: e.target.value } })} />
                     <span className="chip-x" onClick={() => { const f = { ...m.formulas }; delete f[out]; updateModule({ formulas: f }) }}>✕</span>
@@ -1727,8 +1733,8 @@ export default function App() {
             <div style={{ maxHeight:360, overflowY:'auto', padding:10 }}>
               {projects.map(p => (
                 <div key={p.name} className="row" style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:10, marginBottom:6 }}>
-                  <span style={{ flex:1, fontWeight:600 }}>{p.name}
-                    <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight:400 }}> · {p.modules} {t('proj.modules', { n: p.modules, e: p.edges })} · {p.saved_at?.replace('T', ' ')}</span></span>
+                  <span style={{ flex:1, fontWeight:'var(--fw-semibold)' }}>{p.name}
+                    <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight:'var(--fw-normal)' }}> · {p.modules} {t('proj.modules', { n: p.modules, e: p.edges })} · {p.saved_at?.replace('T', ' ')}</span></span>
                   <button className="btn" style={{ fontSize: 'var(--fs-base)', padding:'4px 12px' }} onClick={() => loadProjectByName(p.name)}>{t('topbar.load')}</button>
                   <span className="chip-x" title="删除" onClick={async () => { await api.projectDelete(p.name); setProjects(ps => ps.filter(x => x.name !== p.name)) }}>✕</span>
                 </div>
