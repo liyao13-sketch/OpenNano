@@ -114,6 +114,13 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       if (pick) loadFormOf(pick.run_id)
     } catch (e: any) { setMsg('链加载失败: ' + e.message) }
   }
+  /* 短号：只去批次前缀（`AR50-T1-ICP-0013` → `ICP-0013`）。
+     与画布节点同一约定 —— 表里 8 列，长号会把「状态」挤出可视区（2026-09-13 owner报）。 */
+  const short = (v?: string | null) => {
+    const x = v || ''
+    return batch && x.startsWith(batch + '-') ? x.slice(batch.length + 1) : x
+  }
+
   useEffect(() => { loadChain(batch); /* eslint-disable-next-line */ }, [batch, ctx.modules.length])
 
   const doContinue = async (useMenu: boolean) => {
@@ -297,9 +304,10 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       {msg && <div className="bd-msg">{msg}</div>}
       {report && <pre className="bd-report">{report}</pre>}
 
+      {/* 左格放宽：run 链那张表 8 列，50/50 平分会挤到只能横向滚（2026-09-13） */}
       <div className="bd-panes">
         {/* 左：链 + 调试线 + 事件 + 样品树 + 续做 */}
-        <div className="bd-pane">
+        <div className="bd-pane wide">
           <div className="bd-sec-head">
             <b>run 链</b>
             <span className="dim">
@@ -314,25 +322,29 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               )}
             </span>
           </div>
-          <table className="tbl" style={{ width: '100%', fontSize: 13 }}>
-            <thead><tr><th>run_id</th><th>seq</th><th>性质</th><th>sample/die</th><th>parent</th><th>状态</th><th>recipe</th><th></th></tr></thead>
-            <tbody>
-              {visibleRuns.map(r => (
-                <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
-                  <td>{r.run_id}</td>
-                  <td>{r.stage_seq}</td>
-                  <td title={natMap[r.run_id]?.why || ''} style={{ opacity: .9, whiteSpace: 'nowrap' }}>
-                    {natMap[r.run_id]?.nature_label || '—'}
-                    </td>
-                    <td style={{ opacity: .8 }}>{r.sample_id || '—'}</td>
-                    <td style={{ opacity: .75 }}>{r.parent_run_id || '—'}</td>
+          {/* 字号只在 `.tbl` 定一次；单元格一律不换行（窄了横向滚动）—— 见 styles.css「表格排版统一」 */}
+          <div className="tbl-wrap">
+            <table className="tbl" style={{ width: '100%' }}>
+              {/* 列序按"看得见的优先级"排：状态排在 parent/recipe 之前 —— 窄了横向滚时也不会被挤出屏幕 */}
+              <thead><tr><th>run_id</th><th>seq</th><th>性质</th><th>sample</th><th>状态</th><th>parent</th><th>recipe</th><th></th></tr></thead>
+              <tbody>
+                {visibleRuns.map(r => (
+                  <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
+                    <td className="code">{r.run_id}</td>
+                    <td>{r.stage_seq}</td>
+                    {/* 长标签只留主干（全文进 tooltip）：**中英文括号都要切** —— 只切全角曾漏掉「批次级(多片同做)」 */}
+                    <td className="soft" title={natMap[r.run_id]?.why || ''}>
+                      {(natMap[r.run_id]?.nature_label || '—').split(/[（(]/)[0]}</td>
+                    <td className="soft" title={r.sample_id || ''}>{short(r.sample_id) || '—'}</td>
                     <td>{r.status}</td>
-                    <td style={{ opacity: .75 }}>{r.recipe_id || '—'}</td>
-                    <td><button className="btn ghost" onClick={e => { e.stopPropagation(); setSel(r) }}>选</button></td>
+                    <td className="soft" title={r.parent_run_id || ''}>{short(r.parent_run_id) || '—'}</td>
+                    <td className="soft ellip" title={r.recipe_id || ''}>{short((r.recipe_id || '').replace(/^core:/, '')) || '—'}</td>
+                    <td><button className="btn ghost sm" onClick={e => { e.stopPropagation(); setSel(r) }}>选</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
 
             {/* 参数调试线（O1）：数据来自数据线的 v_tune_line 视图（缺 = NULL、不补值） */}
             {tuneLine?.available && (tuneLine.series || []).length > 0 && (
@@ -375,7 +387,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                     {events.plan_vs_actual.usage_rule.slice(0, 78)}…
                   </div>
                 )}
-                <table className="tbl" style={{ width: '100%', fontSize: 12, marginTop: 4 }}>
+                <div className="tbl-wrap" style={{ marginTop: 4 }}>
+                <table className="tbl" style={{ width: '100%' }}>
                   <thead><tr><th>event</th><th>kind</th><th>日期</th><th>从 → 到</th><th>颗数</th><th>状态</th></tr></thead>
                   <tbody>
                     {events.events.map((e: any) => (
@@ -387,12 +400,13 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                                   ? '取样分配（组内）' : '取样分配')
                              : e.kind}</td>
                         <td>{e.at}</td>
-                        <td style={{ opacity: .8 }}>{e.from_sample_id} → {e.to_sample_id || '（组）'}</td>
+                        <td className="soft">{e.from_sample_id} → {e.to_sample_id || '（组）'}</td>
                         <td>{e.count}</td><td>{e.status}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
                 <div style={{ opacity: .7, marginTop: 4 }}>
                   ⚠️ <b>split</b>=物理裂片（只 1 条×49）· <b>allocate</b>=从现有样品取样（不改总数）；
                   「实际用量」只算 allocate。工具**只出提案**，落账走数据线 <code>propose_apply.py</code>。
@@ -502,17 +516,19 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               <b style={{ fontSize: 13 }}>步骤参数（{runSteps.length} 步{preview ? ` · 预览 group ${preview.group}` : ''}）</b>
               {runSteps.length === 0 && <div style={{ opacity: .6, fontSize: 12 }}>该 run 尚未灌参 —— 先「续做 + 用 group N 灌参」或导入实验包</div>}
               {runSteps.length > 0 && (
-                <table className="tbl" style={{ width: '100%', fontSize: 12 }}>
-                  <thead><tr><th>#</th><th>槽</th><th>role</th><th>时长s</th><th>参数（规范键）</th></tr></thead>
-                  <tbody>
-                    {runSteps.slice(0, 12).map((s: any) => (
-                      <tr key={s.step_order}>
-                        <td>{s.step_order}</td><td>{s.machine_step}</td><td>{s.role}</td><td>{Math.round(s.duration_s || 0)}</td>
-                        <td style={{ wordBreak: 'break-all' }}>{Object.entries(s.param_json || {}).slice(0, 6).map(([k, v]) => `${k}=${v}`).join(' · ')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="tbl-wrap">
+                  <table className="tbl" style={{ width: '100%' }}>
+                    <thead><tr><th>#</th><th>槽</th><th>role</th><th>时长s</th><th>参数（规范键）</th></tr></thead>
+                    <tbody>
+                      {runSteps.slice(0, 12).map((s: any) => (
+                        <tr key={s.step_order}>
+                          <td>{s.step_order}</td><td>{s.machine_step}</td><td>{s.role}</td><td>{Math.round(s.duration_s || 0)}</td>
+                          <td className="wrap">{Object.entries(s.param_json || {}).slice(0, 6).map(([k, v]) => `${k}=${v}`).join(' · ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
 

@@ -1452,7 +1452,7 @@ export default function App() {
 
       {/* 状态栏(BEAMER 式:项目/规模/选中/运行/后端) */}
       <div className="statusbar">
-        <span>项目 {projectName}</span><span className="sb-sep" />
+        <span className="sb-name" title={`项目 ${projectName}`}>项目 {projectName}</span><span className="sb-sep" />
         <span>{nodes.length} 节点 · {edges.length} 连线</span><span className="sb-sep" />
         <span>选中 {selectedNode ? (selectedNode.data.module as Module).name : '—'}</span><span className="sb-sep" />
         <span>运行 {running ? '进行中…' : (nodes.some(n => (n.data.module as Module).run_state === 'ok') ? '已完成' : '待运行')}</span>

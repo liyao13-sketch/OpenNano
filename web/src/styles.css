@@ -441,9 +441,13 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   flex: 1; min-height: 0; display: flex; gap: 0;
 }
 .bd-pane {
-  flex: 1 1 50%; min-width: 0; overflow-y: auto; padding: 10px 14px 16px;
+  /* ⚠️ 基准必须是 0：`flex: 1 1 50%` 会让"50% 基准"压过下面的 grow 比例，
+     左格标了 .wide 反而更窄（2026-09-13 实测 312px vs 610px）。 */
+  flex: 1 1 0; min-width: 300px; overflow-y: auto; padding: 10px 14px 16px;
 }
 .bd-pane + .bd-pane { border-left: 1px solid var(--border); }
+/* run 链那张表列多：左格按 1.9 : 1 分，让 8 列**不横向滚**也看得全；更窄才滚 */
+.bd-pane.wide { flex: 2.2 1 0; }
 .bd-sec-head {
   display: flex; align-items: baseline; justify-content: space-between;
   margin: 2px 0 6px;
@@ -864,6 +868,33 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
     transform: translateX(-180%); animation: node-sheen 1.3s var(--ease); pointer-events: none;
   }
 }
+/* ============================================================================
+   2026-09-13 · 表格与状态栏排版统一（owner：「状态栏里的字体不统一，有的换行了，有的没换行」）
+   病根（两处，都在批次面板那张 run 链表上）：
+     ① 那张表被**内联成 13px**，另两张 12px、表头 10.5px ⇒ 一屏三档字号 = "字体不统一"；
+     ② 只有**部分单元格**内联了 `whiteSpace:'nowrap'` ⇒ 同一行里 run_id 折成
+        「AR50- / T1- / PECVD-0001」三行、而旁边几列不折 = "有的换行有的没换行"。
+   规矩：字号只在 `.tbl` 定一次；**单元格一律不换行**，窄了横向滚动；真要折行的列显式挂 `.wrap`。
+   ============================================================================ */
+.tbl { font-size: 12px; }
+.tbl td, .tbl th { white-space: nowrap; padding-left: 7px; padding-right: 7px; }
+.tbl td.ellip { max-width: 122px; overflow: hidden; text-overflow: ellipsis; }
+.tbl .btn.sm { height: 22px; padding: 0 7px; font-size: 11.5px; }
+.tbl td.code { font-family: var(--mono); font-size: 11.5px; }
+.tbl td.soft { opacity: .78; }
+.tbl td.wrap { white-space: normal; word-break: break-all; max-width: 340px; }
+.tbl-wrap { overflow-x: auto; }
+/* 表格横向滚动同样不显示滚动条（与两侧面板一致） */
+.tbl-wrap { scrollbar-width: none; -ms-overflow-style: none; }
+.tbl-wrap::-webkit-scrollbar { height: 0; display: none; }
+
+/* —— 状态栏：一律不换行、不许被压缩（避免挤到互相重叠），长项目名用省略号 —— */
+.statusbar { font-variant-numeric: tabular-nums; scrollbar-width: none; }
+.statusbar::-webkit-scrollbar { height: 0; display: none; }
+.statusbar > span { flex-shrink: 0; }
+.statusbar > .spacer { flex: 1 1 auto; }
+.statusbar .sb-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+
 /* —— 浅色主题：流光换成**深色**扫光（白底上白色流光看不见）—— */
 :root[data-theme="light"] .lib-tile::after {
   background: linear-gradient(100deg, transparent, rgba(15,23,42,.05), transparent);
