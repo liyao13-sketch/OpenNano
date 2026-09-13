@@ -57,6 +57,8 @@ const OUTER_CLEAR = 14
 const NUDGE: number[] = [0, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10]
 /** 同一簇内两条候选线的最小间隔（小于它视为同一条线） */
 const LINE_MERGE = 0.75
+/** 簇数超过它就进入"稀疏候选线"模式（只留缝中点 + 全局兜底） */
+const MANY_CLUSTERS = 32
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
 
@@ -177,7 +179,14 @@ function fallbackRoute(S: Pt, T: Pt): Pt[] {
 
 /* --------------------------------------------------- 走廊线 / 网格 */
 
-/** 把一轴上的区间按「重叠或相接即并」聚成簇，返回相邻簇缝的中点 + 簇外侧兜底走廊线 */
+/**
+ * 把一轴上的区间按「重叠或相接即并」聚成簇，返回：
+ *   · 相邻簇**缝的中点**（★ 主走廊：这些线整条都是空的）
+ *   · 每个簇左右/上下两侧、外扩 margin + OUTER_CLEAR 的兜底走廊
+ *   · 最外侧的全局兜底走廊
+ * 簇特别多时（≤ MANY_CLUSTERS）只留缝中点 + 全局兜底，避免候选线爆到几百条
+ * —— 连通性只依赖缝中点，丢掉的只是"更贴近某列的备选车道"。
+ */
 function corridorLines(boxes: Box[], axis: number, margin: number): number[] {
   const iv: number[][] = []
   for (const b of boxes) {
@@ -193,13 +202,16 @@ function corridorLines(boxes: Box[], axis: number, margin: number): number[] {
     if (last && s[0] <= last[1] + EPS) { if (s[1] > last[1]) last[1] = s[1] }
     else cl.push([s[0], s[1]])
   }
+  const dense = cl.length > MANY_CLUSTERS
   const out = margin + OUTER_CLEAR
   const lines: number[] = []
   lines.push(cl[0][0] - out)                                  // 全局外侧兜底走廊
   for (let k = 0; k + 1 < cl.length; k++) {
     lines.push((cl[k][1] + cl[k + 1][0]) / 2)                 // ★ 缝的中点（保证整条为空）
-    lines.push(cl[k][1] + out)                                // 本簇右侧外侧兜底走廊
-    lines.push(cl[k + 1][0] - out)                            // 下一簇左侧外侧兜底走廊
+    if (!dense) {
+      lines.push(cl[k][1] + out)                              // 本簇右侧外侧兜底走廊
+      lines.push(cl[k + 1][0] - out)                          // 下一簇左侧外侧兜底走廊
+    }
   }
   lines.push(cl[cl.length - 1][1] + out)                      // 全局外侧兜底走廊
   return lines
