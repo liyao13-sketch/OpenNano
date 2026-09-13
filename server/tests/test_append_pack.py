@@ -216,7 +216,7 @@ def test_core_to_project_回灌形状一致(core):
     ids = [m.get("core_run_id") for m in proj["modules"]]
     assert sorted(ids) == sorted(r["run_id"] for r in run_rows())
     assert proj["core_batch_id"] == BATCH
-    assert proj["_core_to_canvas"]["source"] == "core(只读)"
+    assert proj["_core_to_canvas"]["source"] == "core (read-only)"   # 界面标签跟界面语言走
     mod = {m["core_run_id"]: m for m in proj["modules"]}[f"{BATCH}-LDW-0001"]
     # 空测量不进画布（不渲染成 0）
     vals = [x for x in (mod.get("core_measurements") or [])]

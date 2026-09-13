@@ -320,7 +320,7 @@ def load_run_chain(batch: str) -> dict:
             "observations": obs_by_run.get(rid, []),
         })
     return {
-        "batch_id": batch, "source": "core(只读)", "nodes": len(chain),
+        "batch_id": batch, "source": "core (read-only)", "nodes": len(chain),
         "edges": sum(1 for r in chain if r.get("parent_run_id")),
         "roots": [r["run_id"] for r in chain if not r.get("parent_run_id")],
         "chain": chain,
@@ -374,30 +374,33 @@ def sample_tree(batch: str) -> dict:
         if n["children"]:
             n["child_count"] = len(n["children"])
     return {
-        "batch_id": batch, "source": "core(只读)",
+        "batch_id": batch, "source": "core (read-only)",
         "tree": [nodes[r] for r in sorted(roots)],
         "nodes": nodes, "count": len(nodes),
         "orphan_parent": dangling,
-        "note": ("样品组（如 DIE4/DIE15）的数字是**组内颗数**、不是 die 位号；"
-                 "裂片事件的「哪一颗去了哪」未记 ⇒ 工具不推断"),
+        "note": ("The number in a sample group (DIE4/DIE15) is the **count inside the group**, "
+                 "not a die position; which die went where was not recorded ⇒ the tool does not infer it"),
     }
 
 
 def _sample_nature(my_runs: list[dict]) -> str:
-    """该样品上 run 的总体性质（供 UI 一眼看：试验片 / 批次级 / 链）。"""
+    """该样品上 run 的总体性质（**界面标签，英文**；`run_nature` 的键不动）。
+
+    ⚠️ 2026-09-13 界面定全英文 ⇒ 这里返回的说明改成英文；键值仍是 trial/chain/batch_level。
+    """
     if not my_runs:
-        return "无 run"
+        return "no runs"
     ns = {(r.get("run_nature") or "").strip() for r in my_runs}
     ns.discard("")
     if ns == {"trial"}:
-        return "试验片"
+        return "trial wafer"
     if ns == {"chain"}:
-        return "链上样品"
+        return "chained sample"
     if ns and ns <= {"batch_level"}:
-        return "批次级（整片/多片）"
+        return "batch level (whole/multi-die)"
     if ns:
-        return "混合（" + "/".join(sorted(ns)) + "）"
-    return "未标（按 parent 自推）"
+        return "mixed (" + "/".join(sorted(ns)) + ")"
+    return "untagged (parent inferred)"
 
 # ---------------------------------------------------------------- core → 画布（回灌）
 #: core 表 → 包内 CSV 名（只读，用来喂 parse_expack）
@@ -474,7 +477,7 @@ def core_to_project(batch: str, project_name: str = "", lib=None,
     proj["name"] = project_name or batch
     proj["core_batch_id"] = batch
     proj["_core_to_canvas"] = {
-        "source": "core(只读)", "batch_id": batch, "runs": len(rows),
+        "source": "core (read-only)", "batch_id": batch, "runs": len(rows),
         "steps": len(tables.get("steps", [])),
         "measurements": len(tables.get("measurements", [])),
         "measurements_blank_skipped": skipped_blank,

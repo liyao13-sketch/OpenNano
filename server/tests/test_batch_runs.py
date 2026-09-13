@@ -126,13 +126,13 @@ def test_parallels_识别同上游并发并告警缺_die_层(core):
     assert p["count"] == 2 and p["runs"] == [f"{BATCH}-ICP-0001", f"{BATCH}-ICP-0002"]
     assert p["distinct_samples"] == 2
     assert p["hint"] == ""                                   # 有 die 区分 ⇒ 不告警
-    assert p["kind"].startswith("同一上游下的并发")
+    assert p["kind"].startswith("concurrent under one upstream")
     # ② 无共同上游的两条并发（ICP-0003 有样品、ICP-0004 没标）
     orphan = icp[""]
     assert orphan["count"] == 2
     assert orphan["distinct_samples"] == 1                    # 只有 0003 有 sample
-    assert "共用 sample" in orphan["hint"]
-    assert orphan["kind"].startswith("无共同上游")
+    assert "share sample" in orphan["hint"]
+    assert orphan["kind"].startswith("same-stage concurrency with no common upstream")
 
 
 def test_parallels_全都没标_sample_不许说成同一个样品():
@@ -145,7 +145,7 @@ def test_parallels_全都没标_sample_不许说成同一个样品():
             {"core_run_id": f"{BATCH}-ICP-0002", "core_parent_run_id": "P"}]
     p = parallels(mods, BATCH)[0]
     assert p["distinct_samples"] == 0 and p["samples"] == []
-    assert "都没有 sample 归属" in p["hint"] and "同一个" not in p["hint"]
+    assert "none of these runs has a sample" in p["hint"] and "one wafer ran several times" in p["hint"]
 
 
 def test_parallels_同一样品组要提示需人工标性质():
@@ -155,7 +155,7 @@ def test_parallels_同一样品组要提示需人工标性质():
     mods = [{"core_run_id": f"{batch}-ICP-0001", "core_parent_run_id": "P", "core_sample_id": "G"},
             {"core_run_id": f"{batch}-ICP-0002", "core_parent_run_id": "P", "core_sample_id": "G"}]
     p = parallels(mods, batch)[0]
-    assert p["distinct_samples"] == 1 and "共用 sample" in p["hint"]
+    assert p["distinct_samples"] == 1 and "share sample" in p["hint"]
 
 
 # ------------------------------------------------------------------ 性质判定
@@ -199,16 +199,17 @@ def test_sample_tree_整片到组到组内_悬空父单列(core):
     assert die15["children"] == [f"{BATCH}-01-DIE15-01"]
     assert die15["child_count"] == 1
     assert t["orphan_parent"] == [f"{BATCH}-01-DIE99"]          # 悬空 parent 不静默丢
-    assert "组内颗数" in t["note"]                              # DIE4/DIE15 的数字不是位号
+    assert "count inside the group" in t["note"]                              # DIE4/DIE15 的数字不是位号
 
 
 def test_sample_tree_样品性质标签(core):
     from kb.append_pack import _sample_nature
-    assert _sample_nature([{"run_nature": "trial"}]) == "试验片"
-    assert _sample_nature([{"run_nature": "chain"}]) == "链上样品"
-    assert _sample_nature([{"run_nature": "batch_level"}]) == "批次级（整片/多片）"
-    assert _sample_nature([]) == "无 run"
-    assert _sample_nature([{}]) == "未标（按 parent 自推）"
+    # 界面 2026-09-13 定全英文 ⇒ 这些是**界面标签**，跟界面语言走（`run_nature` 的键不变）
+    assert _sample_nature([{"run_nature": "trial"}]) == "trial wafer"
+    assert _sample_nature([{"run_nature": "chain"}]) == "chained sample"
+    assert _sample_nature([{"run_nature": "batch_level"}]) == "batch level (whole/multi-die)"
+    assert _sample_nature([]) == "no runs"
+    assert _sample_nature([{}]) == "untagged (parent inferred)"
 
 
 # ------------------------------------------------------------------ 批次概览

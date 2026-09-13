@@ -311,11 +311,11 @@ def parallels(modules: list[dict], batch: str) -> list[dict]:
             hint = ""                                  # 各 run 有各自的样品 ⇒ 已能区分
         elif not samples:
             # ⚠️ 全都没标 sample ≠ "sample 相同"（曾经这里误报成"同一个样品组"）
-            hint = ("这些 run **都没有 sample 归属** ⇒ 无法判断是同一片做多次、还是多片各做一次；"
-                    "请补 sample_id（或标 `core_run_nature`）")
+            hint = ("none of these runs has a sample ⇒ cannot tell whether one wafer ran several times "
+                    "or several wafers ran once each; please fill sample_id (or tag core_run_nature)")
         else:
-            hint = (f"这些 run 共用 sample「{samples[0]}」（可能是样品组）⇒ 组内区分未记；"
-                    "若组内每颗各做一次，请标 `core_run_nature=trial`")
+            hint = (f"these runs share sample \"{samples[0]}\" (possibly a sample group) ⇒ "
+                    "per-die attribution was not recorded; if each die ran once, tag core_run_nature=trial")
         out.append({
             "parent_run_id": parent,
             "stage": stage,
@@ -324,20 +324,22 @@ def parallels(modules: list[dict], batch: str) -> list[dict]:
             "samples": samples,
             "distinct_samples": len(samples),
             # 有父且同 stage ⇒ 同一上游下的并发；无父且同 stage ⇒ 大概率是分片后的同工序并发
-            "kind": ("同一上游下的并发（分片/多片并行做同一工序）" if same_parent
-                     else "无共同上游的同 stage 并发（疑似分片未记 die）"),
+            "kind": ("concurrent under one upstream (split / several wafers doing the same step)" if same_parent
+                     else "same-stage concurrency with no common upstream (split likely, die not recorded)"),
             "hint": hint,
         })
     out.sort(key=lambda x: (-x["count"], x["stage"]))
     return out
 
 
-#: run 性质（数据线 2026-09-12 建议）—— 防"同 stage 同 stage_seq ⇒ 串行"的误读
+#: run 性质（数据线 2026-09-12 建议）—— 防"同 stage 同 stage_seq ⇒ 串行"的误读。
+#: ⚠️ 2026-09-13 owner定「界面全英文」⇒ 这些**界面标签**改英文；`nature` 的**键**（chain/trial/…）
+#:    一个字母都没动（它们是契约里的值，翻了对不上库）。
 NATURE_LABEL = {
-    "chain": "链内续接",           # 有父 run ⇒ 真实上游链
-    "trial": "独立试验",           # 无父 + 有独立 sample ⇒ 与其他 run 并列的试验片
-    "batch_level": "批次级(多片同做)",  # 无父 + 与兄弟同 stage/sample ⇒ season 或"多 die 一起做"
-    "unclassified": "未分类",
+    "chain": "chained",            # 有父 run ⇒ 真实上游链
+    "trial": "standalone trial",   # 无父 + 有独立 sample ⇒ 与其他 run 并列的试验片
+    "batch_level": "batch level (multi-die)",  # 无父 + 与兄弟同 stage/sample
+    "unclassified": "unclassified",
 }
 
 
@@ -387,16 +389,16 @@ def classify(modules: list[dict], batch: str) -> list[dict]:
             same_sample = [x for x in peers if r["sample_id"] and x["sample_id"] == r["sample_id"]]
             if not r["sample_id"]:
                 nature = "batch_level"
-                why = "无上游、未标 sample ⇒ 疑为 season 或批次级（待人工确认）"
+                why = "no upstream and no sample ⇒ probably season or batch level (needs human confirmation)"
             elif same_sample:
                 # ⚠️ 关键：sample 也可能是**样品组**（如 DIE4 = 4 颗一组）。
                 # 同组多条 run **不等于**同一样品做多次，也不等于独立试验 —— 工具不猜。
                 nature = "batch_level"
-                why = (f"无上游、与同 stage 的 {len(same_sample)} 条 run 共享"
-                       f" sample「{r['sample_id']}」；若该 sample 是**样品组**（组内每颗各做一次），"
-                       f"应标 `core_run_nature=trial` 以区分")
+                why = (f"no upstream; shares sample \"{r['sample_id']}\" with {len(same_sample)} "
+                       f"run(s) in the same stage. If that sample is a **sample group** (one run per die), "
+                       f"tag it core_run_nature=trial to tell them apart")
             else:
-                nature, why = "trial", "无上游、sample 在同 stage 内唯一 ⇒ 独立试验"
+                nature, why = "trial", "no upstream; its sample is unique within the stage ⇒ standalone trial"
         item = {"run_id": r["run_id"], "stage": r["stage"], "sample_id": r["sample_id"],
                 "parent_run_id": r["parent_run_id"], "nature": nature,
                 "nature_label": NATURE_LABEL[nature], "why": why,

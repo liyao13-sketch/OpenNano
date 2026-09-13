@@ -107,16 +107,17 @@ def tune_lines(batch: str = "") -> dict:
             "param_avail": param_avail,
             "response_avail": resp_avail,
             "comparable_responses": comparable,
+            # 界面标签（英文）；量名词/step 号仍是 core 的原样
             "comparability_note": (
-                f"响应可比 {len(comparable)}/{len(resp_avail)}"
-                + (f"（可拟合：{'、'.join(comparable)}）" if comparable
-                   else "（**没有任何响应列有 ≥2 个点**）")
-                + (f"；全空轮次：step {'、'.join(empty_steps)}" if empty_steps else "")),
+                f"{len(comparable)}/{len(resp_avail)} responses comparable"
+                + (f" (fittable: {', '.join(comparable)})" if comparable
+                   else " (**no response column has ≥2 points**)")
+                + (f"; fully empty steps: {'、'.join(empty_steps)}" if empty_steps else "")),
         })
     return {
         "available": True,
         "series": out,
-        "source": "core/process.db · v_tune_line（数据线视图，只读）",
-        "note": ("缺的格就是 NULL（不补值）；**可比性只按响应列非空点数报**，"
-                 "量纲定义以 schema 为准（`cd_delta_nm` 定义工单已请数据线补写）。"),
+        "source": "core/process.db · v_tune_line (data-line view, read-only)",
+        "note": ("A missing cell is NULL and is never filled in; **comparability counts non-empty "
+                 "points per response column only**; units follow the schema."),
     }

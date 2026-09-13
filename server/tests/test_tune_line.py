@@ -78,9 +78,9 @@ def test_可比性只报不猜(db):
     s = tune_lines(BATCH)["series"][0]
     assert s["response_avail"] == {"cd_delta_nm": 2, "depth_nm": 1, "er_nm_min": 1}
     assert s["comparable_responses"] == {"cd_delta_nm": 2}
-    assert "响应可比 1/3" in s["comparability_note"]
-    assert "step 3" in s["comparability_note"]
-    assert "可拟合：cd_delta_nm" in s["comparability_note"]
+    assert "1/3 responses comparable" in s["comparability_note"]
+    assert "fully empty steps: 3" in s["comparability_note"]
+    assert "fittable: cd_delta_nm" in s["comparability_note"]
 
 
 def test_空值就是空值_绝不补(db):
