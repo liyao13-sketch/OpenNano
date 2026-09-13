@@ -1,3 +1,4 @@
+import { useI18n } from './i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Module } from './types'
 import TuneLineView from './TuneLineView'
@@ -44,6 +45,7 @@ const post = async (url: string, body: any) => {
 }
 
 export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
+  const { t: tr } = useI18n()
   const [batches, setBatches] = useState<any[]>([])
   const [batch, setBatch] = useState('')
   const [chain, setChain] = useState<{ runs: Run[]; nodes: number; edges: number; roots: string[]
@@ -76,7 +78,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     post('/api/batch/list', payload).then(d => {
       setBatches(d.batches || [])
       if ((d.batches || []).length) setBatch(b => b || d.batches[d.batches.length - 1].batch_id)
-    }).catch(e => setMsg('批次列表失败: ' + e.message))
+    }).catch(e => setMsg(tr('bd.batchListFail', { msg: e.message })))
     fetch('/api/form/contract').then(r => r.json()).then(setContract).catch(() => {})
     fetch('/api/menu/zones').then(r => r.json()).then(d => setMenuDir(d.default_dir || '')).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -112,7 +114,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       const pick = d.runs[d.runs.length - 1] || null
       setSel(pick)
       if (pick) loadFormOf(pick.run_id)
-    } catch (e: any) { setMsg('链加载失败: ' + e.message) }
+    } catch (e: any) { setMsg(tr('bd.chainFail', { msg: e.message })) }
   }
   /* 短号：只去批次前缀（`AR50-T1-ICP-0013` → `ICP-0013`）。
      与画布节点同一约定 —— 表里 8 列，长号会把「状态」挤出可视区（2026-09-13 owner报）。 */
@@ -140,9 +142,9 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
         menu_group: useMenu && group ? Number(group) : null, menu_dir: menuDir,
       })
       ctx.onApply({ name: d.project.name, modules: d.project.modules, edges: d.project.edges }, d.summary)
-      setMsg('✅ ' + d.summary + (d.issues?.length ? ` ⚠️ ${d.issues.length} 条校验提示` : ''))
+      setMsg('✅ ' + d.summary + (d.issues?.length ? ` ⚠️ ${d.issues.length}` : ''))
       setSel(d.run); loadChain(batch)
-    } catch (e: any) { setMsg('❌ 续做失败: ' + e.message) } finally { setBusy('') }
+    } catch (e: any) { setMsg(tr('bd.continueFail', { msg: e.message })) } finally { setBusy('') }
   }
 
   const scanMenu = async () => {
@@ -150,9 +152,9 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     try {
       const d = await post('/api/menu/scan', { dir: menuDir })
       const named = (d.recipes || []).filter((r: any) => r.name).length
-      setMsg(`菜单解析：recipe ${d.recipes?.length || 0} 槽（有名 ${named}）· group ${d.groups?.length || 0} 槽`
-        + ` · 越界剔除 ${d.skipped_out_of_scope}` + (d.pair_warning ? `\n⚠️ ${d.pair_warning}` : ''))
-    } catch (e: any) { setMsg('❌ 菜单扫描失败: ' + e.message) } finally { setBusy('') }
+      setMsg(tr('bd.menuScan', { rcp: d.recipes?.length || 0, named, grp: d.groups?.length || 0, skipped: d.skipped_out_of_scope })
+        + (d.pair_warning ? `\n⚠️ ${d.pair_warning}` : ''))
+    } catch (e: any) { setMsg(tr('bd.menuScanFail', { msg: e.message })) } finally { setBusy('') }
   }
 
   /** 统一的事件提案（kind=allocate 取样分配 / split 物理裂片）。
@@ -160,7 +162,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const proposeEvent = async (kind: 'allocate' | 'split', apply = false) => {
     const n = Number((document.getElementById('alloc-n') as HTMLInputElement)?.value || 0)
     const to = (document.getElementById('alloc-to') as HTMLInputElement)?.value || ''
-    if (!to || !n) { setMsg('请填"取样颗数"和"到样品"'); return }
+    if (!to || !n) { setMsg(tr('bd.needFields')); return }
     setBusy('alloc'); setMsg('')
     try {
       const d = await post('/api/batch/propose', { batch_id: batch, operator: 'owner', apply,
@@ -172,12 +174,12 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                    note: kind === 'split' ? '工具侧：物理裂片（1 片 → N 颗）'
                                           : '工具侧：取样分配（从现有样品取 N 颗）' }] })
       const chk = d.precheck || {}
-      setMsg((chk.ok ? '✅ 本地预检通过' : '❌ 本地预检未过') + `\n`
-        + (chk.errors?.length ? '错误：\n' + chk.errors.join('\n') + '\n' : '')
-        + (chk.warnings?.length ? '提示：\n' + chk.warnings.join('\n') + '\n' : '')
-        + `\n数据线脚本（${apply ? '落账' : '干跑'}）：\n` + (d.run?.stdout || d.run?.error || ''))
+      setMsg((chk.ok ? tr('bd.precheckOk') : tr('bd.precheckFail')) + `\n`
+        + (chk.errors?.length ? tr('bd.errors') + '\n' + chk.errors.join('\n') + '\n' : '')
+        + (chk.warnings?.length ? tr('bd.warnings') + '\n' + chk.warnings.join('\n') + '\n' : '')
+        + `\n${apply ? tr('bd.scriptApply') : tr('bd.scriptDry')}\n` + (d.run?.stdout || d.run?.error || ''))
       if (apply) post('/api/batch/events', { batch_id: batch }).then(setEvents).catch(() => {})
-    } catch (e: any) { setMsg('❌ 提案失败: ' + e.message) } finally { setBusy('') }
+    } catch (e: any) { setMsg(tr('bd.proposeFail', { msg: e.message })) } finally { setBusy('') }
   }
 
   const rehydrate = async () => {
@@ -188,10 +190,10 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       ctx.onApply({ name: d.name, modules: d.modules || [], edges: d.edges || [] },
                   `从 core 回灌「${batch}」：${(d.modules || []).length} 个 run`)
       const i = d._core_to_canvas || {}
-      setMsg(`✅ 已从 core 回灌「${batch}」：${i.runs} 个 run · ${i.steps} 步 · `
-        + `${i.measurements} 条测量（跳过空值 ${i.measurements_blank_skipped}）· ${i.observations} 条现象\n`
-        + `连线 ${(d.edges || []).length} 条（parent 链）· 只读 core，未写任何数据资产`)
-    } catch (e: any) { setMsg('❌ 回灌失败: ' + e.message) } finally { setBusy('') }
+      setMsg(tr('bd.rehydrated', { batch, runs: i.runs, steps: i.steps, meas: i.measurements,
+          blank: i.measurements_blank_skipped, obs: i.observations }) + '\n'
+        + tr('bd.rehydrateEdges', { n: (d.edges || []).length }))
+    } catch (e: any) { setMsg(tr('bd.rehydrateFail', { msg: e.message })) } finally { setBusy('') }
   }
 
   const checkMenu = async () => {
@@ -199,8 +201,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     try {
       const d = await post('/api/menu/check', { dir: menuDir, text: true })
       setReport(d.text || '')
-      setMsg(`体检：${d.summary.dumps} 份导出 · 可用 ${d.summary.ok} · 有问题 ${d.summary.with_warnings} ⇒ ${d.summary.verdict}`)
-    } catch (e: any) { setMsg('❌ 体检失败: ' + e.message) } finally { setBusy('') }
+      setMsg(tr('bd.inspect', { dumps: d.summary.dumps, ok: d.summary.ok, bad: d.summary.with_warnings, verdict: d.summary.verdict }))
+    } catch (e: any) { setMsg(tr('bd.inspectFail', { msg: e.message })) } finally { setBusy('') }
   }
 
   const proposeMapping = async () => {
@@ -210,12 +212,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       if (d.skipped) { setMsg('✅ ' + d.note); return }
       const ok = (d.mappings || []).filter((m: any) => m.suggest)
       const human = (d.mappings || []).filter((m: any) => m.needs_human)
-      setReport('LLM 提案（' + d.model + '）\n' + (d.mappings || []).map((m: any) =>
-        `  ${m.column} → ${m.suggest || '（无候选）'}  conf=${m.confidence.toFixed(2)}`
-        + (m.needs_human ? ' ⚠️需人工裁决' : '') + `\n     理由: ${m.reason}`).join('\n'))
-      setMsg(`提案已落盘（不生效）：${ok.length} 条有候选 · ${human.length} 条需人工裁决\n`
-        + `文件：server/kb/adapters/proposed/RIE-400iPB.json —— 采纳需改 datasets_menu 映射表 + §13.2 契约，再由数据线复核`)
-    } catch (e: any) { setMsg('❌ 提案失败: ' + e.message) } finally { setBusy('') }
+      setReport(tr('bd.llmReport', { model: d.model }) + '\n' + (d.mappings || []).map((m: any) =>
+        `  ${m.column} ${tr('bd.llmCandidate', { suggest: m.suggest || tr('bd.noCandidate') })}  conf=${m.confidence.toFixed(2)}`
+        + (m.needs_human ? ` ${tr('bd.needsHuman')}` : '') + `\n     ${tr('bd.reason', { text: m.reason })}`).join('\n'))
+      setMsg(tr('bd.proposalSaved', { ok: ok.length, human: human.length }) + '\n' + tr('bd.proposalFile'))
+    } catch (e: any) { setMsg(tr('bd.proposeFail', { msg: e.message })) } finally { setBusy('') }
   }
 
   const loadGroup = async () => {
@@ -224,8 +225,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     try {
       const d = await post('/api/menu/group', { group: Number(group), dir: menuDir })
       setPreview(d)
-      setMsg(`group ${d.group} = [${d.group_seq.join(', ')}] · 执行 ${d.total_steps} 步 / 定义 ${d.defined_total} 步`)
-    } catch (e: any) { setMsg('❌ 取 group 失败: ' + e.message) } finally { setBusy('') }
+      setMsg(tr('bd.groupInfo', { g: d.group, seq: d.group_seq.join(', '), exec: d.total_steps, defined: d.defined_total }))
+    } catch (e: any) { setMsg(tr('bd.groupFail', { msg: e.message })) } finally { setBusy('') }
   }
 
   const renderTree = (nodes: SNode[], all: Record<string, SNode>, d: number): any =>
@@ -269,37 +270,37 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
           </select>
         </label>
         <button className="btn ghost" disabled={busy !== '' || !batch} onClick={rehydrate}
-          title="从 core 只读拉该 batch 的 run 链进画布（接着做的起点；不碰 CSV）">从 core 回灌画布</button>
+          title={tr('bd.rehydrateTip')}>{tr('bd.rehydrate')}</button>
         <div style={{ position: 'relative' }}>
-          <button className="btn ghost" onClick={() => setToolsOpen(v => !v)}>菜单工具 ▾</button>
+          <button className="btn ghost" onClick={() => setToolsOpen(v => !v)}>{tr('bd.tools')}</button>
           {toolsOpen && (
             <div className="dropdown" onMouseLeave={() => setToolsOpen(false)}>
-              <div className="dd-sec">菜单目录</div>
+              <div className="dd-sec">{tr('bd.menuDir')}</div>
               <div style={{ padding: '2px 9px 6px' }}>
                 <input value={menuDir} onChange={e => setMenuDir(e.target.value)}
-                  style={{ width: 300 }} placeholder="菜单导出目录" />
+                  style={{ width: 300 }} placeholder={tr('bd.menuDirPh')} />
               </div>
               <button className="dropdown-item" disabled={busy !== ''}
-                onClick={() => { setToolsOpen(false); scanMenu() }}>解析菜单目录</button>
+                onClick={() => { setToolsOpen(false); scanMenu() }}>{tr('bd.parseMenu')}</button>
               <button className="dropdown-item" disabled={busy !== ''}
                 onClick={() => { setToolsOpen(false); checkMenu() }}
-                title="批量扫该机台下所有导出：配对/未映射列/空壳/越界/跨 dump 漂移">批量体检</button>
+                title={tr('bd.bulkInspectTip')}>{tr('bd.bulkInspect')}</button>
               <button className="dropdown-item" disabled={busy !== ''}
                 onClick={() => { setToolsOpen(false); proposeMapping() }}
-                title="未映射列 → LLM 提规范键候选（只落提案文件，需人采纳）">LLM 映射建议</button>
+                title={tr('bd.llmTip')}>{tr('bd.llmBtn')}</button>
               <div className="dropdown-sep" />
-              <div className="dd-sec">group 灌参预览</div>
+              <div className="dd-sec">{tr('bd.groupPreview')}</div>
               <div style={{ display: 'flex', gap: 6, padding: '2px 9px 6px', alignItems: 'center' }}>
                 <input value={group} onChange={e => setGroup(e.target.value.replace(/\D/g, ''))}
                   style={{ width: 64 }} placeholder="N" />
                 <button className="dropdown-item" style={{ flex: 1 }} disabled={!group || busy !== ''}
-                  onClick={() => { setToolsOpen(false); loadGroup() }}>预览 group</button>
+                  onClick={() => { setToolsOpen(false); loadGroup() }}>{tr('bd.previewGroup')}</button>
               </div>
             </div>
           )}
         </div>
         <span className="spacer" />
-        {onClose && <button className="btn ghost" onClick={onClose} title="收起批次面板">✕</button>}
+        {onClose && <button className="btn ghost" onClick={onClose} title={tr('bd.closePanel')}>✕</button>}
       </div>
       {msg && <div className="bd-msg">{msg}</div>}
       {report && <pre className="bd-report">{report}</pre>}
@@ -309,15 +310,15 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
         {/* 左：链 + 调试线 + 事件 + 样品树 + 续做 */}
         <div className="bd-pane wide">
           <div className="bd-sec-head">
-            <b>run 链</b>
+            <b>{tr('bd.runChain')}</b>
             <span className="dim">
-              {chain ? `${chain.nodes} 节点 / ${chain.edges} 连线` : '—'}
+              {chain ? tr('bd.nodesEdges', { n: chain.nodes, e: chain.edges }) : '—'}
               {seasonRuns.length > 0 && (
                 <label style={{ marginLeft: 10, cursor: 'pointer' }}
-                  title="season（热机）不加工已登记样品；数据保留，默认不画">
+                  title={tr('bd.seasonTip')}>
                   <input type="checkbox" checked={showSeason}
                     onChange={e => setShowSeason(e.target.checked)} />
-                  显示 season（{seasonRuns.length}）
+                  {tr('bd.showSeason', { n: seasonRuns.length })}
                 </label>
               )}
             </span>
@@ -326,7 +327,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
           <div className="tbl-wrap">
             <table className="tbl" style={{ width: '100%' }}>
               {/* 列序按"看得见的优先级"排：状态排在 parent/recipe 之前 —— 窄了横向滚时也不会被挤出屏幕 */}
-              <thead><tr><th>run_id</th><th>seq</th><th>性质</th><th>sample</th><th>状态</th><th>parent</th><th>recipe</th><th></th></tr></thead>
+              <thead><tr><th>run_id</th><th>{tr('bd.colSeq')}</th><th>{tr('bd.colNature')}</th><th>sample</th><th>{tr('bd.colState')}</th><th>parent</th><th>recipe</th><th></th></tr></thead>
               <tbody>
                 {visibleRuns.map(r => (
                   <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
@@ -339,7 +340,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                     <td>{r.status}</td>
                     <td className="soft" title={r.parent_run_id || ''}>{short(r.parent_run_id) || '—'}</td>
                     <td className="soft ellip" title={r.recipe_id || ''}>{short((r.recipe_id || '').replace(/^core:/, '')) || '—'}</td>
-                    <td><button className="btn ghost sm" onClick={e => { e.stopPropagation(); setSel(r) }}>选</button></td>
+                    <td><button className="btn ghost sm" onClick={e => { e.stopPropagation(); setSel(r) }}>{tr('bd.pick')}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -350,7 +351,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             {tuneLine?.available && (tuneLine.series || []).length > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 10 }}>
                 <div className="bd-sec-head">
-                  <b>参数调试线（O1 单点优化）</b>
+                  <b>{tr('bd.tuneLine')}</b>
                   <span className="dim">{tuneLine.source}</span>
                 </div>
                 {tuneLine.series.map((s: any) => <TuneLineView key={s.tune_id} series={s} />)}
@@ -358,46 +359,46 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             )}
             {tuneLine && !tuneLine.available && (
               <div className="card" style={{ marginTop: 8, padding: 10, fontSize: 'var(--fs-base)', opacity: .75 }}>
-                <b>参数调试线暂不可用</b>：{tuneLine.reason}
+                <b>{tr('bd.tuneUnavailable')}</b>：{tuneLine.reason}
               </div>
             )}
 
             {events && events.count > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)' }}>
-                <b>样品事件（裂片 / 取样分配）</b>
+                <b>{tr('bd.events')}</b>
                 <div style={{ marginTop: 2 }}>
-                  计划 <b>{events.plan_vs_actual.planned ?? '—'}</b> 颗
+                  {tr('bd.planned')} <b>{events.plan_vs_actual.planned ?? '—'}</b> {tr('bd.pieces')}
                   {events.plan_vs_actual.id_pattern ? `（${events.plan_vs_actual.id_pattern}）` : ''}
-                  · 实际用量 <b>{events.plan_vs_actual.used_top ?? 0}</b> 颗（顶层：from=整片）
-                  {events.plan_vs_actual.used_within ? ` · 组内再取 ${events.plan_vs_actual.used_within} 颗` : ''}
-                  {events.plan_vs_actual.unallocated != null ? ` · 未用 ${events.plan_vs_actual.unallocated} 颗` : ''}
+                  · {tr('bd.actualUse')} <b>{events.plan_vs_actual.used_top ?? 0}</b> {tr('bd.pieces')} ({tr('bd.topLevel')})
+                  {events.plan_vs_actual.used_within ? ` ${tr('bd.withinGroup', { n: events.plan_vs_actual.used_within })}` : ''}
+                  {events.plan_vs_actual.unallocated != null ? ` ${tr('bd.unused', { n: events.plan_vs_actual.unallocated })}` : ''}
                 </div>
                 {events.plan_vs_actual.planned_ids?.length > 0 && (
                   <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }}>
-                    计划位号：{events.plan_vs_actual.planned_ids.join(' ')}
-                    <b>（应然规则；本批未在裂片时登记位号 ⇒ 实际只能到组级）</b>
+                    {tr('bd.plannedIds')} {events.plan_vs_actual.planned_ids.join(' ')}
+                    <b>{tr('bd.rulesNote')}</b>
                   </div>
                 )}
                 {events.plan_vs_actual.spec?.source_gds && (
-                  <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }}>版图来源：{events.plan_vs_actual.spec.source_gds}</div>
+                  <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }}>{tr('bd.layoutSource')} {events.plan_vs_actual.spec.source_gds}</div>
                 )}
                 {events.plan_vs_actual.usage_rule && (
                   <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }} title={events.plan_vs_actual.usage_rule}>
-                    计量规则（来自 core 的 <code>sample_spec_json.planned_use.usage_rule</code>）：
+                    {tr('bd.usageRule')} <code>sample_spec_json.planned_use.usage_rule</code>）：
                     {events.plan_vs_actual.usage_rule.slice(0, 78)}…
                   </div>
                 )}
                 <div className="tbl-wrap" style={{ marginTop: 4 }}>
                 <table className="tbl" style={{ width: '100%' }}>
-                  <thead><tr><th>event</th><th>kind</th><th>日期</th><th>从 → 到</th><th>颗数</th><th>状态</th></tr></thead>
+                  <thead><tr><th>event</th><th>kind</th><th>{tr('bd.date')}</th><th>{tr('bd.fromTo')}</th><th>{tr('bd.count')}</th><th>{tr('bd.colStatus')}</th></tr></thead>
                   <tbody>
                     {events.events.map((e: any) => (
                       <tr key={e.event_id}>
                         <td><code>{e.event_id}</code></td>
-                        <td>{e.kind === 'split' ? '裂片'
+                        <td>{e.kind === 'split' ? tr('bd.split')
                              : e.kind === 'allocate'
                                ? (events.plan_vs_actual.root_sample_id && e.from_sample_id !== events.plan_vs_actual.root_sample_id
-                                  ? '取样分配（组内）' : '取样分配')
+                                  ? tr('bd.allocateWithin') : tr('bd.allocate'))
                              : e.kind}</td>
                         <td>{e.at}</td>
                         <td className="soft">{e.from_sample_id} → {e.to_sample_id || '（组）'}</td>
@@ -408,11 +409,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 </table>
                 </div>
                 <div style={{ opacity: .7, marginTop: 4 }}>
-                  ⚠️ <b>split</b>=物理裂片（只 1 条×49）· <b>allocate</b>=从现有样品取样（不改总数）；
+                  {tr('bd.splitLegend')}
                   「实际用量」只算 allocate。工具**只出提案**，落账走数据线 <code>propose_apply.py</code>。
                 </div>
                 <div style={{ opacity: .7, marginTop: 2, fontSize: 'var(--fs-xs)' }}>
-                  ⚠️ <b>split 只登记事件、不建样品行</b> —— 子样品由 <code>allocate</code> 建；
+                  ⚠️ <b>{tr('bd.splitNote1')}</b> {tr('bd.splitNote2')} <code>allocate</code>;
                   所以裂片后样品表**不会**自动多出 N 行（没登记位号的「59 颗」不硬塞进样品表）。
                 </div>
                 {events.consistency && (
@@ -424,16 +425,16 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   </div>
                 )}
                 <div className="row" style={{ gap: 8, marginTop: 6 }}>
-                  <label style={{ fontSize: 'var(--fs-base)' }}>取样颗数
+                  <label style={{ fontSize: 'var(--fs-base)' }}>{tr('bd.countLabel')}
                     <input id="alloc-n" defaultValue="20" style={{ width: 60, marginLeft: 4 }} /></label>
-                  <label style={{ fontSize: 'var(--fs-base)' }}>到样品
+                  <label style={{ fontSize: 'var(--fs-base)' }}>{tr('bd.toSample')}
                     <input id="alloc-to" placeholder={`${batch}-01-DIE20`} style={{ width: 190, marginLeft: 4 }} /></label>
                   <button className="btn ghost" onClick={() => proposeEvent('allocate', false)}
-                    title="产出**取样分配**提案 → 本地预检 → 数据线 propose_apply.py 干跑（不落账）">取样提案（干跑）</button>
+                    title={tr('bd.allocateBtnTip')}>{tr('bd.allocateBtn')}</button>
                   <button className="btn ghost" onClick={() => proposeEvent('split', false)}
-                    title="产出**物理裂片**提案（split，1 片 → N 颗）→ 干跑">裂片提案（干跑）</button>
+                    title={tr('bd.splitBtnTip')}>{tr('bd.splitBtn')}</button>
                   <button className="btn ghost" onClick={() => proposeEvent('allocate', true)}
-                    title="真正落账（由数据线脚本执行，含幂等与不推断校验）">落账（--apply）</button>
+                    title={tr('bd.applyBtnTip')}>{tr('bd.applyBtn')}</button>
                 </div>
               </div>
             )}
@@ -442,7 +443,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)' }}>
                 <b>样品继承树（{chain.sample_tree.count} 个样品 · core 只读）</b>
                 <div style={{ opacity: .7, marginBottom: 4 }}>
-                  整片 → die 组 → 组内；run 挂在样品上。⚠️ 组名里的数字是<b>组内颗数</b>、不是 die 位号
+                  {tr('bd.treeNote1')} <b>{tr('bd.treeNote2')}</b> {tr('bd.treeNote3')}
                   {chain.sample_tree.orphan_parent?.length ? ` · 悬空 parent: ${chain.sample_tree.orphan_parent.join('、')}` : ''}
                 </div>
                 {renderTree(chain.sample_tree.tree, chain.sample_tree.nodes, 0)}
@@ -454,7 +455,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                                              borderLeft: '3px solid var(--warn)' }}>
                 <b>需人工判定性质（{chain.nature_needs_human.length} 条）</b>
                 <div style={{ opacity: .8 }}>
-                  这些 run 无上游、也没标 sample ⇒ 可能是 <b>season 预热</b>或<b>批次级（多片一起做）</b>，
+                  {tr('bd.orphanNote1')} <b>{tr('bd.orphanNote2')}</b> {tr('bd.orphanNote3')} <b>{tr('bd.orphanNote4')}</b>{tr('bd.orphanNote5')}
                   工具不猜：请补 <code>sample_id</code>，或在模块上标 <code>core_run_nature</code>
                   （<code>chain</code>/<code>trial</code>/<code>batch_level</code>）。
                 </div>
@@ -496,7 +497,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   </span>
                 </div>
                 <div className="row" style={{ gap: 8 }}>
-                  <button className="btn" disabled={busy !== ''} onClick={() => doContinue(false)}>续做（复制参数）</button>
+                  <button className="btn" disabled={busy !== ''} onClick={() => doContinue(false)}>{tr('bd.continue')}</button>
                   <button className="btn" disabled={busy !== '' || !group} onClick={() => doContinue(true)}>
                     续做 + 用 group {group || 'N'} 灌参
                   </button>
@@ -514,11 +515,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
 
             <div style={{ marginTop: 8 }}>
               <b style={{ fontSize: 'var(--fs-md)' }}>步骤参数（{runSteps.length} 步{preview ? ` · 预览 group ${preview.group}` : ''}）</b>
-              {runSteps.length === 0 && <div style={{ opacity: .6, fontSize: 'var(--fs-base)' }}>该 run 尚未灌参 —— 先「续做 + 用 group N 灌参」或导入实验包</div>}
+              {runSteps.length === 0 && <div style={{ opacity: .6, fontSize: 'var(--fs-base)' }}>{tr('bd.noSteps')}</div>}
               {runSteps.length > 0 && (
                 <div className="tbl-wrap">
                   <table className="tbl" style={{ width: '100%' }}>
-                    <thead><tr><th>#</th><th>槽</th><th>role</th><th>时长s</th><th>参数（规范键）</th></tr></thead>
+                    <thead><tr><th>#</th><th>{tr('bd.colSlot')}</th><th>role</th><th>{tr('bd.colDur')}</th><th>{tr('bd.colParams')}</th></tr></thead>
                     <tbody>
                       {runSteps.slice(0, 12).map((s: any) => (
                         <tr key={s.step_order}>

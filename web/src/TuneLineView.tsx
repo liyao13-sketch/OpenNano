@@ -1,3 +1,4 @@
+import { useI18n } from './i18n'
 import { useMemo, useState } from 'react'
 
 /** 参数调试线（O1 单点优化视图）。
@@ -6,13 +7,18 @@ import { useMemo, useState } from 'react'
  *  不许做的事：补值、插值、把不同量纲画到一根轴上。 */
 
 const PARAM_LABEL: Record<string, string> = {
-  t_set_s: 't设定s', t_dwell_s: 't实测s', source_w: 'source W', bias_w: 'bias W',
-  bias_w_actual: 'bias实测', chf3_sccm: 'CHF₃', ar_sccm: 'Ar', o2_sccm: 'O₂',
+  /* 参数键（core 键）→ 界面短标签。**键不翻**，只翻显示用的标签 */
+  t_set_s: 't set (s)', t_dwell_s: 't dwell (s)', source_w: 'source W', bias_w: 'bias W',
+  bias_w_actual: 'bias actual', chf3_sccm: 'CHF₃', ar_sccm: 'Ar', o2_sccm: 'O₂',
   cf4_sccm: 'CF₄', sf6_sccm: 'SF₆',
 }
 const RESP_LABEL: Record<string, string> = {
-  cd_delta_nm: 'cd偏差', depth_nm: '深度', er_nm_min: '速率',
-  selectivity: '选择比', film_thickness_nm: '膜厚', stress_mpa: '应力', refractive_index: '折射率',
+  /* 量名词（core 键）→ 界面短标签。**键不翻**，只翻这些显示用标签 */
+  t_set_s: 't set (s)', t_dwell_s: 't dwell (s)', source_w: 'source W', bias_w: 'bias W',
+  bias_w_actual: 'bias actual', chf3_sccm: 'CHF₃', ar_sccm: 'Ar', o2_sccm: 'O₂',
+  cd_delta_nm: 'cd delta', depth_nm: 'depth', er_nm_min: 'etch rate',
+  selectivity: 'selectivity', film_thickness_nm: 'thickness', stress_mpa: 'stress',
+  refractive_index: 'n',
 }
 
 function num(v: any): number | null {
@@ -21,6 +27,7 @@ function num(v: any): number | null {
 }
 
 export default function TuneLineView({ series }: { series: any }) {
+  const { t } = useI18n()
   const params: string[] = series.param_cols || []
   const resps: string[] = series.response_cols || []
   const comparable: Record<string, number> = series.comparable_responses || {}
@@ -50,7 +57,7 @@ export default function TuneLineView({ series }: { series: any }) {
     <div className="tune-line">
       <div className="tl-head">
         <b>{series.tune_id}</b>
-        <span className="tl-meta">{series.stage} · {series.sample_id} · {series.n_steps} 轮</span>
+        <span className="tl-meta">{series.stage} · {series.sample_id} · {t('tl.rounds', { n: series.n_steps })}</span>
         <span className={'tl-note' + (Object.keys(comparable).length ? '' : ' warn')}>
           {series.comparability_note}
         </span>
@@ -61,7 +68,7 @@ export default function TuneLineView({ series }: { series: any }) {
           <table className="tbl tl-tbl">
             <thead>
               <tr>
-                <th>轮</th><th>run</th><th>日期</th>
+                <th>{t('tl.round')}</th><th>run</th><th>{t('tl.date')}</th>
                 {params.map(c => <th key={c}>{PARAM_LABEL[c] || c}</th>)}
                 {resps.map(c => <th key={c} className="resp">{RESP_LABEL[c] || c}</th>)}
               </tr>
@@ -86,16 +93,16 @@ export default function TuneLineView({ series }: { series: any }) {
 
         <div className="tl-chart">
           <div className="tl-chart-ctl">
-            <label>横轴
+            <label>{t('tl.xAxis')}
               <select value={xCol} onChange={e => setXCol(e.target.value)}>
                 {params.map(c => <option key={c} value={c}>{PARAM_LABEL[c] || c}</option>)}
               </select>
             </label>
-            <label>纵轴
+            <label>{t('tl.yAxis')}
               <select value={yCol} onChange={e => setYCol(e.target.value)}>
                 {resps.map(c => (
                   <option key={c} value={c}>
-                    {RESP_LABEL[c] || c}{comparable[c] ? '' : '（点不足）'}
+                    {RESP_LABEL[c] || c}{comparable[c] ? '' : t('tl.few')}
                   </option>
                 ))}
               </select>
@@ -128,8 +135,8 @@ export default function TuneLineView({ series }: { series: any }) {
           ) : (
             <div className="tl-empty">
               {yCol && !comparable[yCol]
-                ? `「${RESP_LABEL[yCol] || yCol}」可比点不足 2 个（缺的格不补值）——换一列，或补测后再来`
-                : '暂无可画的点'}
+                ? t('tl.notEnough', { y: RESP_LABEL[yCol] || yCol })
+                : t('tl.nothing')}
             </div>
           )}
         </div>

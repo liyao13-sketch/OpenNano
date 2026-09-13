@@ -818,6 +818,7 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 @media (max-height: 840px) {
   .lib-tile { min-height: 30px; }
   .lib-tile .abbr { font-size: var(--fs-xs); }
+  .lib-tile .abbr { font-size: var(--fs-xs); }
   .lib-grid { gap: 5px; }
   .sidebar h3 { margin: 8px 4px 5px; }
   .sidebar { padding: 6px 8px 10px; }
@@ -827,6 +828,25 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
   .lib-tile .abbr { font-size: var(--fs-micro); }
   .lib-grid { gap: 4px; }
   .sidebar h3 { margin: 6px 4px 4px; font-size: var(--fs-micro); }
+}
+
+
+/* ----------------------------------------------------------------------------
+   2026-09-13 · 左栏方块**上下铺满**（owner：「方块可以上下铺满整个界面，
+   而不是漏出下面很大一部分」）
+   做法：侧栏改成 flex 列，两组方阵按**各自行数**分高度（PROCESS 5 行 / METROLOGY 8 行，
+   比例由 JSX 给 `flexGrow`），行高一律 `1fr` ⇒ 有多少空间就长多高，不再固定 34px。
+   矮窗口仍走下面的 media query（行高有下限，超出就滚动）。
+   ---------------------------------------------------------------------------- */
+.sidebar { display: flex; flex-direction: column; }
+.sidebar h3 { flex: 0 0 auto; }
+.lib-grid { flex: 1 1 auto; min-height: 0; grid-auto-rows: minmax(0, 1fr); }
+.lib-tile { min-height: 0; }
+/* 方块变高了，缩写也随高度长一点（容器查询；不支持就退回 --fs-md） */
+.lib-tile .abbr { font-size: var(--fs-md); }
+@supports (container-type: size) {
+  .lib-tile { container-type: size; }
+  .lib-tile .abbr { font-size: clamp(11px, 26cqh, 15px); }
 }
 
 /* —— 详情栏拖手 —— */
@@ -925,6 +945,21 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
 :root[data-theme="light"] .panel .card::after {
   background: linear-gradient(100deg, transparent, rgba(15,23,42,.04), transparent);
 }
+
+
+/* ----------------------------------------------------------------------------
+   2026-09-13 · 卡片标题行（`标题 + 右侧按钮/提示` 的通用写法）
+   ⚠️ 教训：以前直接把 flex 挂在 `h4` 上 —— 那样**文本节点会变成 flex 项**，
+      被 `justify-content: space-between` 推着走 ⇒ 详情栏一加宽，标题就"移动位置、
+      甚至盖住前面的族色小方块"。现在固定成：外层 `.card-head` 负责 flex，`h4` 只当标题。
+   ---------------------------------------------------------------------------- */
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); margin: 0 0 9px;
+}
+.card-head > h4 { margin: 0; flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-head > .btn, .card-head > span { flex-shrink: 0; }
 
 /* 详情栏定位（::before 需要它做定位上下文） */
 .panel { position: relative; }

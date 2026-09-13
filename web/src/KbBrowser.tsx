@@ -1,7 +1,9 @@
+import { useI18n } from './i18n'
 import { useEffect, useState } from 'react'
 import { api } from './api'
 
 export default function KbBrowser({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n()
   const [entries, setEntries] = useState<any[]>([])
   const [stats, setStats] = useState<any>({})
   const [q, setQ] = useState('')
@@ -20,16 +22,16 @@ export default function KbBrowser({ onClose }: { onClose: () => void }) {
     <div style={{ position:'fixed', inset:0, background:'rgba(8,9,10,.72)', backdropFilter:'blur(2px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
       <div style={{ width:860, maxHeight:'84%', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:14, display:'flex', flexDirection:'column', overflow:'hidden' }}>
         <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:12 }}>
-          <b>组织记忆 · 知识库（{stats.total || 0} 条）</b>
+          <b>{t('kb.title', { n: stats.total || 0 })}</b>
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-            <input placeholder="搜索标题/来源…" value={q} onChange={e => setQ(e.target.value)}
+            <input placeholder={t('kb.search')} value={q} onChange={e => setQ(e.target.value)}
               onKeyDown={e => e.key==='Enter' && load(q)}
               style={{ padding:'6px 10px', background:'var(--surface)', color:'var(--text)', border:'1px solid var(--border)', borderRadius:6, width:220 }} />
             <select value={minRel} onChange={e => setMinRel(parseInt(e.target.value))}
               style={{ padding:'6px 8px', background:'var(--surface)', color:'var(--text)', border:'1px solid var(--border)', borderRadius:6 }}>
-              <option value={0}>全部可信度</option>
-              <option value={4}>≥4 已核实</option>
-              <option value={2}>≥2 含未核实</option>
+              <option value={0}>{t('kb.allRel')}</option>
+              <option value={4}>{t('kb.rel4')}</option>
+              <option value={2}>{t('kb.rel2')}</option>
             </select>
             <span style={{ cursor:'pointer', color:'var(--muted)' }} onClick={onClose}>✕</span>
           </div>
@@ -43,12 +45,12 @@ export default function KbBrowser({ onClose }: { onClose: () => void }) {
                 <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{e.process_type}</span>
               </div>
               <div style={{ fontSize: 'var(--fs-xs)', color:'var(--muted)' }}>
-                材料 {e.material?.material || '—'} · 来源 {e.source}
+                {t('kb.material')} {e.material?.material || '—'} · {t('kb.source')} {e.source}
                 {Object.keys(e.results || {}).length > 0 && <> · 结果 {Object.entries(e.results).map(([k,v]) => `${k}=${v}`).join(', ')}</>}
               </div>
             </div>
           ))}
-          {shown.length === 0 && <div style={{ color:'var(--muted)' }}>无匹配条目</div>}
+          {shown.length === 0 && <div style={{ color:'var(--muted)' }}>{t('kb.none')}</div>}
         </div>
       </div>
     </div>

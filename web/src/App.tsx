@@ -13,7 +13,6 @@ import PanelTabs from './PanelTabs'
 import type { Module, Library, CatalogItem, Equipment } from './types'
 import { routeEdge, type Pt, type Box } from './orthoRoute'
 import { useI18n } from './i18n'
-import { LANGS } from './i18n'
 
 const KIND_COLOR: Record<string,string> = { process:'var(--kind-process)', inspect:'var(--kind-inspect)', design:'var(--kind-design)', sim:'var(--kind-sim)' }
 // 工艺族配色(Linear 低饱和):光刻胶=琥珀, 曝光=雾蓝, 刻蚀=陶红, 沉积=青绿, 湿法=天青...
@@ -208,7 +207,7 @@ const edgeTypes = { ortho: OrthoEdge }
 const nodeTypes = { process: ProcessNode }
 
 export default function App() {
-  const { t, lang, setLang } = useI18n()
+  const { t } = useI18n()
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
@@ -221,7 +220,7 @@ export default function App() {
   const [sending, setSending] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
-  const [projectName, setProjectName] = useState('未命名项目')
+  const [projectName, setProjectName] = useState('Untitled')
   const [loadOpen, setLoadOpen] = useState(false)
   const [projects, setProjects] = useState<{name:string;modules:number;edges:number;saved_at:string}[]>([])
   const importRef = useRef<HTMLInputElement>(null)
@@ -299,7 +298,7 @@ export default function App() {
     const m = await api.newModule(item.subtype, pos?.x ?? (80 + nodes.length * 30), pos?.y ?? (80 + nodes.length * 30))
     setNodes(nds => [...nds, { id: m.id, type:'process', position:{x:m.x, y:m.y}, data:{ module:{ ...m, run_state:'idle' } } }])
     setSelectedId(m.id)
-    pushLog('edit', `添加节点「${m.name}」`)
+    pushLog('edit', t('log.addNode', { name: m.name }))
   }
 
   // BEAMER: 双击库项 → 插入到选中节点之后(自动改接线);无选中则普通添加
@@ -317,9 +316,9 @@ export default function App() {
         { id:`e-${selectedId}-${m.id}`, source:selectedId, target:m.id, ...EDGE_BASE },
         { id:`e-${m.id}-${target}`, source:m.id, target, ...EDGE_BASE },
       ])
-      pushLog('edit', `插入节点「${m.name}」(位于选中节点之后,已自动改接线)`)
+      pushLog('edit', t('log.insertNode', { name: m.name }))
     } else {
-      pushLog('edit', `添加节点「${m.name}」`)
+      pushLog('edit', t('log.addNode', { name: m.name }))
     }
     setSelectedId(m.id)
   }
@@ -327,8 +326,8 @@ export default function App() {
   const selectedNode: Node | undefined = nodes.find(n => n.id === selectedId)
 
   const pushLog = useCallback((kind: string, text: string) => {
-    const t = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    setLogs(ls => [...ls.slice(-299), { t, kind, text }])
+    const ts = new Date().toLocaleTimeString('en-GB', { hour12: false })   // 全英文界面用 24h
+    setLogs(ls => [...ls.slice(-299), { t: ts, kind, text }])
   }, [])
 
   // 参数/接口变化 → 本节点及其下游结果失效(BEAMER: 改参数会 reset 后续模块)
@@ -360,7 +359,7 @@ export default function App() {
     if (running || nodes.length === 0) return
     setRunning(true)
     const untilName = until ? (nodes.find(n => n.id === until)?.data.module.name || until) : null
-    pushLog('run', untilName ? `运行到「${untilName}」` : `运行整个流程(${nodes.length} 个节点)`)
+    pushLog('run', untilName ? t('log.runTo', { name: untilName }) : t('log.runAll', { n: nodes.length }))
     setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, module: { ...n.data.module, run_state: 'running' } } })))
     try {
       const r = await api.flowRun({
@@ -378,16 +377,16 @@ export default function App() {
         else pushLog(l.status === 'error' ? 'error' : 'warn', `${l.name}: ${l.reason || l.status}`)
       }
       if (r.errors?.length) {
-        const t = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-        setIssues(is => [...is, ...r.errors.map((e: any) => ({ t, text: `${e.name}: ${e.error}` }))])
+        const ts = new Date().toLocaleTimeString('en-GB', { hour12: false })
+        setIssues(is => [...is, ...r.errors.map((e: any) => ({ t: ts, text: `${e.name}: ${e.error}` }))])
         setDockTab('issues')
       }
-      if (r.cyclic?.length) pushLog('warn', `检测到环(未运行): ${r.cyclic.join(' → ')}`)
-      pushLog('run', `完成:运行 ${r.ran} 个,跳过 ${r.skipped} 个,错误 ${r.errors?.length || 0} 个`)
+      if (r.cyclic?.length) pushLog('warn', t('log.cycle', { path: r.cyclic.join(' → ') }))
+      pushLog('run', t('log.runDone', { ran: r.ran, skipped: r.skipped, errors: r.errors?.length || 0 }))
     } catch (e: any) {
-      pushLog('error', '运行失败: ' + e.message)
-      const t = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-      setIssues(is => [...is, { t, text: '运行失败: ' + e.message }])
+      pushLog('error', t('log.runFail', { msg: e.message }))
+      const ts = new Date().toLocaleTimeString('en-GB', { hour12: false })
+      setIssues(is => [...is, { t: ts, text: t('log.runFail', { msg: e.message }) }])
       setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, module: { ...n.data.module, run_state: 'idle' } } })))
     } finally { setRunning(false) }
   }
@@ -404,14 +403,14 @@ export default function App() {
     setNodes(nds => [...nds, { id: nid, type: 'process',
       position: { x: src.position.x + 28, y: src.position.y + 28 },
       data: { module: { ...m, id: nid, name: m.name, key_values: {}, run_state: 'idle' } } }])
-    pushLog('edit', `复制节点「${m.name}」`)
+    pushLog('edit', t('log.dupNode', { name: m.name }))
   }
 
   const toggleDisable = (id: string) => {
     const m = nodes.find(n => n.id === id)?.data.module as Module | undefined
     patchNode(id, { disabled: !m?.disabled })
     invalidateDownstream(id)
-    pushLog('edit', `${m?.disabled ? '启用' : '禁用'}节点「${m?.name}」`)
+    pushLog('edit', m?.disabled ? t('log.toggleNodeOn', { name: m?.name }) : t('log.toggleNodeOff', { name: m?.name }))
   }
 
   const editComment = (id: string) => {
@@ -427,7 +426,7 @@ export default function App() {
           style: { ...(e.style || {}), strokeDasharray: !(e.data as any)?.disabled ? '5 4' : undefined,
                    stroke: !(e.data as any)?.disabled ? 'var(--faint)' : undefined } }
       : e))
-    pushLog('edit', `切换连线状态`)
+    pushLog('edit', t('log.toggleEdge'))
   }
 
   // 上游承接参数:入边源节点的 key_values ∩ 本模块 inputs
@@ -507,7 +506,7 @@ export default function App() {
     setNodes(nds => nds.filter(n => !ids.has(n.id)))
     setEdges(eds => eds.filter(e => !ids.has(e.source) && !ids.has(e.target) && !eids.has(e.id)))
     setSelectedId(null)
-    pushLog('edit', `删除 ${ids.size} 个节点 / ${eids.size} 条连线`)
+    pushLog('edit', t('log.delSel', { n: ids.size, e: eids.size }))
   }, [selectedNodes, selectedId, edges, setNodes, setEdges])
 
   // 键盘快捷键(BEAMER 式):Ctrl+A 全选 / F3 备注 / Ctrl+0 适配 / Ctrl+± 缩放 / Ctrl+D 复制 / Ctrl+S 保存
@@ -555,7 +554,7 @@ export default function App() {
     const m: Module = selectedNode.data.module
     if (!m.equipment_id) return
     await api.eqUpdate(m.equipment_id, { inputs: m.param_inputs, outputs: m.param_outputs, formulas: m.formulas })
-    alert('已存为设备模板：之后新拖入并选用该设备的节点将继承此接口定义。')
+    alert(t('alert.tplSaved'))
   }
 
   const onEquipment = async (eid: string) => {
@@ -608,7 +607,7 @@ export default function App() {
     const bias = p.gds_bias ?? 0
     const lw = (p.size_nm ?? 500) + bias
     const r = await api.gds({ pitch_nm: p.pitch ?? 1000, linewidth_nm: lw, nx: 2, ny: 2, cell_um: 100, label: 'OpenNano' })
-    alert('GDS 已生成:\n' + r.path + (bias ? `\n已应用 CD bias ${bias > 0 ? '+' : ''}${bias} nm → 写入线宽 ${lw} nm` : ''))
+    alert(t('alert.gdsDone') + '\n' + r.path + (bias ? `\n${t('alert.gdsBias', { bias: (bias > 0 ? '+' : '') + bias, lw })}` : ''))
   }
 
   const genGdsLive = async () => {
@@ -618,17 +617,17 @@ export default function App() {
     const bias = p.gds_bias ?? 0
     const lw = (p.size_nm ?? 500) + bias
     const r = await api.gdsLive({ pitch_nm: p.pitch ?? 1000, linewidth_nm: lw, nx: 2, ny: 2, cell_um: 100, label: 'OpenNano' })
-    alert(r.ok ? '已绘制到 KLayout\n' + r.log + (bias ? `\n(应用 bias ${bias > 0 ? '+' : ''}${bias} nm → 线宽 ${lw} nm)` : '') : '绘制失败: ' + r.error)
+    alert(r.ok ? t('log.gdsDrawn') + '\n' + r.log + (bias ? `\n(${t('log.gdsBias', { bias: (bias > 0 ? '+' : '') + bias, lw })}` + ')' : '') : t('log.gdsFail', { msg: r.error }))
   }
 
   const save = async () => {
-    const name = (prompt('项目名称（同名将覆盖）:', projectName) ?? projectName).trim()
+    const name = (prompt(t('prompt.projectName'), projectName) ?? projectName).trim()
     if (!name) return
     const modules = nodes.map(n => n.data.module as Module)
     const es = edges.map(e => ({ src: e.source, dst: e.target }))
     const r = await api.saveProject(name, modules, es)
     setProjectName(name)
-    alert(`已保存「${r.name}」（${r.modules} 个模块）`)
+    alert(t('alert.saved', { name: r.name, n: r.modules }))
   }
 
   saveRef.current = save
@@ -682,7 +681,7 @@ export default function App() {
     }
     updateModule({ params, param_defs: defs })
     const src = blk.per_key ? Object.values(blk.per_key)[0] as any : null
-    pushLog('edit', `套用机台实测值：${machDef.tool_id} · ${machPhase} 段（${Object.keys(blk.params).length} 个键`
+    pushLog('edit', t('log.applyMeasured', { tool: machDef.tool_id, phase: machPhase, n: Object.keys(blk.params).length })
       + (src?.from_run ? ` · 来源 ${src.from_run} ${src.date}` : '') + '）')
   }
 
@@ -719,8 +718,8 @@ export default function App() {
         return p ? { ...n, position: { x: p.x, y: p.y } } : n
       }))
       setTimeout(() => fitMode('height'), 60)
-      pushLog('view', `自动整理布局：${d.summary?.cols ?? '?'} 列 / ${d.summary?.rows ?? '?'} 行（只改位置）`)
-    } catch (e: any) { pushLog('warn', '自动整理布局失败: ' + e.message) }
+      pushLog('view', t('log.arrange', { cols: d.summary?.cols ?? '?', rows: d.summary?.rows ?? '?' }))
+    } catch (e: any) { pushLog('warn', t('log.arrangeFail', { msg: e.message })) }
   }
 
   const loadProjectObj = (d: any) => {
@@ -757,13 +756,13 @@ export default function App() {
   const importConfig = async (file: File) => {
     try {
       const bundle = JSON.parse(await file.text())
-      if (bundle.kind !== 'opennano-config') { alert('不是 OpenNano 配置文件'); return }
+      if (bundle.kind !== 'opennano-config') { alert(t('alert.notConfig')); return }
       const r = await api.configImport({ library: bundle.library, kb_entries: bundle.kb_entries })
       api.library().then(setLibrary)
       api.kbStats().then(s => setKbTotal(s.total)).catch(() => {})
-      alert(`导入完成：\n配置库 ${r.library === 'replaced' ? '已替换（原文件自动备份）' : '未变'}\n知识库 +${r.kb_added} 新增 / ${r.kb_updated} 更新`)
+      alert(t('alert.importCfg', { lib: r.library === 'replaced' ? t('alert.libReplaced') : t('alert.libUnchanged'), added: r.kb_added, updated: r.kb_updated }))
     } catch (e: any) {
-      alert('导入失败: ' + e.message)
+      alert(t('alert.importFail', { msg: e.message }))
     }
   }
 
@@ -781,43 +780,43 @@ export default function App() {
       if (!ok) return
       const r = await api.kbIngestUpload({ ...base, dry_run: false })
       api.kbStats().then(s => setKbTotal(s.total)).catch(() => {})
-      alert(`导入完成：新增 ${r.added} 条 / 更新 ${r.updated} 条（共 ${r.entries} 条数据行）\n结果字段：${(r.result_keys || []).join(', ')}`)
+      alert(t('alert.importData', { added: r.added, updated: r.updated, entries: r.entries, keys: (r.result_keys || []).join(', ') }))
     } catch (e: any) {
-      alert('导入失败: ' + e.message)
+      alert(t('alert.importFail', { msg: e.message }))
     }
   }
 
   // ---- 实验数据包(文件夹⇄画布 双向桥梁) ----
   const exportExpack = async () => {
     try {
-      const purpose = prompt('实验目的(写入 manifest,可空):', '') ?? ''
+      const purpose = prompt(t('prompt.purposePack'), '') ?? ''
       const size = await download('/api/expack/export', {
         name: projectName, purpose, core_eq_state: (window as any).__dshEqState || [],
         modules: nodes.map(n => n.data.module as Module),
         edges: edges.map(e => ({ src: e.source, dst: e.target })),
       })
-      pushLog('edit', `导出实验数据包「${projectName}」`)
-      alert(`实验数据包已导出（${(size / 1024).toFixed(0)} KB zip）\n\n`
-        + `结构：{项目名}/ 流程_{批次}.md + manifest + flow + batches/runs/steps/measurements(待填模板)/observations + artifacts/ + gds/\n`
-        + `列名与数据域 core 逐列一致 → 实验后填数值+放 SEM 图 → 交《数据》会话 build_core 落库。\n`
-        + `其中「流程_*.md」是给人看的流程卡（上机对照/交接），数据仍以 CSV 为准。`)
-    } catch (e: any) { alert('导出失败: ' + e.message) }
+      pushLog('edit', t('log.exportPack', { name: projectName }))
+      alert(t('alert.packDone', { size: (size / 1024).toFixed(0) }) + '\n\n'
+        + t('alert.packBody1', { project: projectName, batch: projectName }) + '\n'
+        + t('alert.packBody2') + '\n'
+        + t('alert.packBody3'))
+    } catch (e: any) { alert(t('alert.exportFail', { msg: e.message })) }
   }
 
   // 画布流程 → 实验流程卡(Markdown,人读;与包内那张同一份)
   const exportCard = async () => {
     try {
-      const purpose = prompt('实验目的(写入卡头,可空):', '') ?? ''
+      const purpose = prompt(t('prompt.purposeCard'), '') ?? ''
       const size = await download('/api/expack/card', {
         name: projectName, purpose,
         modules: nodes.map(n => n.data.module as Module),
         edges: edges.map(e => ({ src: e.source, dst: e.target })),
       })
-      pushLog('edit', `导出实验流程卡「${projectName}」`)
-      alert(`实验流程卡已导出（${(size / 1024).toFixed(1)} KB .md）\n\n`
-        + `人读版：批次信息 + 设备链 + 逐步参数（中文标签/单位）+ 待填测量清单 + 上机检查项。\n`
-        + `⚠️ 只读参考：要改流程请改画布后重新导出；实测值填在包的 measurements.csv / observations.csv。`)
-    } catch (e: any) { alert('导出失败: ' + e.message) }
+      pushLog('edit', t('log.exportCard', { name: projectName }))
+      alert(t('alert.cardDone', { size: (size / 1024).toFixed(1) }) + '\n\n'
+        + t('alert.cardBody1') + '\n'
+        + t('alert.cardBody2'))
+    } catch (e: any) { alert(t('alert.exportFail', { msg: e.message })) }
   }
 
   // 追加包：只含尚未入 core 的 run（镜像包 core-slice 会被整包跳过，必须走这个出口）
@@ -828,9 +827,9 @@ export default function App() {
         core_eq_state: (window as any).__dshEqState || [] }
       const pv = await (await fetch('/api/expack/append/preview', { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })).json()
-      if (!pv.count) { alert('没有需要追加的 run（core 里都已有）\n\n' + (pv.note || '')); return }
-      const purpose = prompt(`将追加 ${pv.count} 个 run：\n${pv.new_runs.join('\n')}\n\n实验目的(可空):`, '') ?? ''
-      const saveDir = prompt('落盘目录（便于交《数据》验收，可空=只下载）:', '~/Downloads/opennano_append') ?? ''
+      if (!pv.count) { alert(t('alert.appendNone') + '\n\n' + (pv.note || '')); return }
+      const purpose = prompt(t('prompt.purpose', { n: pv.count, list: pv.new_runs.join('\n') }), '') ?? ''
+      const saveDir = prompt(t('prompt.appendDir'), '~/Downloads/opennano_append') ?? ''
       const r = await fetch('/api/expack/append', { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...proj, purpose, save_dir: saveDir }) })
@@ -839,26 +838,26 @@ export default function App() {
       const blob = await r.blob()
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
       a.download = `${info.batch_id || projectName}_append.zip`; a.click()
-      pushLog('edit', `导出追加包「${projectName}」：${pv.new_runs.length} 个新 run`)
+      pushLog('edit', t('log.exportAppend', { name: projectName, n: pv.new_runs.length }))
       const dates = Object.entries(info.date_source || {}).map(([k, v]: any) => `  ${k}: ${v}`).join('\n')
       const samples = Object.entries(info.sample_id_source || {}).map(([k, v]: any) => `  ${k}: ${v}`).join('\n')
-      alert(`追加包已导出（${(blob.size / 1024).toFixed(1)} KB）\n\n`
-        + `含 ${pv.new_runs.length} 个新 run：${pv.new_runs.join(', ')}\n`
-        + (samples ? `\nsample_id 来源（继承 core，不凭空造号）:\n${samples}\n` : '')
-        + (dates ? `\nrun 日期来源:\n${dates}\n` : '')
-        + (info.saved_to ? `\n已落盘: ${info.saved_to}\n` : '')
-        + `\nmanifest.source=tool-append ⇒ 不会被 core-slice 规则跳过；既有源优先，老行不会被覆盖。`)
-    } catch (e: any) { alert('导出失败: ' + e.message) }
+      alert(t('alert.appendDone', { size: (blob.size / 1024).toFixed(1) }) + '\n\n'
+        + t('alert.appendRuns', { n: pv.new_runs.length, list: pv.new_runs.join(', ') }) + '\n'
+        + (samples ? `\n${t('alert.appendSampleSrc')}\n${samples}\n` : '')
+        + (dates ? `\n${t('alert.appendDateSrc')}\n${dates}\n` : '')
+        + (info.saved_to ? `\n${t('alert.appendSavedTo')} ${info.saved_to}\n` : '')
+        + `\n${t('alert.appendNote')}`)
+    } catch (e: any) { alert(t('alert.exportFail', { msg: e.message })) }
   }
 
   const importExpack = async () => {
-    const path = prompt('实验数据包路径（文件夹或 zip，如 ~/Downloads/AR50-T1）：', '')
+    const path = prompt(t('prompt.packPath'), '')
     if (!path || !path.trim()) return
     try {
       const d = await api.expackImport(path.trim())
       loadProjectObj(d)
-      pushLog('run', `导入实验包「${d.name}」：${(d.modules || []).length} 节点 / ${(d.edges || []).length} 连线`)
-    } catch (e: any) { alert('导入失败: ' + e.message) }
+      pushLog('run', t('log.importPack', { name: d.name, n: (d.modules || []).length, e: (d.edges || []).length }))
+    } catch (e: any) { alert(t('alert.importFail', { msg: e.message })) }
   }
 
   // ---- 数据导出(core 9 表 + 量名词 + 项目画布) ----
@@ -870,9 +869,9 @@ export default function App() {
         edges: edges.map(e => ({ src: e.source, dst: e.target })),
       }
       const size = await download('/api/export/data', { project: proj })
-      alert(`已导出 core 数据工作簿（${(size / 1024).toFixed(1)} KB）\n工作表: core 9 表全量 + 量名词 + 项目画布（权威源=core）`)
+      alert(t('alert.workbookDone', { size: (size / 1024).toFixed(1) }))
     } catch (e: any) {
-      alert('导出失败: ' + e.message)
+      alert(t('alert.exportFail', { msg: e.message }))
     }
   }
 
@@ -900,37 +899,37 @@ export default function App() {
           const list = (library?.equipment || {})[m.subtype] || []
           const eq = list.find((e: any) => e.name === op.equipment_name || e.name.includes(op.equipment_name))
           if (eq) { const r2 = await api.applyEquipment(m.subtype, eq.id); Object.assign(m, r2, { equipment_id: eq.id, equipment_name: eq.name }) }
-          else pushLog('warn', `画布: 未找到设备模板「${op.equipment_name}」`)
+          else pushLog('warn', t('log.noTpl', { name: op.equipment_name }))
         }
         if (op.machine_name) {
           const mc = (library?.machines || []).find((x: any) => x.name === op.machine_name || x.tool_id === op.machine_name)
           if (mc) { m.machine_id = mc.id; m.machine_name = mc.name }
-          else pushLog('warn', `画布: 未找到机台「${op.machine_name}」`)
+          else pushLog('warn', t('log.noMachine', { name: op.machine_name }))
         }
         if (op.params && Object.keys(op.params).length) m.params = { ...(m.params || {}), ...op.params }
         m.run_state = 'idle'
         nds.push({ id: m.id, type: 'process', position: { x: m.x, y: m.y }, data: { module: m } })
         if (op.ref) refMap[op.ref] = m.id
-        pushLog('edit', `Agent 添加节点「${m.equipment_name || m.name}」`)
+        pushLog('edit', t('log.agentAdd', { name: m.equipment_name || m.name }))
       } else if (op.type === 'connect') {
         const sid = refMap[op.src] || nds.find(n => matchNode(n, op.src))?.id
         const tid = refMap[op.dst] || nds.find(n => matchNode(n, op.dst))?.id
         if (sid && tid && sid !== tid) {
           eds.push({ id: `e-${sid}-${tid}`, source: sid, target: tid, ...EDGE_BASE })
-          pushLog('edit', `Agent 连线 ${op.src} → ${op.dst}`)
-        } else pushLog('warn', `Agent 连线失败(${op.src} → ${op.dst})`)
+          pushLog('edit', t('log.agentLink', { src: op.src, dst: op.dst }))
+        } else pushLog('warn', t('log.agentLinkFail', { src: op.src, dst: op.dst }))
       } else if (op.type === 'set_params') {
         const n = nds.find(x => refMap[op.node] === x.id || matchNode(x, op.node))
         if (n) { n.data.module.params = { ...(n.data.module.params || {}), ...op.params }
-                 pushLog('edit', `Agent 设参数 ${op.node}: ${JSON.stringify(op.params)}`) }
-        else pushLog('warn', `Agent 设参数失败: 未找到「${op.node}」`)
+                 pushLog('edit', t('log.agentParams', { node: op.node, json: JSON.stringify(op.params) })) }
+        else pushLog('warn', t('log.agentParamsFail', { node: op.node }))
       } else if (op.type === 'delete_nodes') {
         const ids = new Set(op.nodes.map((r: string) => refMap[r] || nds.find(n => matchNode(n, r))?.id).filter(Boolean))
         for (let i = nds.length - 1; i >= 0; i--) if (ids.has(nds[i].id)) nds.splice(i, 1)
         eds = eds.filter(e => !ids.has(e.source) && !ids.has(e.target))
-        pushLog('edit', `Agent 删除 ${ids.size} 个节点`)
+        pushLog('edit', t('log.agentDel', { n: ids.size }))
       } else if (op.type === 'clear') {
-        nds.length = 0; eds = []; pushLog('edit', 'Agent 清空画布')
+        nds.length = 0; eds = []; pushLog('edit', t('log.agentClear'))
       } else if (op.type === 'run') {
         doRun = true; until = op.until ? (refMap[op.until] || op.until) : undefined
       }
@@ -951,11 +950,11 @@ export default function App() {
       const r = await api.agentChat(msg, history)
       setMessages(ms => [...ms, { role: 'assistant', content: r.answer, src: r.sources, tools: r.tool_calls }])
       if (r.canvas_ops?.length) {
-        pushLog('run', `Agent 提交 ${r.canvas_ops.length} 条画布操作`)
+        pushLog('run', t('log.agentOps', { n: r.canvas_ops.length }))
         await applyCanvasOps(r.canvas_ops)
       }
     } catch (e: any) {
-      setMessages(ms => [...ms, { role: 'assistant', content: '出错: ' + e.message }])
+      setMessages(ms => [...ms, { role: 'assistant', content: t('chat.failed', { msg: e.message }) }])
     } finally { setSending(false) }
   }
 
@@ -1127,14 +1126,6 @@ export default function App() {
               <button className="dropdown-item" onClick={() => { fitMode('width'); setViewMenu(false) }}>{t('view.fitWidth')}</button>
               <button className="dropdown-item" onClick={() => { fitMode('height'); setViewMenu(false) }}>{t('view.fitHeight')}</button>
               <button className="dropdown-item" onClick={() => { fitMode('1'); setViewMenu(false) }}>{t('view.zoom100')}</button>
-              <div className="dropdown-sep" />
-              <div style={{ padding:'4px 9px 2px', fontSize: 'var(--fs-micro)', letterSpacing:'.06em',
-                textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>{t('view.lang')}</div>
-              {LANGS.map(L => (
-                <button key={L.key} className="dropdown-item" onClick={() => { setLang(L.key); setViewMenu(false) }}>
-                  {lang === L.key ? '● ' : '○ '}{L.label}
-                </button>
-              ))}
               <button className="dropdown-item" onClick={() => { setViewMenu(false); arrangeLayout() }}
                 title={t('view.arrangeTip')}>{t('view.arrange')}</button>
               <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>{t('view.log')}</button>
@@ -1208,7 +1199,8 @@ export default function App() {
         <div className="sidebar" style={libCollapsed ? { display: 'none' } : undefined}>
           {/* 形式统一：拖进去的**长方块**与画布上生成的方块同形（左边色条 + 圆角 + 渐变 + 流光） */}
           <h3>PROCESS<span className="dim">{t('lib.process')}</span></h3>
-          <div className="lib-grid">
+          {/* flexGrow = 该组的**行数** ⇒ 两组按行数分高度，方块上下铺满侧栏 */}
+          <div className="lib-grid" style={{ flexGrow: Math.ceil(catalog.filter(c => c.group === 'PROCESS').length / 2) }}>
             {catalog.filter(c => c.group==='PROCESS').map(c => (
               /* 2026-09-13 owner：去掉中文小字、缩写居中；方块按**工艺族**上色（与画布节点同色）。 */
               <div key={c.subtype} className="lib-tile" draggable
@@ -1222,7 +1214,7 @@ export default function App() {
             ))}
           </div>
           <h3>METROLOGY<span className="dim">{t('lib.metrology')}</span></h3>
-          <div className="lib-grid">
+          <div className="lib-grid" style={{ flexGrow: Math.ceil(catalog.filter(c => c.group === 'METROLOGY').length / 2) }}>
             {catalog.filter(c => c.group==='METROLOGY').map(c => (
               <div key={c.subtype} className="lib-tile" draggable
                 style={{ ['--tile-accent' as any]: FAMILY_COLOR[c.family || ''] || KIND_COLOR[c.kind] }}
@@ -1278,7 +1270,7 @@ export default function App() {
                 border:'1px solid var(--border)', borderRadius:999,
                 padding:'5px 11px', backdropFilter:'blur(6px)' }}>
                 <span style={{ fontSize: 'var(--fs-micro)', letterSpacing:'.06em', textTransform:'uppercase',
-                  color:'var(--faint)', fontWeight:600 }}>族</span>
+                  color:'var(--faint)', fontWeight:600 }}>{t('legend.family')}</span>
                 {families.map(f => (
                   <span key={f.key} title={f.label}
                     style={{ width:9, height:9, borderRadius:3, cursor:'default',
@@ -1294,7 +1286,7 @@ export default function App() {
                 background:'var(--panel)', border:'1px solid var(--accent)', borderRadius:10,
                 padding:'6px 12px', display:'flex', alignItems:'center', gap:10, fontSize: 'var(--fs-base)',
                 boxShadow:'var(--shadow-2)' }}>
-                <span>{t('canvas.selected', { n: selectedNodes.length })}{selectedEdgeCount ? ` · ${selectedEdgeCount} ${lang === 'zh' ? '条连线' : 'links'}` : ''}</span>
+                <span>{t('canvas.selected', { n: selectedNodes.length })}{selectedEdgeCount ? ` · ${selectedEdgeCount} links` : ''}</span>
                 <button className="btn" style={{ padding:'3px 12px', fontSize: 'var(--fs-base)' }} onClick={deleteSelected}>🗑 {t('canvas.deleteSel')}</button>
                 <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{t('canvas.orBackspace')}</span>
               </div>
@@ -1342,7 +1334,7 @@ export default function App() {
             <BatchPanel onClose={() => setDockTab('agent')} ctx={{
               projectName, modules: nodes.map(n => n.data.module as Module),
               edges: edges.map(e => ({ src: e.source, dst: e.target })),
-              onApply: (p, log) => { loadProjectObj(p); pushLog('run', `批次续做：${log}`) },
+              onApply: (p, log) => { loadProjectObj(p); pushLog('run', t('log.batchContinue', { log })) },
               onFormChange: (modules, eqState) => {
                 setNodes(ns => ns.map(n => {
                   const m = modules.find((x: any) => x.id === n.id)
@@ -1515,14 +1507,17 @@ export default function App() {
                 </div>
               )}
               <div className="card">
-                <h4 style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  Process Interface（承接 ← / 影响 →）
+                {/* ⚠️ 别把 flex 挂在 h4 上：那样**文本节点会变成 flex 项**，被 space-between 推着走
+                    —— 详情栏一加宽，标题就"移动位置、盖住前面的族色小方块"（owner 2026-09-13 实测）。
+                    正确做法：外面套一层 .card-head 做 flex，h4 只当普通标题。 */}
+                <div className="card-head">
+                  <h4 title={t('panel.iface')}>{t('panel.iface')}</h4>
                   {m.equipment_id ? (
-                    <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 8px' }} onClick={saveAsTemplate}>{t('panel.saveTpl')}</button>
+                    <button className="btn ghost sm" onClick={saveAsTemplate}>{t('panel.saveTpl')}</button>
                   ) : (
-                    <span style={{ fontSize: 'var(--fs-micro)', color:'var(--muted)', fontWeight:400 }}>{t('panel.saveTplHint')}</span>
+                    <span className="dim" style={{ fontWeight: 400 }}>{t('panel.saveTplHint')}</span>
                   )}
-                </h4>
+                </div>
                 <div className="iface-sec">{t('panel.inputs')}</div>
                 {m.param_inputs.map(k => (
                   <div className="row" key={k}>
@@ -1633,7 +1628,7 @@ export default function App() {
                     while (grew) { grew = false; for (const e of edges) if (down.has(e.source) && !down.has(e.target)) { down.add(e.target); grew = true } }
                     return nds.map(n => down.has(n.id) ? { ...n, data: { ...n.data, module: { ...n.data.module, run_state: 'idle' } } } : n)
                   })
-                  pushLog('edit', `重置「${m.name}」及其下游状态`)
+                  pushLog('edit', t('log.resetNode', { name: m.name }))
                   setMenu(null)
                 }}>{t('menu.reset')}</button>
                 <button onClick={() => { editComment(menu.id); setMenu(null) }}>{t('menu.comment')}</button>

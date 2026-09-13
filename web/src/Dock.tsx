@@ -1,3 +1,4 @@
+import { useI18n } from './i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type DockTab = {
@@ -9,12 +10,14 @@ export type DockTab = {
 /** 底部停靠面板：对话 / 批次 / 日志 / 问题 同住一处。
  *  顶边可拖拽调高（记忆在 localStorage）；双击页签栏或点 chevron 收起。
  *  设计依据（owner 2026-09-12）：LLM 对话要"在画布下方"，且不再左右两根滚动条抢着用。 */
-export default function Dock({ tabs, active, onTab, defaultHeight = 240 }: {
+export default function Dock({
+  tabs, active, onTab, defaultHeight = 240 }: {
   tabs: DockTab[]
   active: string
   onTab: (key: string) => void
   defaultHeight?: number
 }) {
+  const { t } = useI18n()
   const LS_KEY = 'opennano.dock.height'
   const [height, setHeight] = useState<number>(() => {
     const v = Number(localStorage.getItem(LS_KEY))
@@ -50,7 +53,7 @@ export default function Dock({ tabs, active, onTab, defaultHeight = 240 }: {
 
   return (
     <div className="dock" style={{ height: collapsed ? 34 : height }}>
-      <div className="dock-handle" title="拖拽调整高度 · 双击收起/展开"
+      <div className="dock-handle" title={t('dock.dragTip')}
         onMouseDown={e => {
           drag.current = { y: e.clientY, h: height }
           document.body.style.cursor = 'row-resize'
@@ -65,7 +68,7 @@ export default function Dock({ tabs, active, onTab, defaultHeight = 240 }: {
           </div>
         ))}
         <span className="spacer" />
-        <span className="dock-chev" title={collapsed ? '展开' : '收起'}
+        <span className="dock-chev" title={collapsed ? t('dock.expand') : t('dock.collapse')}
           onClick={() => setCollapsed(c => !c)}>
           {collapsed ? '▴' : '▾'}
         </span>

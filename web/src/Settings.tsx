@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
+import { useI18n } from './i18n'
 import type { Library, Equipment, ParamDef } from './types'
 
 export default function Settings({ onClose, onChange }: { onClose: () => void; onChange?: () => void }) {
+  const { t: tr } = useI18n()
   const [lib, setLib] = useState<Library | null>(null)
   const [tab, setTab] = useState<'equipment'|'params'|'machines'|'defaults'|'rules'>('equipment')
   const [cat, setCat] = useState('etch')
@@ -27,15 +29,15 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
     <div style={{ position:'fixed', inset:0, background:'rgba(8,9,10,.72)', backdropFilter:'blur(2px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
       <div style={{ width:720, maxHeight:'82%', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:14, display:'flex', flexDirection:'column', overflow:'hidden' }}>
         <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <b>设置 · 库</b>
+          <b>{tr('set.title')}</b>
           <span style={{ cursor:'pointer', color:'var(--muted)' }} onClick={onClose}>✕</span>
         </div>
         <div style={{ display:'flex', borderBottom:'1px solid var(--border)' }}>
-          {(['equipment','params','machines','defaults','rules'] as const).map(t => (
-            <div key={t} onClick={() => setTab(t)}
-              style={{ padding:'8px 18px', cursor:'pointer', fontWeight: tab===t ? 700 : 400,
-                color: tab===t ? 'var(--accent-text)' : 'var(--muted)', borderBottom: tab===t ? '2px solid var(--accent)' : '2px solid transparent' }}>
-              {{equipment:'工艺模板',params:'参数',machines:'机台',defaults:'默认',rules:'影响规则'}[t]}
+          {(['equipment','params','machines','defaults','rules'] as const).map(tabKey => (
+            <div key={tabKey} onClick={() => setTab(tabKey)}
+              style={{ padding:'8px 18px', cursor:'pointer', fontWeight: tab===tabKey ? 700 : 400,
+                color: tab===tabKey ? 'var(--accent-text)' : 'var(--muted)', borderBottom: tab===tabKey ? '2px solid var(--accent)' : '2px solid transparent' }}>
+              {{equipment: tr('set.tabEquipment'), params: tr('set.tabParams'), machines: tr('set.tabMachines'), defaults: tr('set.tabDefaults'), rules: tr('set.tabRules')}[tabKey]}
             </div>
           ))}
         </div>
@@ -50,18 +52,18 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
                   <div key={eq.id} style={{ marginBottom:6 }}>
                     <div className="row">
                       <span style={{ flex:1 }}>{eq.name}</span>
-                      <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{Object.keys(eq.params||{}).length} 参数 · {(eq.inputs||[]).length}←/{(eq.outputs||[]).length}→</span>
+                      <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{tr('set.eqMeta', { p: Object.keys(eq.params||{}).length, i: (eq.inputs||[]).length, o: (eq.outputs||[]).length })} · {(eq.inputs||[]).length}←/{(eq.outputs||[]).length}→</span>
                       <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
-                        onClick={() => setEditEqId(editEqId === eq.id ? null : eq.id)}>{editEqId === eq.id ? '收起' : '编辑'}</button>
-                      <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }} onClick={async () => { await api.eqRemove(eq.id); refresh() }}>删</button>
+                        onClick={() => setEditEqId(editEqId === eq.id ? null : eq.id)}>{editEqId === eq.id ? tr('set.collapse') : tr('set.edit')}</button>
+                      <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }} onClick={async () => { await api.eqRemove(eq.id); refresh() }}>{tr('set.delShort')}</button>
                     </div>
                     {editEqId === eq.id && <DeviceEditor key={eq.id + JSON.stringify(eq.params || {}).length} eq={eq} lib={lib} refresh={refresh} onClose={() => setEditEqId(null)} />}
                   </div>
                 ))}
               </div>
               <div className="row" style={{ marginTop:12 }}>
-                <input placeholder="新设备名(默认参数模板,添加后可编辑)" value={newEq} onChange={e => setNewEq(e.target.value)} />
-                <button className="btn" onClick={async () => { if(newEq.trim()){ await api.eqAdd(cat, newEq.trim()); setNewEq(''); refresh() } }}>添加</button>
+                <input placeholder={tr('set.newEqPh')} value={newEq} onChange={e => setNewEq(e.target.value)} />
+                <button className="btn" onClick={async () => { if(newEq.trim()){ await api.eqAdd(cat, newEq.trim()); setNewEq(''); refresh() } }}>{tr('set.add')}</button>
               </div>
             </>
           )}
@@ -78,7 +80,7 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
                 <div className="row" key={k} style={{ marginBottom:8 }}>
                   <label style={{ width:90, textAlign:'left' }}>{v}</label>
                   <select value={defaults[k] || ''} onChange={async e => { await api.setDefault(k, e.target.value || null); refresh(); onChange?.() }}>
-                    <option value="">— 内置默认 —</option>
+                    <option value="">{tr('set.builtin')}</option>
                     {(lib.equipment[k] || []).map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
                   </select>
                 </div>
@@ -94,6 +96,7 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
 const PARAM_CAT_COLOR: Record<string,string> = { '尺寸':'var(--kind-process)', '膜厚':'var(--kind-inspect)', '材料':'var(--fam-resist)', '质量':'var(--fam-etch)' }
 
 function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
+  const { t: tr } = useI18n()
   const params: Record<string, {unit?:string;category?:string}> = lib.params || {}
   const [rules, setRules] = useState<any[]>(lib.influence_rules || [])
   const suggestions = [...Object.keys(params), 'surface_film', 'gds_bias']
@@ -116,26 +119,26 @@ function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
       {rules.map((r, i) => (
         <div key={r.id || i} style={{ border:'1px solid var(--border)', borderRadius:10, padding:'8px 10px', marginBottom:8, background:'var(--surface)' }}>
           <div className="row">
-            <input list="rule-params" value={r.from || ''} placeholder="源(参数/属性)" onChange={e => upd(i, { from: e.target.value })} />
+            <input list="rule-params" value={r.from || ''} placeholder={tr('set.fromPh')} onChange={e => upd(i, { from: e.target.value })} />
             <span style={{ color:'var(--accent-text)' }}>→</span>
-            <input list="rule-params" value={r.to || ''} placeholder="目标参数" onChange={e => upd(i, { to: e.target.value })} />
+            <input list="rule-params" value={r.to || ''} placeholder={tr('set.toPh')} onChange={e => upd(i, { to: e.target.value })} />
             <select value={r.sign || ''} onChange={e => upd(i, { sign: e.target.value })} style={{ width:86 }}>
-              <option value="">定性?</option><option value="+">正影响</option>
-              <option value="-">负影响</option><option value="~">非单调</option>
+              <option value="">{tr('set.qualPh')}</option><option value="+">{tr('set.pos')}</option>
+              <option value="-">{tr('set.neg')}</option><option value="~">{tr('set.nonmono')}</option>
             </select>
             <select value={r.reliability_score ?? 3} onChange={e => upd(i, { reliability_score: parseInt(e.target.value) })} style={{ width:70 }}>
               {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}/5</option>)}
             </select>
-            <span style={{ cursor:'pointer', color:'var(--muted)' }} title="删除规则"
+            <span style={{ cursor:'pointer', color:'var(--muted)' }} title={tr('set.delRule')}
               onClick={() => setRules(rs => rs.filter((_, j) => j !== i))}>✕</span>
           </div>
           <div className="row">
-            {input(r.when || '', v => upd(i, { when: v }), "when 条件,如 surface_film == 'SiO₂'")}
-            {input(r.expr || '', v => upd(i, { expr: v }), '定量表达式')}
+            {input(r.when || '', v => upd(i, { when: v }), tr('set.whenPh'))}
+            {input(r.expr || '', v => upd(i, { expr: v }), tr('set.exprPh'))}
           </div>
           <div className="row">
-            {input(r.mechanism || '', v => upd(i, { mechanism: v }), '定性机理(为什么会影响)')}
-            {input(r.source || '', v => upd(i, { source: v }), '来源', 130)}
+            {input(r.mechanism || '', v => upd(i, { mechanism: v }), tr('set.mechPh'))}
+            {input(r.source || '', v => upd(i, { source: v }), tr('set.srcPh'), 130)}
           </div>
         </div>
       ))}
@@ -143,8 +146,8 @@ function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
         <button className="btn ghost" onClick={() => setRules(rs => [...rs, {
           id: `ir-${Date.now().toString(36)}`, from: '', to: '', when: '', expr: '',
           sign: '', mechanism: '', scope: 'global', source: '', reliability_score: 3, enabled: true,
-        }])}>+ 新规则</button>
-        <button className="btn" onClick={async () => { await api.rulesSave(rules); refresh() }}>保存规则（{rules.length}）</button>
+        }])}>{tr('set.newRule')}</button>
+        <button className="btn" onClick={async () => { await api.rulesSave(rules); refresh() }}>{tr('set.saveRules', { n: rules.length })}</button>
       </div>
     </div>
   )
@@ -153,6 +156,7 @@ function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
 /* ===== 设备编辑器:参数模板 + 承接/影响接口 + 公式模板 ===== */
 function DeviceEditor({ eq, lib, refresh, onClose }: {
   eq: Equipment; lib: Library; refresh: () => void; onClose: () => void }) {
+  const { t: tr } = useI18n()
   const [name, setName] = useState(eq.name)
   const [rows, setRows] = useState<[string, ParamDef][]>(() =>
     Object.entries(eq.params || {}).map(([k, d]) => [k, {
@@ -189,14 +193,14 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
   return (
     <div style={{ border:'1px solid var(--accent)', borderRadius:10, padding:10, margin:'6px 0 10px', background:'var(--surface)' }}>
       <div className="row">
-        <label style={{ width:60 }}>名称</label>
+        <label style={{ width:60 }}>{tr('set.name')}</label>
         <input value={name} onChange={e => setName(e.target.value)} />
       </div>
 
-      <div className="iface-sec">参数模板（新拖入并选此设备的节点将继承）</div>
+      <div className="iface-sec">{tr('set.tplHead')}</div>
       <div className="row" style={{ fontSize: 'var(--fs-micro)', color:'var(--muted)' }}>
-        <span style={{ width:110 }}>参数键</span><span style={{ width:110 }}>显示名</span>
-        <span style={{ width:48 }}>单位</span><span style={{ width:58 }}>默认</span>
+        <span style={{ width:110 }}>{tr('set.paramKey')}</span><span style={{ width:110 }}>{tr('set.label')}</span>
+        <span style={{ width:48 }}>{tr('set.unit')}</span><span style={{ width:58 }}>{tr('set.default')}</span>
         <span style={{ width:58 }}>min</span><span style={{ width:58 }}>max</span>
       </div>
       {rows.map(([k, d], i) => (
@@ -214,10 +218,10 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
       ))}
       <div className="row">
         <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
-          onClick={() => setRows(rs => [...rs, ['', { label:'', unit:'', default:0, min:0, max:0 }]])}>+ 参数</button>
+          onClick={() => setRows(rs => [...rs, ['', { label:'', unit:'', default:0, min:0, max:0 }]])}>{tr('set.addParam')}</button>
       </div>
 
-      <div className="iface-sec">承接 inputs（←）/ 影响 outputs（→）</div>
+      <div className="iface-sec">{tr('set.ioHead')}</div>
       {(['in', 'out'] as const).map(kind => {
         const list = kind === 'in' ? inputs : outputs
         const set = kind === 'in' ? setInputs : setOutputs
@@ -229,35 +233,35 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
                 <span className="chip-x" onClick={() => set(list.filter(y => y !== x))}>✕</span></span>
             ))}
             <select value="" style={{ width:130 }} onChange={e => { if (e.target.value) set([...list, e.target.value]) }}>
-              <option value="">+ 添加…</option>
+              <option value="">{tr('set.addMore')}</option>
               {paramNames.filter(p => !list.includes(p)).map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
         )
       })}
 
-      <div className="iface-sec">公式模板（输出 = 表达式）</div>
+      <div className="iface-sec">{tr('set.formulaHead')}</div>
       {formulas.map(([out, expr], i) => (
         <div className="row" key={i}>
           <select style={{ width:110 }} value={out}
             onChange={e => setFormulas(fs => fs.map((f, j) => j === i ? [e.target.value, f[1]] : f))}>
-            <option value="">— 选择输出 —</option>
+            <option value="">{tr('set.pickOut')}</option>
             {[...new Set([...outputs, ...formulas.map(f => f[0])])].filter(Boolean)
               .map(o => <option key={o} value={o}>{o}</option>)}
           </select>
-          <input value={expr} placeholder="如 胶CD - 2 * bias_nm"
+          <input value={expr} placeholder={tr('set.formulaPh')}
             onChange={e => setFormulas(fs => fs.map((f, j) => j === i ? [f[0], e.target.value] : f))} />
           <span className="chip-x" onClick={() => setFormulas(fs => fs.filter((_, j) => j !== i))}>✕</span>
         </div>
       ))}
       <div className="row">
         <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
-          onClick={() => setFormulas(fs => [...fs, ['', '']])}>+ 公式</button>
+          onClick={() => setFormulas(fs => [...fs, ['', '']])}>{tr('set.addFormula')}</button>
       </div>
 
       <div className="row" style={{ marginTop:8 }}>
-        <button className="btn" onClick={save} disabled={busy}>{busy ? '…' : '保存设备模板'}</button>
-        <button className="btn ghost" onClick={onClose}>收起</button>
+        <button className="btn" onClick={save} disabled={busy}>{busy ? '…' : tr('set.saveTpl')}</button>
+        <button className="btn ghost" onClick={onClose}>{tr('set.collapse')}</button>
       </div>
     </div>
   )
@@ -265,6 +269,7 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
 
 /* ===== 参数:作用域(全局/工艺/机台) + 语义类别(可自定义) ===== */
 function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
+  const { t: tr } = useI18n()
   const params: Record<string, any> = lib.params || {}
   const cats: string[] = (lib as any).param_categories || ['尺寸', '膜厚', '材料', '质量']
   const machines: any[] = (lib as any).machines || []
@@ -275,7 +280,7 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
   const [newCat, setNewCat] = useState('')
 
   const scopeLabel = (sc: string) => {
-    if (!sc || sc === 'global') return '全局'
+    if (!sc || sc === 'global') return tr('set.global')
     const [kind, id] = sc.split(':')
     if (kind === 'process') return `工艺: ${templates.find(t => t.id === id)?.name || id}`
     if (kind === 'machine') return `机台: ${machines.find((m: any) => m.id === id)?.name || id}`
@@ -295,20 +300,20 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
       </div>
 
       <div className="row">
-        <input placeholder="参数名" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-        <input placeholder="单位" style={{ width:64 }} value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} />
+        <input placeholder={tr('set.paramNamePh')} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+        <input placeholder={tr('set.unitPh')} style={{ width:64 }} value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} />
         <select style={{ width:92 }} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
           {cats.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
       <div className="row">
         <select value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })}>
-          <option value="global">作用域：全局</option>
-          <optgroup label="绑某工艺模板">
-            {templates.map(t => <option key={t.id} value={`process:${t.id}`}>工艺: {t.name}</option>)}
+          <option value="global">{tr('set.scopeGlobal')}</option>
+          <optgroup label={tr('set.scopeProcessGroup')}>
+            {templates.map(t => <option key={t.id} value={`process:${t.id}`}>{tr('set.scopeProcess', { name: t.name })}</option>)}
           </optgroup>
-          <optgroup label="绑某机台">
-            {machines.map((m: any) => <option key={m.id} value={`machine:${m.id}`}>机台: {m.name}</option>)}
+          <optgroup label={tr('set.scopeMachineGroup')}>
+            {machines.map((m: any) => <option key={m.id} value={`machine:${m.id}`}>{tr('set.scopeMachine', { name: m.name })}</option>)}
           </optgroup>
         </select>
         <button className="btn" onClick={async () => {
@@ -316,18 +321,18 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
           await api.paramAdd(form.name.trim(), form.unit, form.category, form.scope)
           setForm({ name: '', unit: '', category: form.category, scope: form.scope })
           refresh()
-        }}>添加参数</button>
+        }}>{tr('set.addParamBtn')}</button>
       </div>
 
-      <div className="iface-sec">语义类别（点 ✕ 删除；已用于参数的类别删前请确认）</div>
+      <div className="iface-sec">{tr('set.catHead')}</div>
       <div className="row" style={{ flexWrap:'wrap' }}>
         {cats.map(c => (
           <span key={c} className="chip" style={{ fontSize: 'var(--fs-xs)' }}>{c}
             <span className="chip-x" onClick={async () => { await api.categoryRemove(c); refresh() }}>✕</span></span>
         ))}
-        <input placeholder="新类别" style={{ width:110 }} value={newCat} onChange={e => setNewCat(e.target.value)} />
+        <input placeholder={tr('set.newCatPh')} style={{ width:110 }} value={newCat} onChange={e => setNewCat(e.target.value)} />
         <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
-          onClick={async () => { if (newCat.trim()) { await api.categoryAdd(newCat.trim()); setNewCat(''); refresh() } }}>+ 类别</button>
+          onClick={async () => { if (newCat.trim()) { await api.categoryAdd(newCat.trim()); setNewCat(''); refresh() } }}>{tr('set.addCat')}</button>
       </div>
 
       {Object.entries(groups).map(([sc, list]) => (
@@ -351,6 +356,7 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
 
 /* ===== 机台:型号/编号/别名/位置/状态/备注,挂在工艺模板下 ===== */
 function MachinesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
+  const { t: tr } = useI18n()
   const machines: any[] = (lib as any).machines || []
   const templates: { id: string; name: string }[] = Object.values(lib.equipment || {})
     .flat().map((e: any) => ({ id: e.id, name: e.name }))
@@ -369,31 +375,31 @@ function MachinesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
   return (
     <div>
       <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:10, lineHeight:1.7 }}>
-        机台 = <b style={{color:'var(--text)'}}>真实设备实例</b>（型号 + 编号 + 别名），挂在某个工艺模板下。
+        {tr('set.machineIntro1')}<b style={{color:'var(--text)'}}>{tr('set.machineIntro2')}</b>{tr('set.machineIntro3')}
         同型号多台必须分开登记——否则机器差异会被当成工艺规律。
       </div>
 
       <div style={{ border:'1px solid var(--border)', borderRadius:10, padding:10, background:'var(--surface)', marginBottom:12 }}>
         <div className="row">
-          <input placeholder="别名/编号,如 RIE200NL #1" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-          <input placeholder="型号,如 RIE200NL" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} />
+          <input placeholder={tr('set.machineAliasPh')} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+          <input placeholder={tr('set.machineModelPh')} value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} />
         </div>
         <div className="row">
-          <input placeholder="厂家,如 SAMCO(日本)" value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} />
-          <input placeholder="最大样品,如 8 寸" style={{ width:110 }} value={form.max_sample} onChange={e => setForm({ ...form, max_sample: e.target.value })} />
+          <input placeholder={tr('set.machineVendorPh')} value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} />
+          <input placeholder={tr('set.machineMaxPh')} style={{ width:110 }} value={form.max_sample} onChange={e => setForm({ ...form, max_sample: e.target.value })} />
         </div>
         <div className="row">
-          <input placeholder="资产编号" style={{ width:130 }} value={form.serial} onChange={e => setForm({ ...form, serial: e.target.value })} />
+          <input placeholder={tr('set.machineSerialPh')} style={{ width:130 }} value={form.serial} onChange={e => setForm({ ...form, serial: e.target.value })} />
           <select value={form.equipment_id} onChange={e => setForm({ ...form, equipment_id: e.target.value })}>
-            <option value="">— 所属工艺模板 —</option>
+            <option value="">{tr('set.machineTplPh')}</option>
             {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
         <div className="row">
           <input placeholder="位置" style={{ width:110 }} value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} />
           <select style={{ width:110 }} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-            <option value="active">在用</option><option value="maintenance">维护中</option>
-            <option value="down">停机</option><option value="retired">退役</option>
+            <option value="active">{tr('set.stActive')}</option><option value="maintenance">{tr('set.stMaintenance')}</option>
+            <option value="down">{tr('set.stDown')}</option><option value="retired">{tr('set.stRetired')}</option>
             <option value="待确认">待确认</option>
           </select>
           <input placeholder="备注" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />

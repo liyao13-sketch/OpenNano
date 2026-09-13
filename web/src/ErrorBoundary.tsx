@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { Component, type ReactNode } from 'react'
 
 /** 局部错误边界：**一个节点/面板出错，不许把整个界面变白**。
@@ -18,21 +19,21 @@ export default class ErrorBoundary extends Component<
 
   componentDidCatch(err: Error, info: unknown) {
     // 保留现场：控制台能看到组件栈，便于定位是哪个模块的数据坏了
-    console.error('[OpenNano] 渲染出错：', this.props.label || '', err, info)
+    console.error(t('err.console'), this.props.label || '', err, info)
   }
 
   render() {
     if (!this.state.err) return this.props.children
     return (
       <div className="errbox">
-        <div className="errbox-h">⚠️ {this.props.label || '这块界面'}渲染出错（其余部分仍可用）</div>
+        <div className="errbox-h">⚠️ {t('err.msg', { what: this.props.label || t('err.what') })}</div>
         <div className="errbox-msg">{String(this.state.err?.message || this.state.err)}</div>
         <div className="errbox-tip">
-          常见原因：模块数据缺字段（例如续做/导入的节点没有 <code>key_values</code>）。
-          可在节点上右键「重置本节点及下游」，或用「从 core 回灌画布」重建。
+          {t('err.why')}
+          {t('err.fix')}
         </div>
         <button className="btn ghost"
-          onClick={() => { this.setState({ err: null }); this.props.onReset?.() }}>重试渲染</button>
+          onClick={() => { this.setState({ err: null }); this.props.onReset?.() }}>{t('err.retry')}</button>
       </div>
     )
   }
