@@ -102,14 +102,23 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
         if n > 1:
             add("dup_edge", f"重复边 {n} 次：{by_id[s].get('core_run_id')} → {by_id[d].get('core_run_id')}")
 
-    # ⑥ 列内错位（同一 x 列里出现不同 stage_seq）+ ⑦ 孤立 +
-    cols: dict[float, set] = {}
+    # ⑥ 列内错位 + ⑦ 孤立 +
+    #    ⚠️ 2026-09-13 改判据（owner：「为什么 Plasma Strip 距上一个 ICP 的横向距离比别处大？」）：
+    #       并列分支的**溢出子列**允许"借"下一列的 x（它们在更下面的行里，不会撞方块）
+    #       ⇒ 一列里出现多个工序**本身不是错**。真正要拦的是：某个节点的工序比该列**脊柱**
+    #       （最上面那条）还靠后 —— 那才会读成"更晚的工序挤在同一列"。
+    by_x: dict[float, list] = {}
     for m in mods:
-        cols.setdefault(float(m.get("x") or 0), set()).add(int(m.get("core_stage_seq") or 0))
-    for x, seqs in cols.items():
-        seqs = {s for s in seqs if s}
-        if len(seqs) > 1:
-            add("column_mixed", f"x={x:.0f} 这一列混了多个工序：{sorted(seqs)}")
+        by_x.setdefault(float(m.get("x") or 0), []).append(m)
+    for x, items in by_x.items():
+        top = min(items, key=lambda mm: float(mm.get("y") or 0))
+        top_stage = int(top.get("core_stage_seq") or 0)
+        for m in items:
+            st = int(m.get("core_stage_seq") or 0)
+            if st and top_stage and st > top_stage:
+                add("column_mixed",
+                    f"x={x:.0f}：{m.get('core_run_id')} 的工序 {st} 比同列脊柱 "
+                    f"{top.get('core_run_id')} 的 {top_stage} 还靠后 ⇒ 会读成更晚的工序挤在同一列")
     touched = {e.get("src") for e in edges} | {e.get("dst") for e in edges}
     for m in mods:
         if m.get("id") not in touched and m.get("run_nature") != "season":

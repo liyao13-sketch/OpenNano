@@ -782,6 +782,34 @@ def stage_run_index(runs: list[dict]) -> dict[str, int]:
 
 def _layout_modules(runs_sorted: list[dict], modules: list[dict],
                     edges: list[dict] | None = None) -> None:
+    """**机器自校验的布局**：先试"并列分支收成 2 列子格"（更紧凑）；
+    若因此出现了**向上/向左**的边（父在右下、子在左上 ⇒ 读起来像倒流），
+    就退回"顺着往下摞"的竖排。判据不靠感觉，靠 `_bad_edge()` 实测。"""
+    _layout_once(runs_sorted, modules, edges, pack=True)
+    if _bad_edges(runs_sorted, modules, edges):
+        _layout_once(runs_sorted, modules, edges, pack=False)
+
+
+def _bad_edges(runs_sorted: list[dict], modules: list[dict],
+               edges: list[dict] | None) -> list[str]:
+    """列出"倒流"的边：目标在源的**左边**，或同列内**上方**。"""
+    rid_of = [(r.get("run_id") or "").strip() for r in runs_sorted]
+    mid = {m.get("id"): m for m in modules}
+    rid_by_mid = {m.get("id"): rid for m, rid in zip(modules, rid_of)}
+    out = []
+    for e in (edges or []):
+        a, b = mid.get(e.get("src")), mid.get(e.get("dst"))
+        if not a or not b:
+            continue
+        ax, ay, bx, by = (float(a.get("x") or 0), float(a.get("y") or 0),
+                          float(b.get("x") or 0), float(b.get("y") or 0))
+        if bx < ax - 1 or (abs(bx - ax) < 1 and by < ay - 1):
+            out.append(f"{rid_by_mid.get(e.get('src'))} → {rid_by_mid.get(e.get('dst'))}")
+    return out
+
+
+def _layout_once(runs_sorted: list[dict], modules: list[dict],
+                 edges: list[dict] | None = None, pack: bool = True) -> None:
     """按**工艺列**摆放节点（就地改 `x`/`y`）。**主链一条直线，分支挂下面。**
 
     - **x** = 工序列（`stage_seq`）⇒ 左到右就是工艺顺序；
@@ -900,31 +928,43 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
     #   1–2 条 → 照旧顺着往下摞；
     #   **≥3 条** → 收成 **2 列子格**（每行 2 个），右列整体下错 `STAGGER`：
     #      读序仍是"从上到下、从左到右"（1 左上 → 2 右上偏下 → 3 左下 → 4 右下偏下）。
-    # 多出来的那一列让**后面的工序列整体右移一格**（列距仍等宽 ⇒ 不会报 gap_uneven）。
-    # 收益实测：5 行 → 3 行，整图 863 → ~600px 高（同样的字，能多看清一档）。
+    # ⚠️ 2026-09-13 owner：「为什么 Plasma Strip 距上一个 ICP 的**横向距离比别处大**？」
+    #    原因＝当时让"多出来的那一列把**后面的工序列整体右移一格**" ⇒ ICP→ASH 变成 2 格（524px），
+    #    而那一格在主链那一行**是空的**，看着就像莫名多了一段空白。
+    #    改法：**后面的工序列不右移** —— 溢出子列去**共用下一列的 x**（不同行就不冲突：
+    #    ASH 在 row 0，ICP 的分支在 row 1–2）。真撞上 (列,行) 同一个格子时才往右让一格。
+    #    收益：主链每段横向间距都等于一个列距（262），整图窄 262px，T 字形观感消失。
     sub_of: dict[str, int] = {}
-    units: dict[int, int] = {}
     per_col: dict[int, list[str]] = {}
     for rid in rid_of:
         per_col.setdefault(max(seq_of.get(rid, 0) - 1, 0), []).append(rid)
     for _col, _rids in per_col.items():
         _ordered = sorted(_rids, key=lambda r: (rows.get(r, 0), r))
         _branches = _ordered[1:]                     # 第 0 条 = 脊柱（继续往下走的那条）
-        units[_col] = 1
-        if len(_branches) >= 3:
-            units[_col] = 2
+        if pack and len(_branches) >= 3:
             _base = rows.get(_branches[0], 1)
             for _i, _rid in enumerate(_branches):
-                rows[_rid] = _base + _i // 2          # 每行 2 个 ⇒ 行数减半
-                sub_of[_rid] = _i % 2
-        else:
-            for _rid in _branches:
-                sub_of[_rid] = 0
-    col_x: dict[int, float] = {}
-    _x = float(LAYOUT_X0)
-    for _col in sorted(per_col):
-        col_x[_col] = _x
-        _x += units.get(_col, 1) * LAYOUT_COL
+                rows[_rid] = _base + _i // 2          # 每行 2 个 ⇒ 行数减半（2×2/2×3 阶梯）
+    # 落格子：**列 = 工序列 + 溢出子列**，但后面的工序列**不因别人溢出而右移**；
+    # 只有当 (列, 行) 这个格子真被占了，才把这条挤到再右一格（最多让 6 格，兜底）
+    cell: dict[tuple[int, int], str] = {}
+    sub_of.clear()
+    # ① **脊柱先钉**：每列行号最小的那条坐自己那列（主链的列位置谁也不许挤掉）
+    spine_of_col: dict[int, str] = {}
+    for _c, _rids in per_col.items():
+        spine_of_col[_c] = sorted(_rids, key=lambda r: (rows.get(r, 0), r))[0]
+    for _c, _rid in spine_of_col.items():
+        cell[(_c, rows.get(_rid, 0))] = _rid
+    # ② 并列分支：先试自己那列，格子被占（2×2 里同一行的另一半）才**借下一列的 x**
+    for _rid in sorted([r for r in rid_of if r not in set(spine_of_col.values())],
+                       key=lambda r: (rows.get(r, 0), r)):
+        _col = max(seq_of.get(_rid, 0) - 1, 0)
+        _k = rows.get(_rid, 0)
+        _i = 0
+        while (_col + _i, _k) in cell and _i < 7:
+            _i += 1
+        cell[(_col + _i, _k)] = _rid
+        sub_of[_rid] = _i
 
     # ── 落点：**横纵间距等宽 + 行高自适应** ──
     # 横向：列距 = 节点宽 + GAP（等距）；
@@ -943,7 +983,7 @@ def _layout_modules(runs_sorted: list[dict], modules: list[dict],
         y += row_h[k] + LAYOUT_GAP
     for m, rid in zip(modules, rid_of):
         col = max(seq_of.get(rid, 0) - 1, 0)
-        m["x"] = col_x.get(col, float(LAYOUT_X0)) + sub_of.get(rid, 0) * LAYOUT_COL
+        m["x"] = float(LAYOUT_X0) + (col + sub_of.get(rid, 0)) * LAYOUT_COL
         m["y"] = row_y.get(rows.get(rid, 0), float(LAYOUT_Y0)) + (STAGGER if sub_of.get(rid) else 0)
 
 
