@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import ReactFlow, {
   Background, Controls, Handle, MarkerType, Position, addEdge, SelectionMode,
   useNodesState, useEdgesState, Node, Edge, Connection,
@@ -11,6 +11,7 @@ import Dock from './Dock'
 import ErrorBoundary from './ErrorBoundary'
 import PanelTabs from './PanelTabs'
 import type { Module, Library, CatalogItem, Equipment } from './types'
+import { routeEdge, type Pt, type Box } from './orthoRoute'
 
 const KIND_COLOR: Record<string,string> = { process:'var(--kind-process)', inspect:'var(--kind-inspect)', design:'var(--kind-design)', sim:'var(--kind-sim)' }
 // 工艺族配色(Linear 低饱和):光刻胶=琥珀, 曝光=雾蓝, 刻蚀=陶红, 沉积=青绿, 湿法=天青...
@@ -162,6 +163,44 @@ function LogoMark({ size = 17 }: { size?: number }) {
     </svg>
   )
 }
+
+/* ===========================================================================
+   连线：**正交避障路由**（owner 2026-09-13：「你的连线也没有规避碰撞其他连线和方块的
+   最佳路线分配功能」）。算法在 `orthoRoute.ts`（零依赖：借布局的天然走廊跑 A*，
+   先最少拐弯、再最短长度，多条线之间互相错开）。
+   这里只做两件事：**一次算全图**（这样"已占用的线"才排得开）+ **画成圆角折线**。
+   =========================================================================== */
+const RouteCtx = createContext<Record<string, Pt[]>>({})
+
+/** 折线 → 带小圆角的 SVG path（拐角处 7px 圆角，观感比硬折角柔和） */
+function roundedPath(pts: Pt[], r = 7): string {
+  if (pts.length < 2) return ''
+  let d = `M ${pts[0].x} ${pts[0].y}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p = pts[i], a = pts[i - 1], b = pts[i + 1]
+    const l1 = Math.hypot(p.x - a.x, p.y - a.y), l2 = Math.hypot(b.x - p.x, b.y - p.y)
+    const rr = Math.min(r, l1 / 2, l2 / 2)
+    if (rr < 1) { d += ` L ${p.x} ${p.y}`; continue }
+    const u1 = { x: (p.x - a.x) / (l1 || 1), y: (p.y - a.y) / (l1 || 1) }
+    const u2 = { x: (b.x - p.x) / (l2 || 1), y: (b.y - p.y) / (l2 || 1) }
+    d += ` L ${p.x - u1.x * rr} ${p.y - u1.y * rr}`
+       + ` Q ${p.x} ${p.y} ${p.x + u2.x * rr} ${p.y + u2.y * rr}`
+  }
+  const e = pts[pts.length - 1]
+  return d + ` L ${e.x} ${e.y}`
+}
+
+/** 一条边：有路由结果就画正交折线；还没算出来（或算不出）就用原来的平滑曲线兜底 */
+function OrthoEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style }: any) {
+  const routes = useContext(RouteCtx)
+  const pts = routes[id]
+  const d = pts && pts.length > 1
+    ? roundedPath(pts)
+    : `M ${sourceX},${sourceY} C ${sourceX + 40},${sourceY} ${targetX - 40},${targetY} ${targetX},${targetY}`
+  return <path className="react-flow__edge-path" d={d} fill="none" markerEnd={markerEnd} style={style} />
+}
+
+const edgeTypes = { ortho: OrthoEdge }
 
 const nodeTypes = { process: ProcessNode }
 
@@ -610,7 +649,7 @@ export default function App() {
     return {
       id: `e-${e.src ?? e.src_module}-${e.dst ?? e.dst_module}`,
       source: String(e.src ?? e.src_module), target: String(e.dst ?? e.dst_module),
-      ...EDGE_BASE,
+      ...EDGE_BASE, type: 'ortho' as const,
       data: { inferred },
       /* 推断边：虚线 + 细箭头；**不挂文字标签**（一个点扇出 5 条时标签会挤成一团，
          顶栏已有「推断连线 N 条」图例说明含义） */
@@ -1001,6 +1040,32 @@ export default function App() {
     inst.setViewport({ x: tx, y: ty, zoom: mode === '1' ? 1 : z })
   }, [viewNodes])
 
+  /* 全图一次算路（按边 id 稳定排序 ⇒ 同一张图每次结果一样）。
+     放在这里是因为"错开"需要**顺序**：后算的边要避开先算的边。 */
+  const [routes, setRoutes] = useState<Record<string, Pt[]>>({})
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const boxes: Box[] = viewNodes.map(n => ({
+        x: n.position.x, y: n.position.y,
+        w: (n as any).width || (n as any).measured?.width || 190,
+        h: (n as any).height || (n as any).measured?.height || 71,
+      }))
+      const byId = new Map<string, Box>()
+      viewNodes.forEach((n, i) => byId.set(n.id, boxes[i]))
+      const taken: { points: Pt[] }[] = []
+      const out: Record<string, Pt[]> = {}
+      for (const e of [...viewEdges].sort((a, b) => a.id.localeCompare(b.id))) {
+        const sBox = byId.get(e.source), tBox = byId.get(e.target)
+        if (!sBox || !tBox) continue
+        const pts = routeEdge({ source: sBox, target: tBox, obstacles: boxes, taken })
+        out[e.id] = pts
+        taken.push({ points: pts })
+      }
+      setRoutes(out)
+    }, 140)
+    return () => clearTimeout(t)
+  }, [viewNodes, viewEdges])
+
   const topFilmName = inStack.length ? inStack[inStack.length - 1].film : 'Si'
   const stackDesc = ['Si', ...inStack.map(l => l.film + (l.thickness ? ` (${l.thickness} nm)` : ''))].join(' / ')
 
@@ -1160,7 +1225,9 @@ export default function App() {
         </div>
         <div className="center-col">
         <div className="canvas-wrap">
-          <ReactFlow nodes={viewNodes} edges={viewEdges} nodeTypes={nodeTypes}
+          <RouteCtx.Provider value={routes}>
+          <ReactFlow nodes={viewNodes} edges={viewEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+            defaultEdgeOptions={{ type: 'ortho' }}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onConnect={onConnect} onNodeDragStop={onNodeDragStop}
             deleteKeyCode={['Backspace', 'Delete']}
@@ -1226,6 +1293,7 @@ export default function App() {
               </div>
             )}
           </ReactFlow>
+          </RouteCtx.Provider>
         </div>
         <Dock
         active={dockTab}
