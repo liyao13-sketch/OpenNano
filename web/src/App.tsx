@@ -296,6 +296,14 @@ function spreadFanout(routes: Record<string, Pt[]>, edges: any[], nodes: any[]):
     }
     if (!(right > left + 8)) continue
     const pitch = (right - left) / list.length
+    /* ⚠️ 车道必须**按目标 y 排序**再分配（2026-09-13 owner：「方块前面那点弯折会和其他线交联」）——
+       乱序分配时，靠左的车道可能通向"更深"的目标，于是它的竖线会横穿右侧那些**还在水平段上**的线 ⇒
+       在方块出口处交织。按目标 y 由浅到深排，竖线互相嵌套、谁也不穿谁。 */
+    const yOf = (e: any) => {
+      const t = nodes.find((x: any) => x.id === e.target)
+      return t ? t.position.y : 0
+    }
+    list.sort((a, b) => yOf(a) - yOf(b) || String(a.id).localeCompare(String(b.id)))
     list.forEach((e, i) => {
       const pts = out[e.id]
       if (!pts || pts.length < 3) return

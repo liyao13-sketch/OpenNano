@@ -264,9 +264,9 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     <div className="batchdock">
       {/* 工具条：批次 + 回灌 + 菜单工具收纳（原 7 个按钮一字排开 ⇒ 收成 3 个） */}
       <div className="bd-toolbar">
-        <label>批次
+        <label>{tr('bd.batchLabel2')}
           <select value={batch} onChange={e => setBatch(e.target.value)}>
-            {batches.map(b => <option key={b.batch_id} value={b.batch_id}>{b.batch_id}（{b.runs} run）</option>)}
+            {batches.map(b => <option key={b.batch_id} value={b.batch_id}>{tr('bd.runCount', { id: b.batch_id, n: b.runs })}</option>)}
           </select>
         </label>
         <button className="btn ghost" disabled={busy !== '' || !batch} onClick={rehydrate}
@@ -401,7 +401,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                                   ? tr('bd.allocateWithin') : tr('bd.allocate'))
                              : e.kind}</td>
                         <td>{e.at}</td>
-                        <td className="soft">{e.from_sample_id} → {e.to_sample_id || '（组）'}</td>
+                        <td className="soft">{e.from_sample_id} → {e.to_sample_id || tr('bd.groupOf')}</td>
                         <td>{e.count}</td><td>{e.status}</td>
                       </tr>
                     ))}
@@ -499,7 +499,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 <div className="row" style={{ gap: 8 }}>
                   <button className="btn" disabled={busy !== ''} onClick={() => doContinue(false)}>{tr('bd.continue')}</button>
                   <button className="btn" disabled={busy !== '' || !group} onClick={() => doContinue(true)}>
-                    续做 + 用 group {group || 'N'} 灌参
+                    {tr('bd.continueWithGroup', { g: group || 'N' })}
                   </button>
                 </div>
               </div>
@@ -534,7 +534,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <b style={{ fontSize: 'var(--fs-md)' }}>测量（quantity 受控 · value 只数字）</b>
+              <b style={{ fontSize: 'var(--fs-md)' }}>{tr('bd.measHead')}</b>
               {meas.map((m, i) => (
                 <div className="row" key={i} style={{ gap: 6, margin: '4px 0' }}>
                   <select value={m.quantity} onChange={e => setMeas(a => a.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} style={{ flex: 2 }}>
@@ -549,11 +549,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   <button className="btn ghost" onClick={() => setMeas(a => a.filter((_, j) => j !== i))}>×</button>
                 </div>
               ))}
-              <button className="btn ghost" onClick={() => setMeas(a => [...a, { quantity: '', value: '', unit: '', method: '' }])}>+ 加测量</button>
+              <button className="btn ghost" onClick={() => setMeas(a => [...a, { quantity: '', value: '', unit: '', method: '' }])}>{tr('bd.addMeas')}</button>
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <b style={{ fontSize: 'var(--fs-md)' }}>现象（obs_type 受控 32 词）</b>
+              <b style={{ fontSize: 'var(--fs-md)' }}>{tr('bd.obsHead')}</b>
               {obs.map((o, i) => (
                 <div className="row" key={i} style={{ gap: 6, margin: '4px 0' }}>
                   <select value={o.obs_type} onChange={e => setObs(a => a.map((x, j) => j === i ? { ...x, obs_type: e.target.value } : x))} style={{ flex: 2 }}>
@@ -564,11 +564,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                   <button className="btn ghost" onClick={() => setObs(a => a.filter((_, j) => j !== i))}>×</button>
                 </div>
               ))}
-              <button className="btn ghost" onClick={() => setObs(a => [...a, { obs_type: '', description: '' }])}>+ 加现象</button>
+              <button className="btn ghost" onClick={() => setObs(a => [...a, { obs_type: '', description: '' }])}>{tr('bd.addObs')}</button>
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <b style={{ fontSize: 'var(--fs-md)' }}>上机环境（eq_state 一行）</b>
+              <b style={{ fontSize: 'var(--fs-md)' }}>{tr('bd.envHead')}</b>
               <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                 <input value={env.date} onChange={e => setEnv({ ...env, date: e.target.value })} style={{ width: 110 }} title="YYYY-MM-DD" />
                 <input value={env.tool} onChange={e => setEnv({ ...env, tool: e.target.value })} style={{ width: 120 }} title="tool_id" />
@@ -577,7 +577,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 <input placeholder="本底 Pa" value={env.chamber_bg_pa || ''} onChange={e => setEnv({ ...env, chamber_bg_pa: e.target.value })} style={{ width: 90 }} />
                 <input placeholder="Chiller ℃" value={env.chiller_temp_c || ''} onChange={e => setEnv({ ...env, chiller_temp_c: e.target.value })} style={{ width: 90 }} />
                 <select value={env.clean_done} onChange={e => setEnv({ ...env, clean_done: e.target.value })}>
-                  <option value="否">未清扫</option><option value="是">已清扫/seasoning</option>
+                  <option value="否">{tr('bd.envNo')}</option><option value="是">{tr('bd.envYes')}</option>
                 </select>
               </div>
             </div>
