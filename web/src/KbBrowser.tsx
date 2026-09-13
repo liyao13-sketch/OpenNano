@@ -46,7 +46,7 @@ export default function KbBrowser({ onClose }: { onClose: () => void }) {
               </div>
               <div style={{ fontSize: 'var(--fs-xs)', color:'var(--muted)' }}>
                 {t('kb.material')} {e.material?.material || '—'} · {t('kb.source')} {e.source}
-                {Object.keys(e.results || {}).length > 0 && <> · 结果 {Object.entries(e.results).map(([k,v]) => `${k}=${v}`).join(', ')}</>}
+                {Object.keys(e.results || {}).length > 0 && <> · {t('kb.results')} {Object.entries(e.results).map(([k,v]) => `${k}=${v}`).join(', ')}</>}
               </div>
             </div>
           ))}

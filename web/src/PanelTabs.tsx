@@ -99,7 +99,7 @@ function DoeTab({ module, onUpdate }: { module: Module; onUpdate: (p: Partial<Mo
           </table>
         </div>
       )}
-      {matrix && <div style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', marginTop:4 }}>共 {matrix.length} runs</div>}
+      {matrix && <div style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', marginTop:4 }}>{t('pt.totalRuns', { n: matrix.length })}</div>}
     </div>
   )
 }
@@ -112,7 +112,7 @@ function SimTab({ module }: { module: Module }) {
       <div style={{ color:'var(--muted)', marginBottom:8 }}>{t('pt.simHint')}</div>
       <button className="btn" disabled>{t('pt.runSim')}</button>
       <div style={{ marginTop:10, padding:12, background:'var(--surface)', borderRadius:8, color:'var(--muted)', fontSize: 'var(--fs-base)', minHeight:80 }}>
-        结果区: {t('pt.simOuts', { outs })}<br/><span style={{fontSize: 'var(--fs-xs)'}}>{t('pt.simTarget')}</span>
+        {t('pt.simResult')} {t('pt.simOuts', { outs })}<br/><span style={{fontSize: 'var(--fs-xs)'}}>{t('pt.simTarget')}</span>
       </div>
     </div>
   )
@@ -150,7 +150,7 @@ function OptTab({ module }: { module: Module }) {
       const r = await api.optFit({ source: 'core', quantity: target, stage: STAGE[processType] || null,
                                    tool_id: material || null, process_type: processType, target })
       setFitRes(r)
-    } catch (e: any) { setErr('拟合失败: ' + e.message) } finally { setBusy(false) }
+    } catch (e: any) { setErr(t('pt.fitFail', { msg: e.message })) } finally { setBusy(false) }
   }
   const suggest = async () => {
     if (!fitRes?.model_id) return
@@ -158,13 +158,13 @@ function OptTab({ module }: { module: Module }) {
     try {
       const r = await api.optSuggest({ model_id: fitRes.model_id, mode, target_value: mode === 'target' ? tval : null, n: 5 })
       setSug(r)
-    } catch (e: any) { setErr('建议失败: ' + e.message) } finally { setBusy(false) }
+    } catch (e: any) { setErr(t('pt.suggestFail', { msg: e.message })) } finally { setBusy(false) }
   }
 
   return (
     <div>
       <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:8 }}>
-        用知识库实测数据拟合 GPR 代理模型(参数 → 目标),再由贝叶斯优化(EI)推荐下一轮实验。
+        {t('pt.optHint')}
       </div>
       <div className="row">
         <select value={processType} onChange={e => setProcessType(e.target.value)} style={{ width:110 }}>
@@ -173,11 +173,11 @@ function OptTab({ module }: { module: Module }) {
         <input placeholder={t('pt.machine')} value={material} style={{ width:130 }}
           onChange={e => setMaterial(e.target.value)} />
         <select value={target} onChange={e => setTarget(e.target.value)}>
-          {[...new Set([...fields.map(f => f.field), ...OPT_TARGETS])].map(t => {
-            const meta = fields.find(f => f.field === t)
+          {[...new Set([...fields.map(f => f.field), ...OPT_TARGETS])].map(q => {
+            const meta = fields.find(f => f.field === q)
             return (
-              <option key={t} value={t}>
-                {meta ? `${meta.label}${meta.unit ? ` (${meta.unit})` : ''} · ${meta.count} 条${meta.param ? ` · ↦ ${meta.param}` : ''}` : t}
+              <option key={q} value={q}>
+                {meta ? `${meta.label}${meta.unit ? ` (${meta.unit})` : ''} · ${t('pt.quantityRows', { n: meta.count })}${meta.param ? ` · ↦ ${meta.param}` : ''}` : q}
               </option>
             )
           })}
@@ -199,9 +199,9 @@ function OptTab({ module }: { module: Module }) {
       {err && <div style={{ color:'var(--bad)', fontSize: 'var(--fs-base)', marginTop:6 }}>{err}</div>}
       {fitRes && (
         <div style={{ marginTop:10, padding:10, background:'var(--surface)', borderRadius:8, fontSize: 'var(--fs-base)' }}>
-          <b>模型 {fitRes.model_id}</b> · {fitRes.n} 样本 · CV R²={String(fitRes.cv_r2?.toFixed(3))} · train R²={String(fitRes.train_r2?.toFixed(3))}
+          <b>{t('pt.modelTitle', { id: fitRes.model_id })}</b> · {t('pt.samples', { n: fitRes.n })} · CV R²={String(fitRes.cv_r2?.toFixed(3))} · train R²={String(fitRes.train_r2?.toFixed(3))}
           {fitRes.fallback_linear && <span style={{ color:'var(--warn)' }}>{t('pt.smallSample')}</span>}
-          <div style={{ color:'var(--muted)', marginTop:4 }}>特征: {fitRes.features.join(', ')}</div>
+          <div style={{ color:'var(--muted)', marginTop:4 }}>{t('pt.features')} {fitRes.features.join(', ')}</div>
           <div className="row" style={{ marginTop:6 }}>
             <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }} onClick={() => setPlotKind('contour')}>{t('pt.surface')}</button>
             <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }} onClick={() => setPlotKind('main')}>{t('pt.mainEffect')}</button>
@@ -220,7 +220,7 @@ function OptTab({ module }: { module: Module }) {
           {sug.note && <div style={{ fontSize: 'var(--fs-xs)', color:'var(--warn)', marginBottom:6 }}>⚠ {sug.note}</div>}
           {sug.suggestions.map((s: any, i: number) => (
             <div key={i} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'6px 10px', marginBottom:6, fontSize: 'var(--fs-base)' }}>
-              <div style={{ color:'var(--accent-text)', fontWeight:'var(--fw-semibold)' }}>#{i + 1} · 预测 {s.predicted}{s.std != null ? ` ±${s.std}` : ''}</div>
+              <div style={{ color:'var(--accent-text)', fontWeight:'var(--fw-semibold)' }}>#{i + 1} · {t('pt.predicted')} {s.predicted}{s.std != null ? ` ±${s.std}` : ''}</div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:3 }}>
                 {Object.entries(s.params).map(([k, v]) => (
                   <span key={k} className="chip" style={{ fontSize: 'var(--fs-xs)' }}>{k}={String(v)}</span>

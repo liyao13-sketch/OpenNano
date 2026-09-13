@@ -85,7 +85,7 @@ function ProcessNode({ data }: any) {
               </span>
             )}
             {shortRun && (
-              <span title={`core run：${runId}`}
+              <span title={`core run: ${runId}`}
                 style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:'var(--fw-semibold)',
                   color: m.tune_step != null ? 'var(--muted)' : 'var(--accent-hi)',
                   background: m.tune_step != null ? 'transparent' : 'var(--accent-soft)',
@@ -708,14 +708,14 @@ export default function App() {
     const kv = src.key_values || {}
     const hand = dst.param_inputs.filter(k => kv[k] != null).map(k => `${k} = ${kv[k]}`)
     const lines = [`<b>${src.equipment_name || src.name} → ${dst.equipment_name || dst.name}</b>`,
-                   `承接参数: ${hand.length ? hand.join(' · ') : '—'}`]
+                   `${t('panel.handoff')} ${hand.length ? hand.join(' · ') : '—'}`]
     if (src.material?.film) {
       const thk = Number(src.material.thickness) || 0
-      lines.push(`输出膜层: ${src.material.film}${thk ? ` (${thk} nm)` : ''}`)
+      lines.push(`${t('panel.outFilm')} ${src.material.film}${thk ? ` (${thk} nm)` : ''}`)
     }
     const top = outputTopFilm(e.source)
     const bias = library?.bias_table?.[top]
-    if (bias != null) lines.push(`对下一步影响: GDS bias ${bias > 0 ? '+' : ''}${bias} nm`)
+    if (bias != null) lines.push(`${t('panel.nextBias')} ${bias > 0 ? '+' : ''}${bias} nm`)
     return lines.join('<br/>')
   }
 
@@ -801,7 +801,7 @@ export default function App() {
     updateModule({ params, param_defs: defs })
     const src = blk.per_key ? Object.values(blk.per_key)[0] as any : null
     pushLog('edit', t('log.applyMeasured', { tool: machDef.tool_id, phase: machPhase, n: Object.keys(blk.params).length })
-      + (src?.from_run ? ` · 来源 ${src.from_run} ${src.date}` : '') + '）')
+      + (src?.from_run ? ` · ${t('log.srcRun', { run: src.from_run, date: src.date })}` : '') + ')')
   }
 
   /* 详情栏左边缘拖拽调宽 */
@@ -893,9 +893,9 @@ export default function App() {
       const base = { filename: file.name, content_b64: b64, process_type: 'RIE_Cl' }
       const pre = await api.kbIngestUpload({ ...base, dry_run: true })
       const ok = confirm(
-        `预检「${file.name}」\n\n参数列(${pre.params.length}): ${pre.params.slice(0, 8).join(', ')}${pre.params.length > 8 ? ' …' : ''}\n` +
-        `结果列(${pre.results.length}): ${pre.results.slice(0, 10).join(', ')}${pre.results.length > 10 ? ' …' : ''}\n` +
-        `共 ${pre.rows} 行,其中 ${pre.filled_rows} 行有结果数据\n\n确认导入知识库？`)
+        `${t('alert.ingestPreTitle', { name: file.name })}\n\n${t('alert.ingestPreParams', { n: pre.params.length })}: ${pre.params.slice(0, 8).join(', ')}${pre.params.length > 8 ? ' …' : ''}\n` +
+        `${t('alert.ingestPreResults', { n: pre.results.length })}: ${pre.results.slice(0, 10).join(', ')}${pre.results.length > 10 ? ' …' : ''}\n` +
+        `${t('alert.ingestPreRows', { rows: pre.rows, filled: pre.filled_rows })}\n\n${t('alert.ingestPreConfirm')}`)
       if (!ok) return
       const r = await api.kbIngestUpload({ ...base, dry_run: false })
       api.kbStats().then(s => setKbTotal(s.total)).catch(() => {})
@@ -1202,7 +1202,7 @@ export default function App() {
   const stackDesc = ['Si', ...inStack.map(l => l.film + (l.thickness ? ` (${l.thickness} nm)` : ''))].join(' / ')
 
   return (
-    <ErrorBoundary label="主界面">
+    <ErrorBoundary label={t('err.labelMain')}>
     <div className="app">
       <div className="topbar">
         <span className="brand" title={t('brand.sub')}>
@@ -1241,12 +1241,12 @@ export default function App() {
           {viewMenu && (
             <div className="dropdown" onMouseLeave={() => setViewMenu(false)}>
               <label><input type="checkbox" checked={showComments}
-                onChange={e => { setShowComments(e.target.checked); pushLog('view', `备注显示: ${e.target.checked ? '开' : '关'}`) }} /> {t('view.notes')} (F3)</label>
+                onChange={e => { setShowComments(e.target.checked); pushLog('view', e.target.checked ? t('log.notesOn') : t('log.notesOff')) }} /> {t('view.notes')} (F3)</label>
               <label><input type="checkbox" checked={ortho}
                 onChange={e => setOrtho(e.target.checked)} /> {t('view.ortho')}</label>
               <label><input type="checkbox" checked={showSeason}
                 onChange={e => setShowSeason(e.target.checked)}
-                disabled={seasonIds.size === 0} /> 显示 season 节点{seasonIds.size ? ` (${seasonIds.size})` : ''}</label>
+                disabled={seasonIds.size === 0} /> {t('view.seasonNodes')}{seasonIds.size ? ` (${seasonIds.size})` : ''}</label>
               <label><input type="checkbox" checked={libCollapsed}
                 onChange={e => setLibCollapsed(e.target.checked)} /> {t('view.collapse')}</label>
               <div className="dropdown-sep" />
@@ -1258,7 +1258,7 @@ export default function App() {
               <button className="dropdown-item" onClick={() => { setViewMenu(false); arrangeLayout() }}
                 title={t('view.arrangeTip')}>{t('view.arrange')}</button>
               <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>{t('view.log')}</button>
-              <button className="dropdown-item" onClick={() => { setDockTab('issues'); setViewMenu(false) }}>显示问题面板 ({issues.length})</button>
+              <button className="dropdown-item" onClick={() => { setDockTab('issues'); setViewMenu(false) }}>{t('view.issues', { n: issues.length })}</button>
               <div className="dropdown-sep" />
               <div style={{ padding:'4px 9px 2px', fontSize: 'var(--fs-micro)', letterSpacing:'.06em',
                 textTransform:'uppercase', color:'var(--faint)', fontWeight:'var(--fw-semibold)' }}>{t('view.theme')}</div>
@@ -1267,7 +1267,7 @@ export default function App() {
               <button className="dropdown-item" onClick={() => setTheme('light')}>
                 {theme === 'light' ? '● ' : '○ '}{t('view.themeLight')}</button>
               <button className="dropdown-item" onClick={() => setTheme('hc')}>
-                {theme === 'hc' ? '● ' : '○ '}{t('view.themeHc')}度(PyCharm 风)</button>
+                {theme === 'hc' ? '● ' : '○ '}{t('view.themeHc')}</button>
               <div className="dropdown-sep" />
               <button className="dropdown-item" onClick={() => { setLogs([]); setViewMenu(false) }}>{t('view.clearLog')}</button>
               <button className="dropdown-item" onClick={() => { setIssues([]); setViewMenu(false) }}>{t('view.clearIssues')}</button>
@@ -1334,7 +1334,7 @@ export default function App() {
               /* 2026-09-13 owner：去掉中文小字、缩写居中；方块按**工艺族**上色（与画布节点同色）。 */
               <div key={c.subtype} className="lib-tile" draggable
                 style={{ ['--tile-accent' as any]: FAMILY_COLOR[c.family || ''] || KIND_COLOR[c.kind] }}
-                title={`${c.name}${c.family_label ? ' · ' + c.family_label : ''} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
+                title={`${c.name}${c.family_label ? ' · ' + c.family_label : ''} · ${t('lib.tileTip')}`}
                 onClick={() => addModule(c)}
                 onDoubleClick={() => insertAfterSelected(c)}
                 onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
@@ -1347,7 +1347,7 @@ export default function App() {
             {catalog.filter(c => c.group==='METROLOGY').map(c => (
               <div key={c.subtype} className="lib-tile" draggable
                 style={{ ['--tile-accent' as any]: FAMILY_COLOR[c.family || ''] || KIND_COLOR[c.kind] }}
-                title={`${c.name}${c.family_label ? ' · ' + c.family_label : ''} · 单击添加到画布 · 双击插到选中节点之后 · 也可直接拖入`}
+                title={`${c.name}${c.family_label ? ' · ' + c.family_label : ''} · ${t('lib.tileTip')}`}
                 onClick={() => addModule(c)}
                 onDoubleClick={() => insertAfterSelected(c)}
                 onDragStart={e => e.dataTransfer.setData('application/opennano', c.subtype)}>
@@ -1504,7 +1504,7 @@ export default function App() {
             一眼对上「这个节点属于哪一族」；没选中节点时不染色。 */}
         <div className={`panel${m ? ' has-fam' : ''}`}
           style={{ width: panelW, ['--fam' as any]: m ? (FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || 'var(--faint)') : undefined } as any}>
-          <ErrorBoundary label="节点面板" onReset={() => setSelectedId(null)}>
+          <ErrorBoundary label={t('err.labelNode')} onReset={() => setSelectedId(null)}>
           {!m && <div style={{ color:'var(--muted)' }}>{t('panel.empty')}<br/>{t('panel.emptyHint')}</div>}
           {m && (
             <>
@@ -1594,9 +1594,9 @@ export default function App() {
               {m.family === 'expose' && (
                 <div className="card">
                   <h4>{t('panel.link')}</h4>
-                  <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)', marginBottom:8 }}>入射膜堆: {stackDesc}</div>
+                  <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)', marginBottom:8 }}>{t('panel.inFilmStack')} {stackDesc}</div>
                   {resolvedRules.length === 0 && (
-                    <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)' }}>当前上下文（film “{topFilmName}”）无生效影响规则（可在 设置 → 影响规则 中定义）</div>
+                    <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)' }}>{t('panel.noRules', { film: topFilmName })}</div>
                   )}
                   {resolvedRules.map((r: any) => (
                     <div key={r.id} style={{ borderBottom:'1px dashed var(--border)', paddingBottom:6, marginBottom:6 }}>
@@ -1727,7 +1727,7 @@ export default function App() {
         <div style={{ position:'fixed', inset:0, background:'rgba(8,9,10,.72)', backdropFilter:'blur(2px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
           <div style={{ width:520, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
             <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between' }}>
-              <b>载入项目（{projects.length}）</b>
+              <b>{t('proj.loadTitle', { n: projects.length })}</b>
               <span style={{ cursor:'pointer', color:'var(--muted)' }} onClick={() => setLoadOpen(false)}>✕</span>
             </div>
             <div style={{ maxHeight:360, overflowY:'auto', padding:10 }}>
@@ -1736,7 +1736,7 @@ export default function App() {
                   <span style={{ flex:1, fontWeight:'var(--fw-semibold)' }}>{p.name}
                     <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight:'var(--fw-normal)' }}> · {p.modules} {t('proj.modules', { n: p.modules, e: p.edges })} · {p.saved_at?.replace('T', ' ')}</span></span>
                   <button className="btn" style={{ fontSize: 'var(--fs-base)', padding:'4px 12px' }} onClick={() => loadProjectByName(p.name)}>{t('topbar.load')}</button>
-                  <span className="chip-x" title="删除" onClick={async () => { await api.projectDelete(p.name); setProjects(ps => ps.filter(x => x.name !== p.name)) }}>✕</span>
+                  <span className="chip-x" title={t('proj.del')} onClick={async () => { await api.projectDelete(p.name); setProjects(ps => ps.filter(x => x.name !== p.name)) }}>✕</span>
                 </div>
               ))}
               {projects.length === 0 && <div style={{ color:'var(--muted)', padding:12 }}>{t('proj.empty')}</div>}

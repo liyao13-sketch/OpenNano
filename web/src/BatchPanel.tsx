@@ -67,7 +67,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const [report, setReport] = useState('')
   const [meas, setMeas] = useState<{ quantity: string; value: string; unit: string; method: string }[]>([])
   const [obs, setObs] = useState<{ obs_type: string; description: string }[]>([])
-  const [env, setEnv] = useState<any>({ date: new Date().toISOString().slice(0, 10), tool: 'RIE-400iPB', clean_done: '否' })
+  const [env, setEnv] = useState<any>({ date: new Date().toISOString().slice(0, 10), tool: 'RIE-400iPB', clean_done: '否' })   // i18n-keep：eq_state.clean_done 的取值（core 枚举），下拉选项的 value 与它对齐
   const [showSeason, setShowSeason] = useState(false)          // season 默认不画（owner 2026-09-12 裁断）
   const [tuneLine, setTuneLine] = useState<any>(null)          // v_tune_line（数据线视图）
   const [toolsOpen, setToolsOpen] = useState(false)            // 菜单工具下拉
@@ -165,14 +165,14 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     if (!to || !n) { setMsg(tr('bd.needFields')); return }
     setBusy('alloc'); setMsg('')
     try {
-      const d = await post('/api/batch/propose', { batch_id: batch, operator: 'owner', apply,
+      const d = await post('/api/batch/propose', { batch_id: batch, operator: 'owner', apply,   // i18n-keep：operator 是写进提案记录的人名
         events: [{ kind, at: new Date().toISOString().slice(0, 10),
                    from_sample_id: `${batch}-01`,
                    to_sample_id: kind === 'split' ? '' : to, count: n,
                    after_stage: kind === 'split' ? 'LDW' : '',
                    id_pattern: kind === 'split' ? `${batch}-01-D{n:02d}` : '',
-                   note: kind === 'split' ? '工具侧：物理裂片（1 片 → N 颗）'
-                                          : '工具侧：取样分配（从现有样品取 N 颗）' }] })
+                   note: kind === 'split' ? '工具侧：物理裂片（1 片 → N 颗）'   // i18n-keep：note 原样落进提案记录（数据线要读）
+                                          : '工具侧：取样分配（从现有样品取 N 颗）' }] })   // i18n-keep：同上
       const chk = d.precheck || {}
       setMsg((chk.ok ? tr('bd.precheckOk') : tr('bd.precheckFail')) + `\n`
         + (chk.errors?.length ? tr('bd.errors') + '\n' + chk.errors.join('\n') + '\n' : '')
@@ -188,7 +188,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
     try {
       const d = await post('/api/batch/rehydrate', { batch_id: batch, project_name: batch })
       ctx.onApply({ name: d.name, modules: d.modules || [], edges: d.edges || [] },
-                  `从 core 回灌「${batch}」：${(d.modules || []).length} 个 run`)
+                  tr('bd.rehydrateLog', { batch, n: (d.modules || []).length }))
       const i = d._core_to_canvas || {}
       setMsg(tr('bd.rehydrated', { batch, runs: i.runs, steps: i.steps, meas: i.measurements,
           blank: i.measurements_blank_skipped, obs: i.observations }) + '\n'
@@ -359,7 +359,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             )}
             {tuneLine && !tuneLine.available && (
               <div className="card" style={{ marginTop: 8, padding: 10, fontSize: 'var(--fs-base)', opacity: .75 }}>
-                <b>{tr('bd.tuneUnavailable')}</b>：{tuneLine.reason}
+                <b>{tr('bd.tuneUnavailable')}</b>: {tuneLine.reason}
               </div>
             )}
 
@@ -368,7 +368,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 <b>{tr('bd.events')}</b>
                 <div style={{ marginTop: 2 }}>
                   {tr('bd.planned')} <b>{events.plan_vs_actual.planned ?? '—'}</b> {tr('bd.pieces')}
-                  {events.plan_vs_actual.id_pattern ? `（${events.plan_vs_actual.id_pattern}）` : ''}
+                  {events.plan_vs_actual.id_pattern ? ` (${events.plan_vs_actual.id_pattern})` : ''}
                   · {tr('bd.actualUse')} <b>{events.plan_vs_actual.used_top ?? 0}</b> {tr('bd.pieces')} ({tr('bd.topLevel')})
                   {events.plan_vs_actual.used_within ? ` ${tr('bd.withinGroup', { n: events.plan_vs_actual.used_within })}` : ''}
                   {events.plan_vs_actual.unallocated != null ? ` ${tr('bd.unused', { n: events.plan_vs_actual.unallocated })}` : ''}
@@ -384,7 +384,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 )}
                 {events.plan_vs_actual.usage_rule && (
                   <div style={{ opacity: .6, fontSize: 'var(--fs-xs)' }} title={events.plan_vs_actual.usage_rule}>
-                    {tr('bd.usageRule')} <code>sample_spec_json.planned_use.usage_rule</code>）：
+                    {tr('bd.usageRule')} <code>sample_spec_json.planned_use.usage_rule</code>):
                     {events.plan_vs_actual.usage_rule.slice(0, 78)}…
                   </div>
                 )}
@@ -410,17 +410,15 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                 </div>
                 <div style={{ opacity: .7, marginTop: 4 }}>
                   {tr('bd.splitLegend')}
-                  「实际用量」只算 allocate。工具**只出提案**，落账走数据线 <code>propose_apply.py</code>。
+                  {tr('bd.usageNote1')} <code>propose_apply.py</code>{tr('bd.usageNote2')}
                 </div>
                 <div style={{ opacity: .7, marginTop: 2, fontSize: 'var(--fs-xs)' }}>
-                  ⚠️ <b>{tr('bd.splitNote1')}</b> {tr('bd.splitNote2')} <code>allocate</code>;
-                  所以裂片后样品表**不会**自动多出 N 行（没登记位号的「59 颗」不硬塞进样品表）。
+                  ⚠️ <b>{tr('bd.splitNote1')}</b> {tr('bd.splitNote2')} <code>allocate</code>; {tr('bd.splitNote3')}
                 </div>
                 {events.consistency && (
                   <div style={{ marginTop: 4, fontSize: 'var(--fs-xs)',
                                 color: events.consistency.violations ? 'var(--warn)' : undefined }}>
-                    一致性预览（事件 ↔ 样品树）：
-                    <b>{events.consistency.violations ? `${events.consistency.violations} 项待查` : '✓ 0 项'}</b>
+                    {tr('bd.consistency')} <b>{events.consistency.violations ? tr('bd.consistencyCheck', { n: events.consistency.violations }) : tr('bd.consistencyOk')}</b>
                     <span style={{ opacity: .6 }}>　{events.consistency.authority}</span>
                   </div>
                 )}
@@ -441,10 +439,10 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
 
             {chain?.sample_tree && !chain.sample_tree.error && chain.sample_tree.count > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)' }}>
-                <b>样品继承树（{chain.sample_tree.count} 个样品 · core 只读）</b>
+                <b>{tr('bd.sampleTree', { n: chain.sample_tree.count })}</b>
                 <div style={{ opacity: .7, marginBottom: 4 }}>
                   {tr('bd.treeNote1')} <b>{tr('bd.treeNote2')}</b> {tr('bd.treeNote3')}
-                  {chain.sample_tree.orphan_parent?.length ? ` · 悬空 parent: ${chain.sample_tree.orphan_parent.join('、')}` : ''}
+                  {chain.sample_tree.orphan_parent?.length ? ` · ${tr('bd.orphanParent', { list: chain.sample_tree.orphan_parent.join(', ') })}` : ''}
                 </div>
                 {renderTree(chain.sample_tree.tree, chain.sample_tree.nodes, 0)}
               </div>
@@ -453,47 +451,45 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
             {chain?.nature_needs_human && chain.nature_needs_human.length > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)',
                                              borderLeft: '3px solid var(--warn)' }}>
-                <b>需人工判定性质（{chain.nature_needs_human.length} 条）</b>
+                <b>{tr('bd.natureHuman', { n: chain.nature_needs_human.length })}</b>
                 <div style={{ opacity: .8 }}>
                   {tr('bd.orphanNote1')} <b>{tr('bd.orphanNote2')}</b> {tr('bd.orphanNote3')} <b>{tr('bd.orphanNote4')}</b>{tr('bd.orphanNote5')}
-                  工具不猜：请补 <code>sample_id</code>，或在模块上标 <code>core_run_nature</code>
-                  （<code>chain</code>/<code>trial</code>/<code>batch_level</code>）。
+                  {tr('bd.natureFix1')} <code>sample_id</code>{tr('bd.natureFix2')} <code>core_run_nature</code> (<code>chain</code>/<code>trial</code>/<code>batch_level</code>).
                 </div>
-                <div style={{ opacity: .75 }}>{chain.nature_needs_human.join('、')}</div>
+                <div style={{ opacity: .75 }}>{chain.nature_needs_human.join(', ')}</div>
               </div>
             )}
 
             {chain?.parallels && chain.parallels.length > 0 && (
               <div className="card" style={{ marginTop: 8, padding: 8, fontSize: 'var(--fs-base)',
                                              borderLeft: '3px solid var(--warn)' }}>
-                <b>并行分支（{chain.parallels.length} 组）</b>
+                <b>{tr('bd.parHead', { n: chain.parallels.length })}</b>
                 {chain.parallels.map((g, i) => (
                   <div key={i} style={{ marginTop: 4 }}>
-                    · <code>{g.stage}</code> × <b>{g.count}</b> 路{g.samples.length ? `（${g.distinct_samples} 个不同 sample/die）` : '（未记 sample/die）'}
+                    · <code>{g.stage}</code> × <b>{g.count}</b>{tr('bd.parBranches')} {g.samples.length ? tr('bd.parDistinct', { n: g.distinct_samples }) : tr('bd.parNoSample')}
                     <div style={{ opacity: .75 }}>　{g.kind}</div>
                     {g.hint && <div style={{ opacity: .75 }}>　⚠️ {g.hint}</div>}
                   </div>
                 ))}
                 <div style={{ opacity: .7, marginTop: 4 }}>
-                  ⇒ 画布上应渲染为**同一上游下的并排分支**，不是首尾相链（避免"同一片刻了 N 次"的误读）
+                  {tr('bd.parNote')}
                 </div>
               </div>
             )}
 
             {sel && (
               <div className="card" style={{ marginTop: 10, padding: 10 }}>
-                <b>续做（从 {sel.run_id}）</b>
+                <b>{tr('bd.continueFrom', { run: sel.run_id })}</b>
                 <div style={{ opacity: .8, margin: '4px 0' }}>
-                  将生成 <code>{batch}-{sel.stage}-{String(sel.seq + 1).padStart(4, '0')}</code>
-                  ，parent 指向 <code>{sel.run_id}</code>，stage_seq 保持 {sel.stage_seq}
+                  {tr('bd.continueWill1')} <code>{batch}-{sel.stage}-{String(sel.seq + 1).padStart(4, '0')}</code>{tr('bd.continueWill2')} <code>{sel.run_id}</code>{tr('bd.continueWill3', { seq: sel.stage_seq })}
                 </div>
                 <div className="row" style={{ gap: 8, margin: '6px 0' }}>
                   <label style={{ fontSize: 'var(--fs-base)' }}>sample/die
-                    <input value={sample} placeholder={sel.sample_id || '如 AR50-T1-01-DIE3'}
+                    <input value={sample} placeholder={sel.sample_id || tr('bd.samplePh')}
                       onChange={e => setSample(e.target.value)} style={{ width: 170, marginLeft: 4 }} />
                   </label>
                   <span style={{ fontSize: 'var(--fs-xs)', opacity: .7 }}>
-                    填了 ⇒ **只认同 sample 的上一条**（并发分支下不会挂错）；留空 ⇒ 退回"该工序最后一条"
+                    {tr('bd.sampleRule')}
                   </span>
                 </div>
                 <div className="row" style={{ gap: 8 }}>
@@ -508,13 +504,13 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
 
           {/* 右：表单 */}
           <div className="bd-pane">
-            <b>表单化填写（{sel?.run_id || '未选 run'}）</b>
+            <b>{tr('bd.formHead', { run: sel?.run_id || tr('bd.noRunSel') })}</b>
             <div style={{ opacity: .75, fontSize: 'var(--fs-base)', margin: '4px 0' }}>
-              键名/量名/现象词全部来自契约（schema §十三/§三 + 受控词表）；没测留空，禁填 0/-/N/A
+              {tr('bd.formNote1')}schema §十三/§三{tr('bd.formNote2')}{/* i18n-keep：§十三/§三 是 schema 文档的小节号，不许改成 §13/§3 */}
             </div>
 
             <div style={{ marginTop: 8 }}>
-              <b style={{ fontSize: 'var(--fs-md)' }}>步骤参数（{runSteps.length} 步{preview ? ` · 预览 group ${preview.group}` : ''}）</b>
+              <b style={{ fontSize: 'var(--fs-md)' }}>{tr('bd.stepsHead', { n: runSteps.length })}{preview ? tr('bd.stepsPreview', { g: preview.group }) : ''}</b>
               {runSteps.length === 0 && <div style={{ opacity: .6, fontSize: 'var(--fs-base)' }}>{tr('bd.noSteps')}</div>}
               {runSteps.length > 0 && (
                 <div className="tbl-wrap">
@@ -538,10 +534,10 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               {meas.map((m, i) => (
                 <div className="row" key={i} style={{ gap: 6, margin: '4px 0' }}>
                   <select value={m.quantity} onChange={e => setMeas(a => a.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} style={{ flex: 2 }}>
-                    <option value="">（选量名）</option>
+                    <option value="">{tr('bd.pickQuantity')}</option>
                     {(contract?.quantities || []).map((q: string) => <option key={q} value={q}>{q}</option>)}
                   </select>
-                  <input placeholder="值" value={m.value} onChange={e => setMeas(a => a.map((x, j) => j === i ? { ...x, value: e.target.value } : x))} style={{ width: 90 }} />
+                  <input placeholder={tr('bd.valuePh')} value={m.value} onChange={e => setMeas(a => a.map((x, j) => j === i ? { ...x, value: e.target.value } : x))} style={{ width: 90 }} />
                   <select value={m.method} onChange={e => setMeas(a => a.map((x, j) => j === i ? { ...x, method: e.target.value } : x))}>
                     <option value="">method</option>
                     {(contract?.method || []).map((q: string) => <option key={q} value={q}>{q}</option>)}
@@ -557,10 +553,10 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               {obs.map((o, i) => (
                 <div className="row" key={i} style={{ gap: 6, margin: '4px 0' }}>
                   <select value={o.obs_type} onChange={e => setObs(a => a.map((x, j) => j === i ? { ...x, obs_type: e.target.value } : x))} style={{ flex: 2 }}>
-                    <option value="">（选现象）</option>
+                    <option value="">{tr('bd.pickObs')}</option>
                     {(contract?.observations || []).map((v: any) => <option key={v.obs_type} value={v.obs_type}>{v.obs_type} · {v.label}</option>)}
                   </select>
-                  <input placeholder="描述" value={o.description} onChange={e => setObs(a => a.map((x, j) => j === i ? { ...x, description: e.target.value } : x))} style={{ flex: 3 }} />
+                  <input placeholder={tr('bd.descPh')} value={o.description} onChange={e => setObs(a => a.map((x, j) => j === i ? { ...x, description: e.target.value } : x))} style={{ flex: 3 }} />
                   <button className="btn ghost" onClick={() => setObs(a => a.filter((_, j) => j !== i))}>×</button>
                 </div>
               ))}
@@ -572,19 +568,19 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                 <input value={env.date} onChange={e => setEnv({ ...env, date: e.target.value })} style={{ width: 110 }} title="YYYY-MM-DD" />
                 <input value={env.tool} onChange={e => setEnv({ ...env, tool: e.target.value })} style={{ width: 120 }} title="tool_id" />
-                <input placeholder="温度 ℃" value={env.env_temp_c || ''} onChange={e => setEnv({ ...env, env_temp_c: e.target.value })} style={{ width: 80 }} />
-                <input placeholder="湿度 %" value={env.env_rh_pct || ''} onChange={e => setEnv({ ...env, env_rh_pct: e.target.value })} style={{ width: 80 }} />
-                <input placeholder="本底 Pa" value={env.chamber_bg_pa || ''} onChange={e => setEnv({ ...env, chamber_bg_pa: e.target.value })} style={{ width: 90 }} />
+                <input placeholder={tr('bd.tempPh')} value={env.env_temp_c || ''} onChange={e => setEnv({ ...env, env_temp_c: e.target.value })} style={{ width: 80 }} />
+                <input placeholder={tr('bd.rhPh')} value={env.env_rh_pct || ''} onChange={e => setEnv({ ...env, env_rh_pct: e.target.value })} style={{ width: 80 }} />
+                <input placeholder={tr('bd.bgPh')} value={env.chamber_bg_pa || ''} onChange={e => setEnv({ ...env, chamber_bg_pa: e.target.value })} style={{ width: 90 }} />
                 <input placeholder="Chiller ℃" value={env.chiller_temp_c || ''} onChange={e => setEnv({ ...env, chiller_temp_c: e.target.value })} style={{ width: 90 }} />
                 <select value={env.clean_done} onChange={e => setEnv({ ...env, clean_done: e.target.value })}>
-                  <option value="否">{tr('bd.envNo')}</option><option value="是">{tr('bd.envYes')}</option>
+                  <option value="否">{tr('bd.envNo')}</option><option value="是">{tr('bd.envYes')}</option>{/* i18n-keep：value 是 eq_state.clean_done 的 core 取值，只有可见文案走取词 */}
                 </select>
               </div>
             </div>
 
             <div style={{ marginTop: 10, opacity: .65, fontSize: 'var(--fs-base)' }}>
-              参数键示例：{Object.entries(contract?.param_keys || {}).slice(0, 6).map(([k, v]: any) => `${k}←${v.from}`).join(' · ')}
-              {paramJson && Object.keys(paramJson).length > 0 && <>　｜　当前步示例：{Object.entries(paramJson).slice(0, 4).map(([k, v]) => `${k}=${v}`).join(' · ')}</>}
+              {tr('bd.paramKeyEg')} {Object.entries(contract?.param_keys || {}).slice(0, 6).map(([k, v]: any) => `${k}←${v.from}`).join(' · ')}
+              {paramJson && Object.keys(paramJson).length > 0 && <> · {tr('bd.curStepEg')} {Object.entries(paramJson).slice(0, 4).map(([k, v]) => `${k}=${v}`).join(' · ')}</>}
             </div>
           </div>
         </div>

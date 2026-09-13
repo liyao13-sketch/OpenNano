@@ -10,14 +10,14 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
   const [cat, setCat] = useState('etch')
   const [editEqId, setEditEqId] = useState<string | null>(null)
   const [newEq, setNewEq] = useState('')
-  const [newParam, setNewParam] = useState({ name:'', unit:'', category:'尺寸' })
+  const [newParam, setNewParam] = useState({ name:'', unit:'', category:'尺寸' })   // i18n-keep：参数类别是库里的值（api.paramAdd 原样收）
 
   const refresh = () => api.library().then(setLib)
   useEffect(() => { refresh() }, [])
 
   const catLabel: Record<string,string> = {
-    graphic:'图形化', etch:'刻蚀', deposition:'薄膜沉积', doping:'掺杂', bonding:'键合',
-    packaging:'封装', wet:'湿法', thermal:'热处理', assist:'辅助',
+    graphic:'图形化', etch:'刻蚀', deposition:'薄膜沉积', doping:'掺杂', bonding:'键合',   // i18n-keep：与后端 CATEGORY_LABELS 同一批值（见报告）
+    packaging:'封装', wet:'湿法', thermal:'热处理', assist:'辅助',                          // i18n-keep：同上
   }
 
   if (!lib) return null
@@ -93,7 +93,7 @@ export default function Settings({ onClose, onChange }: { onClose: () => void; o
   )
 }
 
-const PARAM_CAT_COLOR: Record<string,string> = { '尺寸':'var(--kind-process)', '膜厚':'var(--kind-inspect)', '材料':'var(--fam-resist)', '质量':'var(--fam-etch)' }
+const PARAM_CAT_COLOR: Record<string,string> = { '尺寸':'var(--kind-process)', '膜厚':'var(--kind-inspect)', '材料':'var(--fam-resist)', '质量':'var(--fam-etch)' }   // i18n-keep：键是库里的参数类别值，翻了颜色就配不上
 
 function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
   const { t: tr } = useI18n()
@@ -111,9 +111,9 @@ function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
   return (
     <div>
       <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:10, lineHeight:1.7 }}>
-        一条影响规则 = <b style={{color:'var(--text)'}}>源 → 目标</b> + <b style={{color:'var(--text)'}}>when 生效条件</b>（表达式，如
-        <code> surface_film == 'SiO₂' </code>，留空恒生效）+ 定量 <code>expr</code> 与定性
-        <code> sign / mechanism </code>（均可留空）。Compute 时定量规则自动求值写入目标参数。
+        {tr('set.rulesIntro1')}<b style={{color:'var(--text)'}}>{tr('set.rulesIntroSrc')} → {tr('set.rulesIntroDst')}</b> + <b style={{color:'var(--text)'}}>{tr('set.rulesIntroWhen')}</b>{tr('set.rulesIntro2')}
+        <code> surface_film == 'SiO₂' </code>{tr('set.rulesIntro3')}<code>expr</code>{tr('set.rulesIntro4')}
+        <code> sign / mechanism </code>{tr('set.rulesIntro5')}
       </div>
       <datalist id="rule-params">{suggestions.map(s => <option key={s} value={s} />)}</datalist>
       {rules.map((r, i) => (
@@ -271,19 +271,19 @@ function DeviceEditor({ eq, lib, refresh, onClose }: {
 function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
   const { t: tr } = useI18n()
   const params: Record<string, any> = lib.params || {}
-  const cats: string[] = (lib as any).param_categories || ['尺寸', '膜厚', '材料', '质量']
+  const cats: string[] = (lib as any).param_categories || ['尺寸', '膜厚', '材料', '质量']   // i18n-keep：库里的类别值（后端 param_categories 的默认值）
   const machines: any[] = (lib as any).machines || []
   const templates: { id: string; name: string }[] = Object.values(lib.equipment || {})
     .flat().map((e: any) => ({ id: e.id, name: e.name }))
 
-  const [form, setForm] = useState({ name: '', unit: '', category: cats[0] || '尺寸', scope: 'global' })
+  const [form, setForm] = useState({ name: '', unit: '', category: cats[0] || '尺寸', scope: 'global' })   // i18n-keep：兜底类别值是库里的值
   const [newCat, setNewCat] = useState('')
 
   const scopeLabel = (sc: string) => {
     if (!sc || sc === 'global') return tr('set.global')
     const [kind, id] = sc.split(':')
-    if (kind === 'process') return `工艺: ${templates.find(t => t.id === id)?.name || id}`
-    if (kind === 'machine') return `机台: ${machines.find((m: any) => m.id === id)?.name || id}`
+    if (kind === 'process') return tr('set.scopeProcess', { name: templates.find(t => t.id === id)?.name || id })
+    if (kind === 'machine') return tr('set.scopeMachine', { name: machines.find((m: any) => m.id === id)?.name || id })
     return sc
   }
   const groups: Record<string, [string, any][]> = {}
@@ -295,8 +295,8 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
   return (
     <div>
       <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:10, lineHeight:1.7 }}>
-        参数有两维分类：<b style={{color:'var(--text)'}}>作用域</b>（全局 / 某工艺模板 / 某机台）与
-        <b style={{color:'var(--text)'}}>语义类别</b>（尺寸、膜厚、材料、质量，可自行增删）。
+        {tr('set.paramsIntro1')}<b style={{color:'var(--text)'}}>{tr('set.paramsIntro2')}</b>{tr('set.paramsIntro3')}
+        <b style={{color:'var(--text)'}}>{tr('set.paramsIntro4')}</b>{tr('set.paramsIntro5', { cats: cats.join(' / ') })}
       </div>
 
       <div className="row">
@@ -337,7 +337,7 @@ function ParamsTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
 
       {Object.entries(groups).map(([sc, list]) => (
         <div key={sc}>
-          <div className="iface-sec">{scopeLabel(sc)}（{list.length}）</div>
+          <div className="iface-sec">{scopeLabel(sc)} ({list.length})</div>
           <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
             {list.map(([k, v]) => (
               <span key={k} className="chip" style={{ fontSize: 'var(--fs-sm)' }}
@@ -376,7 +376,7 @@ function MachinesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
     <div>
       <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)', marginBottom:10, lineHeight:1.7 }}>
         {tr('set.machineIntro1')}<b style={{color:'var(--text)'}}>{tr('set.machineIntro2')}</b>{tr('set.machineIntro3')}
-        同型号多台必须分开登记——否则机器差异会被当成工艺规律。
+        {tr('set.machineIntro4')}
       </div>
 
       <div style={{ border:'1px solid var(--border)', borderRadius:10, padding:10, background:'var(--surface)', marginBottom:12 }}>
@@ -396,17 +396,17 @@ function MachinesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
           </select>
         </div>
         <div className="row">
-          <input placeholder="位置" style={{ width:110 }} value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} />
+          <input placeholder={tr('set.locPh')} style={{ width:110 }} value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} />
           <select style={{ width:110 }} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
             <option value="active">{tr('set.stActive')}</option><option value="maintenance">{tr('set.stMaintenance')}</option>
             <option value="down">{tr('set.stDown')}</option><option value="retired">{tr('set.stRetired')}</option>
-            <option value="待确认">待确认</option>
+            <option value="待确认">待确认</option>{/* i18n-keep：机台状态枚举值，原样写回后端（form.status） */}
           </select>
-          <input placeholder="备注" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+          <input placeholder={tr('set.notesPh')} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
         </div>
         <div className="row">
-          <button className="btn" onClick={save}>{editId ? '保存修改' : '添加机台'}</button>
-          {editId && <button className="btn ghost" onClick={() => { setEditId(null); setForm(blank) }}>取消</button>}
+          <button className="btn" onClick={save}>{editId ? tr('set.saveEdit') : tr('set.addMachine')}</button>
+          {editId && <button className="btn ghost" onClick={() => { setEditId(null); setForm(blank) }}>{tr('set.cancel')}</button>}
         </div>
       </div>
 
@@ -416,16 +416,16 @@ function MachinesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
             <b style={{ fontSize: 'var(--fs-md)' }}>{m.name}</b>
             <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>
               {m.model ? ` · ${m.model}` : ''}{m.vendor ? ` · ${m.vendor}` : ''}{m.serial ? ` · #${m.serial}` : ''}{m.max_sample ? ` · ≤${m.max_sample}` : ''}
-              {m.equipment_id ? ` · 模板 ${templates.find(t => t.id === m.equipment_id)?.name || '?'}` : ' · 未绑模板'}
+              {m.equipment_id ? ` · ${tr('set.tplOf', { name: templates.find(t => t.id === m.equipment_id)?.name || '?' })}` : ` · ${tr('set.noTpl')}`}
               {m.location ? ` · ${m.location}` : ''}{m.notes ? ` · ${m.notes}` : ''}
             </span>
           </span>
           <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 10px' }}
-            onClick={() => { setEditId(m.id); setForm({ name: m.name, model: m.model || '', vendor: m.vendor || '', serial: m.serial || '', equipment_id: m.equipment_id || '', location: m.location || '', status: m.status || 'active', max_sample: m.max_sample || '', notes: m.notes || '' }) }}>编辑</button>
+            onClick={() => { setEditId(m.id); setForm({ name: m.name, model: m.model || '', vendor: m.vendor || '', serial: m.serial || '', equipment_id: m.equipment_id || '', location: m.location || '', status: m.status || 'active', max_sample: m.max_sample || '', notes: m.notes || '' }) }}>{tr('set.edit')}</button>
           <span className="chip-x" onClick={async () => { await api.machineRemove(m.id); refresh() }}>✕</span>
         </div>
       ))}
-      {machines.length === 0 && <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)' }}>（还没有机台）</div>}
+      {machines.length === 0 && <div style={{ color:'var(--muted)', fontSize: 'var(--fs-base)' }}>{tr('set.noMachines')}</div>}
     </div>
   )
 }
