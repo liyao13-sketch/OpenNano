@@ -65,9 +65,14 @@
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
   /* 工艺族配色(低饱和,Linear 风) */
-  --fam-resist:#d4a24e; --fam-expose:#7d8ce0; --fam-etch:#e5645c; --fam-dep:#4cb782;
-  --fam-wet:#4ea7fc; --fam-dope:#c9b04e; --fam-bond:#d98a5c; --fam-pack:#7a808c;   /* pack 原 #6b7280 当文字只有 3.97 ⇒ 提亮到 4.5 */
-  --fam-thermal:#c96a6a; --fam-assist:#7c8598; --fam-metro:#a78bfa;
+  /* 2026-09-13 owner：「曝光和刻蚀的族色太接近，**曝光/刻蚀/镀膜三大工艺要区分最明显**」
+     ⇒ 三个锚点按色相拉开（曝光 蓝216° / 刻蚀 橙红16° / 镀膜 绿145°），并**用明度差做第二条通道**；
+        涂胶(resist) 从原来的琥珀挪到**紫**（它属光刻组，原来跟刻蚀的暖色糊在一起）；
+        其余色相插空：湿法 青187° / 掺杂 黄绿67° / 键合 玫红333° / 热处理 琥珀38°。
+        体检器新增「族色分离度」一节，机器验锚点两两差距。 */
+  --fam-resist:#9d7bf5; --fam-expose:#4f8cff; --fam-etch:#f0704a; --fam-dep:#2fb46a;
+  --fam-wet:#2ab7c9; --fam-dope:#b5c33f; --fam-bond:#d1608f; --fam-pack:#7a808c;
+  --fam-thermal:#c9922f; --fam-assist:#7c8598; --fam-metro:#9b93c9;
   --fam-metro-form:#45b8ac; --fam-metro-comp:#d678ad; --fam-metro-opt:#a78bfa; --fam-metro-elec:#a3c76d;
   /* 节点大类 */
   --kind-process:#5e6ad2; --kind-inspect:#a78bfa; --kind-design:#d4a24e; --kind-sim:#4cb782;
@@ -83,9 +88,9 @@
   --accent-lo:#2f7fd6; --accent-text:#79bcff;
   --ok:#3ddc84; --warn:#ffcc4d; --bad:#ff6b6b; --info:#6bb6ff; --violet:#c9a0ff;
   --shadow-1:0 0 0 1px rgba(255,255,255,.14); --shadow-2:0 10px 30px rgba(0,0,0,.85);
-  --fam-resist:#ffb84d; --fam-expose:#7fa8ff; --fam-etch:#ff6b6b; --fam-dep:#4ddb8a;
-  --fam-wet:#4db8ff; --fam-dope:#ffe066; --fam-bond:#ff9d5c; --fam-pack:#b8c0c8;
-  --fam-thermal:#ff7a7a; --fam-assist:#c8d0d8; --fam-metro:#c9a0ff;
+  --fam-resist:#c9a0ff; --fam-expose:#79bcff; --fam-etch:#ff8a5c; --fam-dep:#4ddb8a;
+  --fam-wet:#4de0e0; --fam-dope:#d9e04d; --fam-bond:#ff8fd0; --fam-pack:#b8c0c8;
+  --fam-thermal:#ffb84d; --fam-assist:#c8d0d8; --fam-metro:#c9a0ff;
   --fam-metro-form:#4de0d0; --fam-metro-comp:#ff8fd0; --fam-metro-opt:#c9a0ff; --fam-metro-elec:#c8e05a;
   --kind-process:#6f8dff; --kind-inspect:#c9a0ff; --kind-design:#ffb84d; --kind-sim:#4ddb8a;
 }
@@ -589,9 +594,9 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   --shadow-1: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04);
   --shadow-2: 0 16px 40px rgba(15,23,42,.14);
   /* 族色：在白底上要压深一档才够清楚 */
-  --fam-resist:#a16207; --fam-expose:#4f46e5; --fam-etch:#b91c1c; --fam-dep:#047857;
-  --fam-wet:#0369a1; --fam-dope:#854d0e; --fam-bond:#c2410c; --fam-pack:#475569;
-  --fam-thermal:#9f1239; --fam-assist:#64748b; --fam-metro:#6d28d9;
+  --fam-resist:#6d28d9; --fam-expose:#1d4ed8; --fam-etch:#c2410c; --fam-dep:#047857;
+  --fam-wet:#0e7490; --fam-dope:#4d7c0f; --fam-bond:#be185d; --fam-pack:#475569;
+  --fam-thermal:#b45309; --fam-assist:#64748b; --fam-metro:#64748b;
   --fam-metro-form:#0f766e; --fam-metro-comp:#a21caf; --fam-metro-opt:#6d28d9; --fam-metro-elec:#4d7c0f;
   --kind-process:#4f46e5; --kind-inspect:#6d28d9; --kind-design:#a16207; --kind-sim:#047857;
   /* A 的 token 在浅色下的对应值 */
