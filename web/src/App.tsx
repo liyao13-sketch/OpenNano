@@ -12,6 +12,8 @@ import ErrorBoundary from './ErrorBoundary'
 import PanelTabs from './PanelTabs'
 import type { Module, Library, CatalogItem, Equipment } from './types'
 import { routeEdge, type Pt, type Box } from './orthoRoute'
+import { useI18n } from './i18n'
+import { LANGS } from './i18n'
 
 const KIND_COLOR: Record<string,string> = { process:'var(--kind-process)', inspect:'var(--kind-inspect)', design:'var(--kind-design)', sim:'var(--kind-sim)' }
 // 工艺族配色(Linear 低饱和):光刻胶=琥珀, 曝光=雾蓝, 刻蚀=陶红, 沉积=青绿, 湿法=天青...
@@ -31,7 +33,8 @@ function ProcessNode({ data }: any) {
   const primary = m.equipment_name || m.name
   const secondary = m.family_label || m.subtype
   const rs = m.run_state || 'idle'
-  const badge = m.disabled ? { t:'禁', c:'var(--faint)', bg:'transparent', bd:'var(--border)' }
+  const { t } = useI18n()
+  const badge = m.disabled ? { t: t('node.badgeDisabled'), c:'var(--faint)', bg:'transparent', bd:'var(--border)' }
     : isSeason       ? { t:'season', c:'var(--faint)', bg:'transparent', bd:'var(--border-2)' }
     : rs === 'running' ? { t:'…', c:'var(--accent-text)', bg:'var(--accent-soft)', bd:'var(--accent)' }
     : rs === 'ok'      ? { t:'✓', c:'var(--ok)', bg:'rgba(76,183,130,.14)', bd:'var(--ok)' }
@@ -60,9 +63,9 @@ function ProcessNode({ data }: any) {
           <span style={{ fontSize: 'var(--fs-lg)', fontWeight:620, letterSpacing:'-.01em', flex:1, lineHeight:1.35,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
             textDecoration: m.disabled ? 'line-through' : 'none' }}>{primary}</span>
-          <span title={m.disabled ? '已禁用(不参与运行)'
-                : isSeason ? 'season 热机（不加工已登记样品；默认收起，可在「视图」里展开）'
-                : rs === 'ok' ? '已运行' : rs === 'stale' ? '上游已变,结果失效' : '未运行'}
+          <span title={m.disabled ? t('node.disabled')
+                : isSeason ? t('node.season')
+                : rs === 'ok' ? t('node.running') : rs === 'stale' ? t('node.stale') : t('node.idle')}
             style={{ fontSize: 'var(--fs-micro)', lineHeight:'14px', minWidth:14, textAlign:'center',
               color:badge.c, background:badge.bg, border:`1px solid ${badge.bd}`, borderRadius:4,
               padding: isSeason ? '0 4px' : undefined }}>{badge.t}</span>
@@ -73,9 +76,9 @@ function ProcessNode({ data }: any) {
             {/* `run{N}` = **本工序第几次**（不含 season），由 core 全量算出来 ⇒ 序号不连续（0002/0003/0005/0006/0008）
                 也一眼读得出"第 5 次"。以前只在"调参轮次"上显示，于是 ICP-0008 看着像第 8 次（owner 2026-09-13）。 */}
             {runNo != null && (
-              <span title={`本工序第 ${runNo} 次（core run：${runId}）`
-                + (m.tune_step != null ? `　·　参数调试线 ${m.tune_id || ''} 第 ${m.tune_step} 轮` : '')
-                + '　序号不连续的是 core 的 run 号，这里按"第几次"显示'}
+              <span title={t('node.runTip', { n: runNo, run: runId })
+                + (m.tune_step != null ? ` · ${t('node.tuneTip', { id: m.tune_id || '', step: m.tune_step })}` : '')
+                + ` · ${t('node.runSeqTip')}`}
                 style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', fontWeight:700,
                   color:'var(--accent-fg)', background:'var(--accent)',
                   border:'1px solid var(--accent)', borderRadius:4, padding:'0 5px' }}>
@@ -93,7 +96,7 @@ function ProcessNode({ data }: any) {
               </span>
             )}
             {shortSample && (
-              <span title={`样品/die：${m.core_sample_id}`}
+              <span title={t('node.sampleTip', { id: m.core_sample_id })}
                 style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', color:'var(--text-2)',
                   background:'var(--raise)', border:'1px solid var(--border)',
                   borderRadius:4, padding:'0 4px' }}>
@@ -101,7 +104,7 @@ function ProcessNode({ data }: any) {
               </span>
             )}
             {m.core_stage_seq != null && (
-              <span title={`工序序号 stage_seq=${m.core_stage_seq}`}
+              <span title={t('node.stageTip', { n: m.core_stage_seq })}
                 style={{ fontSize: 'var(--fs-micro)', fontFamily:'var(--mono)', color:'var(--faint)',
                   border:'1px solid var(--border)', borderRadius:4, padding:'0 4px' }}>
                 #{m.core_stage_seq}
@@ -205,6 +208,7 @@ const edgeTypes = { ortho: OrthoEdge }
 const nodeTypes = { process: ProcessNode }
 
 export default function App() {
+  const { t, lang, setLang } = useI18n()
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
@@ -412,7 +416,7 @@ export default function App() {
 
   const editComment = (id: string) => {
     const m = nodes.find(n => n.id === id)?.data.module as Module | undefined
-    const c = prompt('节点备注(显示在节点下方,可用「视图 → 显示备注」开关)', m?.comment || '')
+    const c = prompt(t('view.notes'), m?.comment || '')
     if (c === null) return
     patchNode(id, { comment: c })
   }
@@ -1073,114 +1077,122 @@ export default function App() {
     <ErrorBoundary label="主界面">
     <div className="app">
       <div className="topbar">
-        <span className="brand" title="OpenNano · 工艺协同优化平台">
+        <span className="brand" title={t('brand.sub')}>
           <LogoMark />
           <span className="brand-name">OpenNano</span>
         </span>
-        <span style={{ color:'var(--muted)' }}>· {projectName} · 组织记忆 {kbTotal} 条</span>
+        <span style={{ color:'var(--muted)' }}>· {projectName} · {t('topbar.kbCount', { n: kbTotal })}</span>
         <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize: 'var(--fs-xs)', color:'var(--muted)' }}>
           <span style={{ width:8, height:8, borderRadius:'50%', background: online ? 'var(--ok)' : 'var(--bad)' }} />
-          {online ? '后端已连接' : '后端未连接'}
+          {online ? t('topbar.online') : t('topbar.offline')}
         </span>
         {inferredEdgeCount > 0 && (
-          <span title="虚线是**按工艺顺序**补的显示连线（core 里没有记录 parent）；实线才是 core 记录的真实上游"
+          <span title={t('topbar.inferredTip')}
             style={{ fontSize: 'var(--fs-xs)', color:'var(--muted)', border:'1px solid var(--line)',
                      borderRadius:10, padding:'1px 7px' }}>
             <svg width="26" height="8" style={{ verticalAlign:'middle', marginRight:4 }}>
               <line x1="0" y1="4" x2="26" y2="4" stroke="var(--faint)" strokeWidth="2"
                 strokeDasharray="6 5" />
             </svg>
-            推断连线 {inferredEdgeCount} 条（core 未记录）
+            {t('topbar.inferred', { n: inferredEdgeCount })}
           </span>
         )}
         <span className="spacer" />
         {/* 运行组(BEAMER: Run / Run To) */}
         <button className="btn" onClick={() => runFlow(selectedId || undefined)}
           disabled={running || nodes.length === 0}
-          title={selectedId ? '运行到选中节点为止 (Run To)' : '运行整个流程 (Run)'}>
-          {running ? '运行中…' : (selectedId ? '▶ 运行到此处' : '▶ 运行流程')}
+          title={selectedId ? t('topbar.runToTip') : t('topbar.runTip')}>
+          {running ? t('node.runningNow') : (selectedId ? `▶ ${t('topbar.runTo')}` : `▶ ${t('topbar.run')}`)}
         </button>
         <button className="btn ghost" onClick={() => runFlow()} disabled={running || !selectedId || nodes.length === 0}
-          title="运行整个流程">全部运行</button>
+          title={t('topbar.run')}>{t('topbar.runAll')}</button>
         <span className="topbar-sep" />
         {/* 视图菜单 */}
         <div style={{ position:'relative' }}>
-          <button className="btn ghost" onClick={() => setViewMenu(v => !v)} title="视图">视图 ▾</button>
+          <button className="btn ghost" onClick={() => setViewMenu(v => !v)} title={t('topbar.view')}>{t('topbar.view')} ▾</button>
           {viewMenu && (
             <div className="dropdown" onMouseLeave={() => setViewMenu(false)}>
               <label><input type="checkbox" checked={showComments}
-                onChange={e => { setShowComments(e.target.checked); pushLog('view', `备注显示: ${e.target.checked ? '开' : '关'}`) }} /> 显示备注 (F3)</label>
+                onChange={e => { setShowComments(e.target.checked); pushLog('view', `备注显示: ${e.target.checked ? '开' : '关'}`) }} /> {t('view.notes')} (F3)</label>
               <label><input type="checkbox" checked={ortho}
-                onChange={e => setOrtho(e.target.checked)} /> 折角连线(正交·默认用平滑曲线)</label>
+                onChange={e => setOrtho(e.target.checked)} /> {t('view.ortho')}</label>
               <label><input type="checkbox" checked={showSeason}
                 onChange={e => setShowSeason(e.target.checked)}
                 disabled={seasonIds.size === 0} /> 显示 season 节点{seasonIds.size ? ` (${seasonIds.size})` : ''}</label>
               <label><input type="checkbox" checked={libCollapsed}
-                onChange={e => setLibCollapsed(e.target.checked)} /> 收起左侧工艺库</label>
+                onChange={e => setLibCollapsed(e.target.checked)} /> {t('view.collapse')}</label>
               <div className="dropdown-sep" />
-              <button className="dropdown-item" onClick={() => { fitMode('contain'); setViewMenu(false) }}>适配视图 · 等比适应 (Ctrl+0)</button>
-              <button className="dropdown-item" onClick={() => { fitMode('cover'); setViewMenu(false) }}>适配视图 · 双向铺满</button>
-              <button className="dropdown-item" onClick={() => { fitMode('width'); setViewMenu(false) }}>适配视图 · 宽度适应</button>
-              <button className="dropdown-item" onClick={() => { fitMode('height'); setViewMenu(false) }}>适配视图 · 高度适应</button>
-              <button className="dropdown-item" onClick={() => { fitMode('1'); setViewMenu(false) }}>原始比例 100%</button>
+              <button className="dropdown-item" onClick={() => { fitMode('contain'); setViewMenu(false) }}>{t('view.fitContain')} (Ctrl+0)</button>
+              <button className="dropdown-item" onClick={() => { fitMode('cover'); setViewMenu(false) }}>{t('view.fitCover')}</button>
+              <button className="dropdown-item" onClick={() => { fitMode('width'); setViewMenu(false) }}>{t('view.fitWidth')}</button>
+              <button className="dropdown-item" onClick={() => { fitMode('height'); setViewMenu(false) }}>{t('view.fitHeight')}</button>
+              <button className="dropdown-item" onClick={() => { fitMode('1'); setViewMenu(false) }}>{t('view.zoom100')}</button>
+              <div className="dropdown-sep" />
+              <div style={{ padding:'4px 9px 2px', fontSize: 'var(--fs-micro)', letterSpacing:'.06em',
+                textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>{t('view.lang')}</div>
+              {LANGS.map(L => (
+                <button key={L.key} className="dropdown-item" onClick={() => { setLang(L.key); setViewMenu(false) }}>
+                  {lang === L.key ? '● ' : '○ '}{L.label}
+                </button>
+              ))}
               <button className="dropdown-item" onClick={() => { setViewMenu(false); arrangeLayout() }}
-                title="按工序列重排所有节点（只改位置，不动连线与标注）—— 方块叠在一起时一键复位">自动整理布局</button>
-              <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>显示日志面板</button>
+                title={t('view.arrangeTip')}>{t('view.arrange')}</button>
+              <button className="dropdown-item" onClick={() => { setDockTab('log'); setViewMenu(false) }}>{t('view.log')}</button>
               <button className="dropdown-item" onClick={() => { setDockTab('issues'); setViewMenu(false) }}>显示问题面板 ({issues.length})</button>
               <div className="dropdown-sep" />
               <div style={{ padding:'4px 9px 2px', fontSize: 'var(--fs-micro)', letterSpacing:'.06em',
-                textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>主题</div>
+                textTransform:'uppercase', color:'var(--faint)', fontWeight:600 }}>{t('view.theme')}</div>
               <button className="dropdown-item" onClick={() => setTheme('linear')}>
-                {theme === 'linear' ? '● ' : '○ '}Linear(默认低饱和)</button>
+                {theme === 'linear' ? '● ' : '○ '}{t('view.themeLinear')}</button>
               <button className="dropdown-item" onClick={() => setTheme('light')}>
-                {theme === 'light' ? '● ' : '○ '}明亮工作台(浅色)</button>
+                {theme === 'light' ? '● ' : '○ '}{t('view.themeLight')}</button>
               <button className="dropdown-item" onClick={() => setTheme('hc')}>
-                {theme === 'hc' ? '● ' : '○ '}高对比度(PyCharm 风)</button>
+                {theme === 'hc' ? '● ' : '○ '}{t('view.themeHc')}度(PyCharm 风)</button>
               <div className="dropdown-sep" />
-              <button className="dropdown-item" onClick={() => { setLogs([]); setViewMenu(false) }}>清空日志</button>
-              <button className="dropdown-item" onClick={() => { setIssues([]); setViewMenu(false) }}>清空问题</button>
+              <button className="dropdown-item" onClick={() => { setLogs([]); setViewMenu(false) }}>{t('view.clearLog')}</button>
+              <button className="dropdown-item" onClick={() => { setIssues([]); setViewMenu(false) }}>{t('view.clearIssues')}</button>
             </div>
           )}
         </div>
         <span className="topbar-sep" />
-        <button className="btn ghost" onClick={() => setKbOpen(true)}>知识库</button>
-        <button className="btn ghost" onClick={() => setSettingsOpen(true)}>设置</button>
-        <button className="btn ghost" onClick={openLoad}>载入</button>
-        <button className="btn ghost" onClick={save}>保存</button>
+        <button className="btn ghost" onClick={() => setKbOpen(true)}>{t('topbar.kb')}</button>
+        <button className="btn ghost" onClick={() => setSettingsOpen(true)}>{t('topbar.settings')}</button>
+        <button className="btn ghost" onClick={openLoad}>{t('topbar.load')}</button>
+        <button className="btn ghost" onClick={save}>{t('topbar.save')}</button>
         <span className="topbar-sep" />
         <button className="btn ghost" onClick={() => setDockTab('batch')}
-          title="批次管理：run 链 / 续做 / 表单填写 / 调试线 / DRIE 菜单直读">批次</button>
+          title={t('topbar.batchTip')}>{t('topbar.batch')}</button>
         {/* 文件（保存/载入/导入/导出全部收纳；owner 2026-09-12："好多种保存输出"⇒ 一个菜单） */}
         <div style={{ position:'relative' }}>
-          <button className="btn ghost" onClick={() => setFileMenu(v => !v)} title="保存 / 载入 / 导入 / 导出">文件 ▾</button>
+          <button className="btn ghost" onClick={() => setFileMenu(v => !v)} title={t('topbar.fileTip')}>{t('topbar.file')} ▾</button>
           {fileMenu && (
             <div className="dropdown" onMouseLeave={() => setFileMenu(false)}>
               {/* 按**功能**分组（不按"导入/导出"分）——方向由条目里的动词表达（owner 2026-09-13） */}
-              <div className="dd-sec">项目</div>
-              <button className="dropdown-item" onClick={() => { setFileMenu(false); openLoad() }}>载入项目…</button>
-              <button className="dropdown-item" onClick={() => { setFileMenu(false); save() }}>保存项目</button>
+              <div className="dd-sec">{t('file.project')}</div>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); openLoad() }}>{t('file.openProject')}</button>
+              <button className="dropdown-item" onClick={() => { setFileMenu(false); save() }}>{t('file.saveProject')}</button>
               <div className="dropdown-sep" />
-              <div className="dd-sec">实验包与流程卡<span className="dd-hint">与 core 对接</span></div>
+              <div className="dd-sec">{t('file.packTitle')}<span className="dd-hint">{t('file.packSub')}</span></div>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportExpack() }}
-                title="画布流程 → 实验数据包(core 格式,含人读流程卡.md)">导出实验包</button>
+                title={t('file.exportPackTip')}>{t('file.exportPack')}</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportCard() }}
-                title="画布流程 → 实验流程卡(Markdown,人读,可打印上机)">导出流程卡</button>
+                title={t('file.exportCardTip')}>{t('file.exportCard')}</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportAppend() }}
-                title="只导出尚未入 core 的 run（tool-append 包）">导出追加包（增量）</button>
+                title={t('file.exportAppendTip')}>{t('file.exportAppend')}</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); importExpack() }}
-                title="实验数据包(文件夹/zip) → 画布流程">导入实验包…</button>
+                title={t('file.importPackTip')}>{t('file.importPack')}</button>
               <div className="dropdown-sep" />
-              <div className="dd-sec">测量数据<span className="dd-hint">Excel 宽表</span></div>
+              <div className="dd-sec">{t('file.measureTitle')}<span className="dd-hint">{t('file.measureSub')}</span></div>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportData() }}
-                title="导出 core 数据工作簿(9表+量名词)">导出数据工作簿</button>
+                title={t('file.exportDataTip')}>{t('file.exportData')}</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); dataRef.current?.click() }}
-                title="上传 Excel 解析为 core 草稿(不落库)">导入数据…</button>
+                title={t('file.importDataTip')}>{t('file.importData')}</button>
               <div className="dropdown-sep" />
-              <div className="dd-sec">系统配置<span className="dd-hint">换机 / 备份</span></div>
+              <div className="dd-sec">{t('file.sysTitle')}<span className="dd-hint">{t('file.sysSub')}</span></div>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); exportConfig() }}
-                title="导出设备库/参数/影响规则/知识库">导出配置包</button>
+                title={t('file.exportCfgTip')}>{t('file.exportCfg')}</button>
               <button className="dropdown-item" onClick={() => { setFileMenu(false); importRef.current?.click() }}
-                title="导入配置包(换机/备份)">导入配置包…</button>
+                title={t('file.importCfgTip')}>{t('file.importCfg')}</button>
             </div>
           )}
         </div>
@@ -1191,11 +1203,11 @@ export default function App() {
       </div>
       <div className="main">
         {libCollapsed && (
-          <div className="sidebar collapsed" title="展开工艺库" onClick={() => setLibCollapsed(false)}>»</div>
+          <div className="sidebar collapsed" title={t('view.expand')} onClick={() => setLibCollapsed(false)}>»</div>
         )}
         <div className="sidebar" style={libCollapsed ? { display: 'none' } : undefined}>
           {/* 形式统一：拖进去的**长方块**与画布上生成的方块同形（左边色条 + 圆角 + 渐变 + 流光） */}
-          <h3>PROCESS<span className="dim">工艺</span></h3>
+          <h3>PROCESS<span className="dim">{t('lib.process')}</span></h3>
           <div className="lib-grid">
             {catalog.filter(c => c.group==='PROCESS').map(c => (
               /* 2026-09-13 owner：去掉中文小字、缩写居中；方块按**工艺族**上色（与画布节点同色）。 */
@@ -1209,7 +1221,7 @@ export default function App() {
               </div>
             ))}
           </div>
-          <h3>METROLOGY<span className="dim">检测</span></h3>
+          <h3>METROLOGY<span className="dim">{t('lib.metrology')}</span></h3>
           <div className="lib-grid">
             {catalog.filter(c => c.group==='METROLOGY').map(c => (
               <div key={c.subtype} className="lib-tile" draggable
@@ -1282,14 +1294,14 @@ export default function App() {
                 background:'var(--panel)', border:'1px solid var(--accent)', borderRadius:10,
                 padding:'6px 12px', display:'flex', alignItems:'center', gap:10, fontSize: 'var(--fs-base)',
                 boxShadow:'var(--shadow-2)' }}>
-                <span>已选 <b>{selectedNodes.length}</b> 个节点{selectedEdgeCount ? ` · ${selectedEdgeCount} 条连线` : ''}</span>
-                <button className="btn" style={{ padding:'3px 12px', fontSize: 'var(--fs-base)' }} onClick={deleteSelected}>🗑 删除选中</button>
-                <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>或按 Backspace</span>
+                <span>{t('canvas.selected', { n: selectedNodes.length })}{selectedEdgeCount ? ` · ${selectedEdgeCount} ${lang === 'zh' ? '条连线' : 'links'}` : ''}</span>
+                <button className="btn" style={{ padding:'3px 12px', fontSize: 'var(--fs-base)' }} onClick={deleteSelected}>🗑 {t('canvas.deleteSel')}</button>
+                <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{t('canvas.orBackspace')}</span>
               </div>
             )}
             {nodes.length === 0 && (
               <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
-                <div style={{ color:'var(--muted)', fontSize: 'var(--fs-lg)', textAlign:'center', lineHeight:1.8 }}>从左侧拖入工艺开始构建流程<br/><span style={{fontSize: 'var(--fs-base)'}}>空白处按住鼠标拖拽 = 框选一批节点 · 中键/右键拖拽 = 平移画布 · Backspace 删除选中</span></div>
+                <div style={{ color:'var(--muted)', fontSize: 'var(--fs-lg)', textAlign:'center', lineHeight:1.8 }}>{t('canvas.empty')}<br/><span style={{fontSize: 'var(--fs-base)'}}>{t('canvas.emptyHint')}</span></div>
               </div>
             )}
           </ReactFlow>
@@ -1299,10 +1311,10 @@ export default function App() {
         active={dockTab}
         onTab={k => setDockTab(k as any)}
         tabs={[
-          { key: 'agent', label: 'Agent 对话', render: () => (
+          { key: 'agent', label: t('dock.agent'), render: () => (
             <div className="dock-col">
               <div className="chatbar-body" ref={chatRef}>
-                {messages.length === 0 && <div className="chat-empty">问我工艺问题，例如「Ta 怎么刻蚀？」「SiO₂ 掩膜刻蚀常用参数」</div>}
+                {messages.length === 0 && <div className="chat-empty">{t('dock.chatEmpty')}</div>}
                 {messages.map((m, i) => (
                   <div key={i} className={"msg " + m.role}>
                     {m.tools && m.tools.length > 0 && (
@@ -1321,12 +1333,12 @@ export default function App() {
               </div>
               <div className="chatbar-input">
                 <input value={input} onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key==='Enter' && send()} placeholder="输入工艺问题…" />
-                <button className="btn" onClick={send} disabled={sending}>{sending ? '…' : '发送'}</button>
+                  onKeyDown={e => e.key==='Enter' && send()} placeholder={t('dock.chatPlaceholder')} />
+                <button className="btn" onClick={send} disabled={sending}>{sending ? '…' : t('dock.send')}</button>
               </div>
             </div>
           )},
-          { key: 'batch', label: '批次', render: () => (
+          { key: 'batch', label: t('dock.batch'), render: () => (
             <BatchPanel onClose={() => setDockTab('agent')} ctx={{
               projectName, modules: nodes.map(n => n.data.module as Module),
               edges: edges.map(e => ({ src: e.source, dst: e.target })),
@@ -1340,17 +1352,17 @@ export default function App() {
               },
             }} />
           )},
-          { key: 'log', label: `日志 (${logs.length})`, render: () => (
+          { key: 'log', label: `${t('dock.log')} (${logs.length})`, render: () => (
             <div className="log-body" ref={logRef}>
-              {logs.length === 0 && <div className="chat-empty">运行流程后,这里逐步记录:承接参数 → 公式/规则 → 输出。</div>}
+              {logs.length === 0 && <div className="chat-empty">{t('dock.logEmpty')}</div>}
               {logs.map((l, i) => (
                 <div key={i} className={'logline ' + l.kind}><span className="lt">{l.t}</span><span>{l.text}</span></div>
               ))}
             </div>
           )},
-          { key: 'issues', label: `问题 (${issues.length})`, render: () => (
+          { key: 'issues', label: `${t('dock.issues')} (${issues.length})`, render: () => (
             <div className="log-body">
-              {issues.length === 0 && <div className="chat-empty">暂无问题。</div>}
+              {issues.length === 0 && <div className="chat-empty">{t('dock.noIssues')}</div>}
               {issues.map((x, i) => (
                 <div key={i} className="logline error"><span className="lt">{x.t}</span><span>{x.text}</span></div>
               ))}
@@ -1358,7 +1370,7 @@ export default function App() {
           )},
         ]} />
         </div>
-        <div className="panel-drag" title="拖拽调整详情栏宽度（双击复位 420）"
+        <div className="panel-drag" title={t('panel.dragTip')}
           onMouseDown={e => {
             panelDrag.current = { x: e.clientX, w: panelW }
             document.body.style.cursor = 'col-resize'
@@ -1370,13 +1382,13 @@ export default function App() {
         <div className={`panel${m ? ' has-fam' : ''}`}
           style={{ width: panelW, ['--fam' as any]: m ? (FAMILY_COLOR[m.family || ''] || KIND_COLOR[m.kind] || 'var(--faint)') : undefined } as any}>
           <ErrorBoundary label="节点面板" onReset={() => setSelectedId(null)}>
-          {!m && <div style={{ color:'var(--muted)' }}>点击画布节点查看详情<br/>（左侧点工艺添加到画布，节点上下端口拖线连接）</div>}
+          {!m && <div style={{ color:'var(--muted)' }}>{t('panel.empty')}<br/>{t('panel.emptyHint')}</div>}
           {m && (
             <>
               <div className="panel-head">
                 <div className="ph-top">
                   <h2 style={{ margin:0 }}>{m.name}</h2>
-                  <button className="btn ghost" onClick={deleteSelected} style={{ fontSize: 'var(--fs-base)', padding:'4px 10px' }}>🗑 删除选中</button>
+                  <button className="btn ghost" onClick={deleteSelected} style={{ fontSize: 'var(--fs-base)', padding:'4px 10px' }}>🗑 {t('canvas.deleteSel')}</button>
                 </div>
                 <div className="ph-meta">
                   <span className="fam-dot" />
@@ -1385,9 +1397,9 @@ export default function App() {
                 </div>
               </div>
               <div className="card">
-                <h4>工艺模板 / 机台</h4>
+                <h4>{t('panel.tpl')}</h4>
                 <select value={m.equipment_id} onChange={e => onEquipment(e.target.value)}>
-                  <option value="">— 内置默认 —</option>
+                  <option value="">{t('panel.builtin')}</option>
                   {catEquipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
                 </select>
                 <div className="row" style={{ marginTop:6 }}>
@@ -1395,7 +1407,7 @@ export default function App() {
                     const mc = (library?.machines || []).find((x: any) => x.id === e.target.value)
                     updateModule({ machine_id: e.target.value, machine_name: mc?.name || '' })
                   }}>
-                    <option value="">— 机台（可选，同型号多台请分开选）—</option>
+                    <option value="">{t('panel.machine')}</option>
                     {(library?.machines || [])
                       .filter((mc: any) => !mc.equipment_id || !m.equipment_id || mc.equipment_id === m.equipment_id)
                       .map((mc: any) => (
@@ -1409,21 +1421,21 @@ export default function App() {
                 {machDef && (
                   <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
                     <div className="bd-sec-head">
-                      <span className="dim">实测默认值</span>
+                      <span className="dim">{t('panel.measured')}</span>
                       <span className="dim">{machDef.tool_id} · {machDef.n_runs} 次
                         {machDef.as_of ? ` · 最近 ${machDef.as_of}` : ''}</span>
                     </div>
                     <div className="row" style={{ gap: 6 }}>
                       {machDef.phases?.length > 1 && (
                         <select value={machPhase} onChange={e => setMachPhase(e.target.value)}
-                          title="该机台是**多段工艺**（chuck/etch/dechuck…）⇒ 选一段套用；完整步序列在 steps 里">
-                          <option value="">— 选一段 —</option>
+                          title={t('panel.phaseTip')}>
+                          <option value="">{t('panel.pickPhase')}</option>
                           {machDef.phases.map((p: string) => <option key={p} value={p}>{p}</option>)}
                         </select>
                       )}
                       <button className="btn ghost" disabled={!machPhase} onClick={applyMachineDefaults}
-                        title="把该段实测值写进本节点参数（并补上缺失的参数行）；不覆盖你没动过的其它键之外的东西">
-                        套用实测值{machPhase ? `（${machPhase}）` : ''}
+                        title={t('panel.applyTip')}>
+                        {t('panel.applyMeasured')}{machPhase ? `（${machPhase}）` : ''}
                       </button>
                     </div>
                     {machDef.phases?.length === 1 && (
@@ -1437,12 +1449,12 @@ export default function App() {
               </div>
               {m.family === 'dep' && (
                 <div className="card">
-                  <h4>沉积材料（本步输出膜层）</h4>
-                  <div className="row"><label>材料</label>
-                    <input list="film-options" value={m.material?.film || ''} placeholder="如 SiO₂"
+                  <h4>{t('panel.film')}</h4>
+                  <div className="row"><label>{t('panel.material')}</label>
+                    <input list="film-options" value={m.material?.film || ''} placeholder={t('panel.filmPlaceholder')}
                       onChange={e => updateModule({ material: { ...(m.material || {}), film: e.target.value } })} />
                   </div>
-                  <div className="row"><label>厚度 nm</label>
+                  <div className="row"><label>{t('panel.thickness')}</label>
                     <input type="number" value={m.material?.thickness ?? 0}
                       onChange={e => updateModule({ material: { ...(m.material || {}), thickness: parseFloat(e.target.value) || 0 } })} />
                   </div>
@@ -1453,7 +1465,7 @@ export default function App() {
               )}
               {m.family === 'expose' && (
                 <div className="card">
-                  <h4>Process Link（入射膜堆叠 · 生效影响规则）</h4>
+                  <h4>{t('panel.link')}</h4>
                   <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)', marginBottom:8 }}>入射膜堆: {stackDesc}</div>
                   {resolvedRules.length === 0 && (
                     <div style={{ fontSize: 'var(--fs-base)', color:'var(--muted)' }}>当前上下文（film “{topFilmName}”）无生效影响规则（可在 设置 → 影响规则 中定义）</div>
@@ -1471,7 +1483,7 @@ export default function App() {
                               onClick={() => onParam(r.to, r.value)}>Apply</button>
                           </>
                         ) : (
-                          <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>定性</span>
+                          <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)' }}>{t('panel.qualitative')}</span>
                         )}
                         <span style={{ marginLeft:'auto', fontSize: 'var(--fs-micro)', color:'var(--muted)' }}>[{r.reliability_score}/5]</span>
                       </div>
@@ -1487,7 +1499,7 @@ export default function App() {
                       <label>gds_bias nm</label>
                       <input type="number" value={m.params.gds_bias}
                         onChange={e => onParam('gds_bias', parseFloat(e.target.value) || 0)} />
-                      <span className="chip-x" title="清除"
+                      <span className="chip-x" title={t('panel.clear')}
                         onClick={() => { const p = { ...m.params }; delete p.gds_bias; updateModule({ params: p }) }}>✕</span>
                     </div>
                   )}
@@ -1495,10 +1507,10 @@ export default function App() {
               )}
               {m.equipment_name === 'GDS Layout' && (
                 <div className="card">
-                  <h4>版图生成（P4 · klayout）</h4>
+                  <h4>{t('panel.gdsTitle')}</h4>
                   <div className="row">
-                    <button className="btn" onClick={genGds}>生成 GDS</button>
-                    <button className="btn ghost" onClick={genGdsLive}>绘制到 KLayout</button>
+                    <button className="btn" onClick={genGds}>{t('panel.gdsGen')}</button>
+                    <button className="btn ghost" onClick={genGdsLive}>{t('panel.gdsDraw')}</button>
                   </div>
                 </div>
               )}
@@ -1506,12 +1518,12 @@ export default function App() {
                 <h4 style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   Process Interface（承接 ← / 影响 →）
                   {m.equipment_id ? (
-                    <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 8px' }} onClick={saveAsTemplate}>存为设备模板</button>
+                    <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)', padding:'3px 8px' }} onClick={saveAsTemplate}>{t('panel.saveTpl')}</button>
                   ) : (
-                    <span style={{ fontSize: 'var(--fs-micro)', color:'var(--muted)', fontWeight:400 }}>选设备后可存模板</span>
+                    <span style={{ fontSize: 'var(--fs-micro)', color:'var(--muted)', fontWeight:400 }}>{t('panel.saveTplHint')}</span>
                   )}
                 </h4>
-                <div className="iface-sec">承接 inputs（← 上游传入）</div>
+                <div className="iface-sec">{t('panel.inputs')}</div>
                 {m.param_inputs.map(k => (
                   <div className="row" key={k}>
                     <span className="chip">{k}</span>
@@ -1521,11 +1533,11 @@ export default function App() {
                 ))}
                 <div className="row">
                   <select value="" onChange={e => { if (e.target.value) updateModule({ param_inputs: [...m.param_inputs, e.target.value] }) }}>
-                    <option value="">+ 添加承接参数…</option>
+                    <option value="">{t('panel.addInput')}</option>
                     {Object.keys(library?.params || {}).filter(p => !m.param_inputs.includes(p)).map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
-                <div className="iface-sec">影响 outputs（→ 传给下游）</div>
+                <div className="iface-sec">{t('panel.outputs')}</div>
                 {m.param_outputs.map(k => (
                   <div className="row" key={k}>
                     <span className="chip">{k}</span>
@@ -1536,22 +1548,22 @@ export default function App() {
                 ))}
                 <div className="row">
                   <select value="" onChange={e => { if (e.target.value) updateModule({ param_outputs: [...m.param_outputs, e.target.value] }) }}>
-                    <option value="">+ 添加影响参数…</option>
+                    <option value="">{t('panel.addOutput')}</option>
                     {Object.keys(library?.params || {}).filter(p => !m.param_outputs.includes(p)).map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
-                <div className="iface-sec">公式 formulas（输出 = 表达式）</div>
+                <div className="iface-sec">{t('panel.formulas')}</div>
                 {Object.entries(m.formulas).map(([out, expr]) => (
                   <div className="row" key={out}>
                     <span className="chip" style={{ flexShrink:0 }}>{out} =</span>
-                    <input type="text" value={expr} placeholder="如 胶CD - 2 * bias_nm"
+                    <input type="text" value={expr} placeholder={t('panel.formulaPlaceholder')}
                       onChange={e => updateModule({ formulas: { ...m.formulas, [out]: e.target.value } })} />
                     <span className="chip-x" onClick={() => { const f = { ...m.formulas }; delete f[out]; updateModule({ formulas: f }) }}>✕</span>
                   </div>
                 ))}
                 <div className="row">
                   <select value="" onChange={e => { if (e.target.value) updateModule({ formulas: { ...m.formulas, [e.target.value]: '' } }) }}>
-                    <option value="">+ 添加公式…</option>
+                    <option value="">{t('panel.addFormula')}</option>
                     {m.param_outputs.filter(o => !(o in m.formulas)).map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                   {Object.keys(m.formulas).length > 0 && <button className="btn" onClick={compute}>Compute</button>}
@@ -1568,15 +1580,15 @@ export default function App() {
 
       {/* 状态栏(BEAMER 式:项目/规模/选中/运行/后端) */}
       <div className="statusbar">
-        <span className="sb-name" title={`项目 ${projectName}`}>项目 {projectName}</span><span className="sb-sep" />
-        <span>{nodes.length} 节点 · {edges.length} 连线</span><span className="sb-sep" />
-        <span>选中 {selectedNode ? (selectedNode.data.module as Module).name : '—'}</span><span className="sb-sep" />
-        <span>运行 {running ? '进行中…' : (nodes.some(n => (n.data.module as Module).run_state === 'ok') ? '已完成' : '待运行')}</span>
+        <span className="sb-name" title={t('sb.project', { name: projectName })}>{t('sb.project', { name: projectName })}</span><span className="sb-sep" />
+        <span>{t('sb.counts', { n: nodes.length, e: edges.length })}</span><span className="sb-sep" />
+        <span>{t('sb.selected', { name: selectedNode ? (selectedNode.data.module as Module).name : '—' })}</span><span className="sb-sep" />
+        <span>{running ? t('sb.running') : (nodes.some(n => (n.data.module as Module).run_state === 'ok') ? t('sb.done') : t('sb.idle'))}</span>
         <span className="spacer" />
         {nodes.some(n => (n.data.module as Module).disabled) && (
-          <span>{nodes.filter(n => (n.data.module as Module).disabled).length} 个已禁用</span>
+          <span>{t('sb.disabled', { n: nodes.filter(n => (n.data.module as Module).disabled).length })}</span>
         )}
-        <span style={{ color: online ? 'var(--ok)' : 'var(--bad)' }}>{online ? '后端已连接' : '后端未连接'}</span>
+        <span style={{ color: online ? 'var(--ok)' : 'var(--bad)' }}>{online ? t('topbar.online') : t('topbar.offline')}</span>
       </div>
       {kbOpen && <KbBrowser onClose={() => setKbOpen(false)} />}
       {loadOpen && (
@@ -1590,12 +1602,12 @@ export default function App() {
               {projects.map(p => (
                 <div key={p.name} className="row" style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:10, marginBottom:6 }}>
                   <span style={{ flex:1, fontWeight:600 }}>{p.name}
-                    <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight:400 }}> · {p.modules} 模块 / {p.edges} 连线 · {p.saved_at?.replace('T', ' ')}</span></span>
-                  <button className="btn" style={{ fontSize: 'var(--fs-base)', padding:'4px 12px' }} onClick={() => loadProjectByName(p.name)}>载入</button>
+                    <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight:400 }}> · {p.modules} {t('proj.modules', { n: p.modules, e: p.edges })} · {p.saved_at?.replace('T', ' ')}</span></span>
+                  <button className="btn" style={{ fontSize: 'var(--fs-base)', padding:'4px 12px' }} onClick={() => loadProjectByName(p.name)}>{t('topbar.load')}</button>
                   <span className="chip-x" title="删除" onClick={async () => { await api.projectDelete(p.name); setProjects(ps => ps.filter(x => x.name !== p.name)) }}>✕</span>
                 </div>
               ))}
-              {projects.length === 0 && <div style={{ color:'var(--muted)', padding:12 }}>（还没有保存的项目——先点「保存」）</div>}
+              {projects.length === 0 && <div style={{ color:'var(--muted)', padding:12 }}>{t('proj.empty')}</div>}
             </div>
           </div>
         </div>
@@ -1606,14 +1618,14 @@ export default function App() {
         const m = nd?.data.module as Module | undefined
         return (
           <div className="ctxmenu" style={{ left: menu.x, top: menu.y }}>
-            <div className="ctx-title">{menu.kind === 'node' ? (m?.name || '节点') : '连线'}</div>
+            <div className="ctx-title">{menu.kind === 'node' ? (m?.name || t('menu.node')) : t('menu.edge')}</div>
             {menu.kind === 'node' && m && (
               <>
-                <button onClick={() => { setMenu(null); runFlow(menu.id) }}>▶ 运行到此处 (Run To)</button>
-                <button onClick={() => { setMenu(null); runFlow() }}>▶▶ 运行整个流程</button>
-                <button onClick={() => { setMenu(null); compute() }}>∑ 单独计算本节点</button>
+                <button onClick={() => { setMenu(null); runFlow(menu.id) }}>{t('menu.runTo')}</button>
+                <button onClick={() => { setMenu(null); runFlow() }}>{t('menu.runAll')}</button>
+                <button onClick={() => { setMenu(null); compute() }}>{t('menu.compute')}</button>
                 <div className="dropdown-sep" />
-                <button onClick={() => { toggleDisable(menu.id); setMenu(null) }}>{m.disabled ? '启用节点' : '禁用节点'}</button>
+                <button onClick={() => { toggleDisable(menu.id); setMenu(null) }}>{m.disabled ? t('menu.enable') : t('menu.disable')}</button>
                 <button onClick={() => {
                   invalidateDownstream(menu.id)
                   setNodes(nds => {
@@ -1623,20 +1635,20 @@ export default function App() {
                   })
                   pushLog('edit', `重置「${m.name}」及其下游状态`)
                   setMenu(null)
-                }}>重置本节点及下游</button>
-                <button onClick={() => { editComment(menu.id); setMenu(null) }}>编辑备注…</button>
-                <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}>复制节点 (Ctrl+D)</button>
+                }}>{t('menu.reset')}</button>
+                <button onClick={() => { editComment(menu.id); setMenu(null) }}>{t('menu.comment')}</button>
+                <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}>{t('menu.dup')}</button>
                 <div className="dropdown-sep" />
-                <button onClick={() => { setSelectedId(menu.id); setDockTab('log'); setMenu(null) }}>查看日志</button>
-                <button className="danger" onClick={() => { deleteSelected(); setMenu(null) }}>删除节点</button>
+                <button onClick={() => { setSelectedId(menu.id); setDockTab('log'); setMenu(null) }}>{t('menu.log')}</button>
+                <button className="danger" onClick={() => { deleteSelected(); setMenu(null) }}>{t('menu.delNode')}</button>
               </>
             )}
             {menu.kind === 'edge' && (
               <>
-                <button onClick={() => { toggleEdgeDisabled(menu.id); setMenu(null) }}>停用 / 启用连线</button>
-                <button onClick={() => { setDockTab('log'); setMenu(null) }}>查看日志</button>
+                <button onClick={() => { toggleEdgeDisabled(menu.id); setMenu(null) }}>{t('menu.toggleEdge')}</button>
+                <button onClick={() => { setDockTab('log'); setMenu(null) }}>{t('menu.log')}</button>
                 <div className="dropdown-sep" />
-                <button className="danger" onClick={() => { setEdges(eds => eds.filter(e => e.id !== menu.id)); setMenu(null) }}>删除连线</button>
+                <button className="danger" onClick={() => { setEdges(eds => eds.filter(e => e.id !== menu.id)); setMenu(null) }}>{t('menu.delEdge')}</button>
               </>
             )}
           </div>
