@@ -1,8 +1,33 @@
 import type { Module, Library } from './types'
 
+/** 把失败的响应变成**人能读的**错误：带上服务端的 `detail`。
+
+为什么必须有它（2026-09-13 审计）：原来只抛 `` `${r.status} ${url}` `` ⇒ 界面里 `alert(e.message)`
+只显示 `400 /api/expack/import`，而服务端明明给了原因（"不是有效的 zip 包：…"）——
+**错误信息在最后一跳被丢掉**，用户根本看不出哪里坏了。FastAPI 422 的 `detail` 是数组
+（`[{loc, msg, type}]`），这里一并拼成一句。
+*/
+async function errorText(r: Response): Promise<string> {
+  let detail = ''
+  try {
+    const body: any = await r.clone().json()
+    if (typeof body?.detail === 'string') detail = body.detail
+    else if (Array.isArray(body?.detail)) {
+      detail = body.detail.map((d: any) => [
+        Array.isArray(d?.loc) ? d.loc.slice(1).join('.') : '', d?.msg,
+      ].filter(Boolean).join(' ')).filter(Boolean).join('; ')
+    }
+  } catch {
+    try { detail = (await r.text()).slice(0, 300) } catch { detail = '' }
+  }
+  let path = r.url
+  try { path = new URL(r.url).pathname } catch { /* 相对 URL 就原样留着 */ }
+  return `${r.status} ${path}${detail ? `：${detail}` : ''}`
+}
+
 async function j<T>(url: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(url, opts)
-  if (!r.ok) throw new Error(`${r.status} ${url}`)
+  if (!r.ok) throw new Error(await errorText(r))
   return r.json()
 }
 
@@ -12,7 +37,7 @@ export async function download(url: string, body: any): Promise<number> {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!r.ok) throw new Error(`${r.status} ${url}`)
+  if (!r.ok) throw new Error(await errorText(r))     // 同上：导出失败也要说得出原因
   const cd = r.headers.get('Content-Disposition') || ''
   const star = /filename\*=UTF-8''([^;]+)/.exec(cd)
   const m = /filename="?([^";]+)"?/.exec(cd)
