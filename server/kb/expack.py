@@ -44,6 +44,14 @@ STAGE_TO_TEMPLATE: dict[str, tuple[str, str]] = {
     "LIFTOFF": ("wet", "Lift-off"), "DICE": ("packaging", "Dicing"),
     "SEM": ("sem", "扫描电镜（SEM）"), "ELLIP": ("ellip", "椭偏仪"),
     "STRESS": ("stress", "应力仪"), "PROFILE": ("profilo", "台阶仪"),
+    # 2026-09-14 补 12（数据线协议 §15.4）：模板名照抄 engine/process_catalog.py 的 METROLOGY 表，
+    # **不在这里另造名字**（名字的唯一真相在那边，改了要对齐）
+    "TEM": ("tem", "透射电镜（TEM）"), "AFM": ("afm", "原子力显微镜（AFM）"),
+    "OM": ("om", "光学显微镜"), "FLUOR": ("fluor", "荧光检测"),
+    "XRD": ("xrd", "X射线衍射（XRD）"), "XPS": ("xps", "X射线光电子能谱（XPS）"),
+    "AES": ("aes", "俄歇能谱（AES）"), "SIMS": ("sims", "二次离子质谱（SIMS）"),
+    "FOURPP": ("fourpp", "四探针"), "HALL": ("hall", "霍尔测试（Hall）"),
+    "CV": ("cv", "电容-电压（C-V）"), "IR": ("ir", "红外热成像"),
 }
 TEMPLATE_TO_STAGE = {tmpl: st for st, (_sub, tmpl) in STAGE_TO_TEMPLATE.items()}
 
@@ -52,7 +60,11 @@ CATEGORY_TO_STAGE = {"etch": "RIE", "deposition": "PECVD", "graphic": "EBL",
                      "wet": "LIFTOFF", "packaging": "DICE",
                      # 表征类(2026-09-12 补:此前 SEM/椭偏等节点会被静默丢弃)
                      "sem": "SEM", "metro_form": "SEM", "cd_sem": "SEM",
-                     "ellip": "ELLIP", "profilo": "PROFILE", "stress": "STRESS"}
+                     "ellip": "ELLIP", "profilo": "PROFILE", "stress": "STRESS",
+                     # 2026-09-14 补 12（协议 §15.4：16 种表征器械 1:1 都有代号，不再有节点进不了包）
+                     "tem": "TEM", "afm": "AFM", "om": "OM", "fluor": "FLUOR",
+                     "xrd": "XRD", "xps": "XPS", "aes": "AES", "sims": "SIMS",
+                     "fourpp": "FOURPP", "hall": "HALL", "cv": "CV", "ir": "IR"}
 
 # ---- core 量名词 ⇄ 画布接口参数 ----
 QUANTITY_TO_PARAM = {
@@ -129,8 +141,17 @@ def resolve_stage(m: dict, lib=None) -> str:
     return CATEGORY_TO_STAGE.get(cat or m.get("subtype") or "", "")
 
 
-#: 表征类 stage（core 词表里就这四个）—— 画布上"检测节点"的身份判据只有这一处
-METROLOGY_STAGES = ("SEM", "ELLIP", "PROFILE", "STRESS")
+#: 表征类 stage —— 画布上"检测"的身份判据只有这一处（契约 §三 第四层 + 数据线协议 §15.4）。
+#: 2026-09-14 由 4 个扩到 **16 个**（一台仪器一个代号，与画布 `process_catalog.METROLOGY` 的 16 种 1:1）：
+#: 形貌 TEM/AFM/OM/FLUOR · 成分结构 XRD/XPS/AES/SIMS · 光学厚度 ELLIP/PROFILE ·
+#: 力学 STRESS · 电学 FOURPP/HALL/CV · 热学 IR。
+#: ⚠️ `FOURPP` 不是 `4PP`：run_id 的 stage 段保持纯字母，不给下游解析留特例（数据线 §15.4 的选择）。
+#: ⚠️ 词表两侧必须**同批落地**：本文件改了映射，数据线那边 `core_schema.STAGES` / `schema §4` / 协议 §4
+#:    也要同批加这 12 个（否则 `build_core` 的写前硬闸会拒收 —— 那是**可见失败**，不是静默污染）。
+METROLOGY_STAGES = ("SEM", "ELLIP", "PROFILE", "STRESS",
+                    "TEM", "AFM", "OM", "FLUOR",
+                    "XRD", "XPS", "AES", "SIMS",
+                    "FOURPP", "HALL", "CV", "IR")
 
 
 def is_metrology_stage(stage: str) -> bool:
@@ -275,6 +296,19 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
             # 非菜单步**没有**机台槽位号 ⇒ 该列留空（step_name 仍记组名）
             step_rows.append([f"{rid}.S{si:02d}", rid, si, "", sname, "",
                               dur, press, "", json.dumps(pj, ensure_ascii=False), ""])
+        # ── 测量行挂在**哪条 run** 上 ──────────────────────────────────────────────
+        # 数据线协议 §15.1（2026-09-14 裁定）：`measurement.run_id` ＝「这个数是在哪次工艺之后
+        # 测出来的」，**不是**「用哪台仪器测的」；并明写 **检测 run 上不许挂 measurement**。
+        # ⇒ 检测节点（球）上的量名词，模板行要挂到**它测的那条 run**（父）上；
+        #    meas_id 也用被测 run 的前缀（`{被测run}.Mnn`），与 core 现状 108/108 同构。
+        # ⚠️ 这正是我此前挂起、等口径的那一处：老行为把测量行挂在检测 run 自己身上（错口径）。
+        host_rid = rid
+        if is_metrology_stage(stage):
+            _p = (m.get("core_parent_run_id") or "").strip()
+            if _p and _p != rid:
+                host_rid = _p
+        host_m = m if host_rid == rid else next(
+            (x for x in modules if (x.get("core_run_id") or "") == host_rid), m)
         # 面板填的测量值（表单）→ 合并进 measurements：同 quantity 填值，未覆盖的追加行
         form_meas = [r for r in (m.get("core_measurements") or [])
                      if str(r.get("value", "")).strip() != ""]     # 空=未测，不当 0
@@ -289,9 +323,11 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
             elif form_meas:
                 # 面板已经填过值 ⇒ **不再产出空模板行**（与追加包口径一致：空=未测，不写行）
                 continue
-            n = len([r for r in meas_rows if r[0].startswith(rid)]) + 1
-            meas_rows.append([(hit or {}).get("meas_id") or f"{rid}.M{n:02d}", rid,
-                              (hit or {}).get("sample_id") or m.get("core_sample_id") or "", q,
+            # 行挂在 host_rid（检测节点 ⇒ 被测 run），meas_id 前缀也跟着走
+            n = len([r for r in meas_rows if r[0].startswith(host_rid)]) + 1
+            meas_rows.append([(hit or {}).get("meas_id") or f"{host_rid}.M{n:02d}", host_rid,
+                              (hit or {}).get("sample_id") or host_m.get("core_sample_id")
+                              or m.get("core_sample_id") or "", q,
                               str(hit.get("value", "")).strip() if hit else "",
                               (hit or {}).get("unit") or meta.get("unit", ""),
                               (hit or {}).get("method", ""), (hit or {}).get("loc", ""),
@@ -1260,9 +1296,17 @@ def metro_markers(runs_sorted: list[dict], id_by_run: dict) -> dict[str, list[di
         anchor_mid = id_by_run.get(anchor_rid)
         if not anchor_mid:
             continue                                  # 锚不到被测 run ⇒ 不画球（宁可少画，不编归属）
+        _stage = str(r.get("stage") or stage_from_run_id(rid))
+        _sub = (STAGE_TO_TEMPLATE.get(_stage) or ("", ""))[0]
+        try:                                       # 族色**唯一真相**在后端（engine.METRO_FAMILY）
+            from engine.process_catalog import METRO_FAMILY as _MF
+            _fam = _MF.get(_sub, "metro")
+        except Exception:                          # noqa: BLE001 —— 取不到就退中性色，不影响正确性
+            _fam = "metro"
         out.setdefault(anchor_mid, []).append({
             "run_id": rid,
-            "stage": str(r.get("stage") or stage_from_run_id(rid)),
+            "stage": _stage,
+            "family": _fam,
             "module_id": id_by_run.get(rid) or "",
             "sample_id": (r.get("sample_id") or "").strip(),
             "date": (r.get("date") or "").strip(),

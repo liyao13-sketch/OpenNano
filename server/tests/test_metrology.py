@@ -22,9 +22,10 @@ import csv
 import io
 import zipfile
 
-from kb.expack import (_bad_edges, _edges_from_runs, _layout_modules, build_expack,
-                       build_process_card, extract_rows, is_metrology_stage, metro_markers,
-                       resolve_stage, stage_run_index, unmapped_modules)
+from kb.expack import (CATEGORY_TO_STAGE, METROLOGY_STAGES, STAGE_TO_TEMPLATE, _bad_edges,
+                       _edges_from_runs, _layout_modules, build_expack, build_process_card,
+                       extract_rows, is_metrology_stage, metro_markers, resolve_stage,
+                       stage_run_index, unmapped_modules)
 from kb.canvas_geom import COL_PITCH, GAP, NODE_W
 
 BATCH = "MT-T1"
@@ -52,8 +53,12 @@ def test_resolve_stage_covers_the_four_core_metrology_stages():
 
 
 def test_unmapped_instrument_is_loud_not_silent():
-    """TEM/XRD 这些**不硬塞**成 SEM —— 不许编 stage；但必须**出声**（进 unmapped 清单）。"""
-    proj = {"name": BATCH, "modules": [_mod("a", "透射电镜（TEM）", subtype="tem")], "edges": []}
+    """词表**之外**的器械：**不硬塞**成 SEM（不许编 stage），但必须**出声**（进 unmapped 清单）。
+
+    ⚠️ 口径随词表变化（2026-09-14）：TEM/XRD 等 12 个已由数据线协议 §15.4 收编 ⇒ 不再举它们做例子；
+    改用数据线**明确说过本次不预加**的白光干涉仪 `wli`（他们 §四-2：WLI/LCM/膜厚仪要"先加词表再用"）。
+    """
+    proj = {"name": BATCH, "modules": [_mod("a", "白光干涉仪（WLI）", subtype="wli")], "edges": []}
     assert resolve_stage(proj["modules"][0]) == ""          # 不编
     un = unmapped_modules(proj)
     assert len(un) == 1 and un[0]["name"]                    # 但卡片/清单里点得出名
@@ -305,3 +310,100 @@ def test_process_card_says_what_the_metrology_node_measures():
 
     loose = {"name": BATCH, "edges": [], "modules": [_mod("m3", SEM_TMPL)]}
     assert "说不出测谁" in build_process_card(loose)
+
+
+# ---------------------------------------------------------------- 词表扩到 16（协议 §15.4）
+
+def test_all_sixteen_metrology_instruments_have_a_stage_and_template():
+    """16 种表征器械**一台一代号**：subtype→stage、stage→模板名、stage→族，三条链都不能断。
+
+    这张表的另一头在数据线（`core_schema.STAGES` / `schema §4` / 协议 §4），两侧必须**同批落地**：
+    只落一侧 ⇒ 拖 TEM 节点导出时 `build_core` 的写前硬闸会拒收（**可见失败**，不是静默污染）。
+    """
+    from engine.process_catalog import METROLOGY, METRO_FAMILY
+    assert len(METROLOGY_STAGES) == 16, f"表征 stage 应为 16 个，实际 {len(METROLOGY_STAGES)}"
+    names = {sub: name for sub, name, _d in METROLOGY}
+    assert len(names) == 16, "画布表征库应恰好 16 种（改了一侧就得改另一侧）"
+    for sub, name in names.items():
+        stage = CATEGORY_TO_STAGE.get(sub)
+        assert stage, f"{sub} 没有 stage 代号 ⇒ 拖这个节点会进不了包"
+        assert stage in METROLOGY_STAGES, f"{stage} 没被认成表征"
+        ssub, tmpl = STAGE_TO_TEMPLATE[stage]
+        assert ssub == sub and tmpl == name, f"{stage} 的模板名/子类与库不一致：( {ssub},{tmpl} ) vs ( {sub},{name} )"
+        assert sub in METRO_FAMILY, f"{sub} 没有族 ⇒ 球没颜色"
+
+
+def test_fourpp_not_4pp():
+    """数据线 §15.4 的选择：`FOURPP` 而非 `4PP`（run_id 的 stage 段保持纯字母）。"""
+    assert "FOURPP" in METROLOGY_STAGES and "4PP" not in METROLOGY_STAGES
+    assert STAGE_TO_TEMPLATE["FOURPP"][0] == "fourpp"
+
+
+def test_marker_carries_the_family_so_the_frontend_need_not_duplicate_it():
+    """族色的**唯一真相**在后端（`METRO_FAMILY`）—— 标记负载带上它，前端不再维护第二份表。"""
+    runs = [{"run_id": f"{BATCH}-RIE-0001", "batch_id": BATCH, "stage": "RIE",
+             "stage_seq": 1, "run_nature": "", "parent_run_id": ""},
+            {"run_id": f"{BATCH}-XRD-0001", "batch_id": BATCH, "stage": "XRD",
+             "stage_seq": 2, "run_nature": "", "parent_run_id": f"{BATCH}-RIE-0001"}]
+    mk = metro_markers(runs, {r["run_id"]: mid for r, mid in zip(runs, ("m1", "m2"))})
+    assert mk["m1"][0]["stage"] == "XRD" and mk["m1"][0]["family"] == "metro_comp"
+
+
+def test_nature_label_has_metrology():
+    """`run_nature` 增 `metrology`（协议 §15.3）：**不许留空**，留空会被推成 `chain`（当链环）。"""
+    from kb.batch_runs import NATURE_LABEL
+    assert "metrology" in NATURE_LABEL and NATURE_LABEL["metrology"]
+
+
+# ---------------------------------------------------------------- §15.1：测量值挂被测 run
+
+def test_metrology_measurements_attach_to_the_measured_run():
+    """**检测 run 上不许挂 measurement**（协议 §15.1「谁挂谁错口径」）。
+
+    检测节点的量名词 = "这一步做完测出来的东西" ⇒ 模板行的 `run_id` 必须是**被测的那条工艺 run**，
+    meas_id 也用它的前缀（与 core 现状 108/108 同构）。老行为挂在检测 run 自己身上 —— 错口径。
+    """
+    proj = {"name": BATCH, "edges": [{"src": "m1", "dst": "m2", "_link": "recorded"}],
+            "modules": [_mod("m1", "RIE"),
+                        _mod("m2", SEM_TMPL, subtype="sem", param_outputs=["硅CD"])]}
+    runs, _, meas, _, _ = extract_rows(proj)
+    assert [r[0] for r in runs] == [f"{BATCH}-RIE-0001", f"{BATCH}-SEM-0001"]
+    assert len(meas) == 1
+    meas_id, host, _sample, qty = meas[0][0], meas[0][1], meas[0][2], meas[0][3]
+    assert host == f"{BATCH}-RIE-0001", f"测量行挂错 run 了：{host}"
+    assert meas_id.startswith(f"{BATCH}-RIE-0001."), f"meas_id 前缀也应在被测 run 上：{meas_id}"
+    assert qty == "final_cd_nm"                     # 硅CD → core 量名词（经 PARAM_TO_QUANTITY）
+    assert all("SEM" not in m[1] for m in meas), "检测 run 上出现了 measurement"
+
+
+def test_process_nodes_still_host_their_own_measurements():
+    """**回归锁**：普通工艺节点的测量值仍挂自己（别把上面那条改过头）。"""
+    proj = {"name": BATCH, "edges": [],
+            "modules": [_mod("m1", "RIE", param_outputs=["刻蚀深度"])]}
+    _, _, meas, _, _ = extract_rows(proj)
+    assert len(meas) == 1 and meas[0][1] == f"{BATCH}-RIE-0001"
+
+
+def test_classifier_calls_a_metrology_run_metrology_not_chain():
+    """批处理面板的性质判定：检测 run **按 stage 认作 `metrology`**，不许因为有 parent 就推成 `chain`。
+
+    协议 §15.3 的原话就是"不能留空——留空工具会按 `parent_run_id` 推成 chain"，而 core 该列现在
+    还是空的（数据线同批补）⇒ 这层兜底必须有，否则面板会把检测显示成"链环"。
+    """
+    from kb.batch_runs import classify
+    mods = [{"id": "m1", "core_run_id": f"{BATCH}-RIE-0001"},
+            {"id": "m2", "core_run_id": f"{BATCH}-SEM-0001"}]
+    rows = [{"run_id": f"{BATCH}-RIE-0001", "batch_id": BATCH, "sample_id": "",
+             "stage": "RIE", "stage_seq": "1", "parent_run_id": "", "run_nature": ""},
+            {"run_id": f"{BATCH}-SEM-0001", "batch_id": BATCH, "sample_id": "",
+             "stage": "SEM", "stage_seq": "2", "parent_run_id": f"{BATCH}-RIE-0001",
+             "run_nature": ""}]
+    import kb.batch_runs as br
+    orig = br.runs_of_batch
+    br.runs_of_batch = lambda modules, batch: rows          # 注入合成 core，不碰真库
+    try:
+        got = {x["run_id"]: x["nature"] for x in classify(mods, BATCH)}
+    finally:
+        br.runs_of_batch = orig
+    assert got[f"{BATCH}-SEM-0001"] == "metrology", f"检测被推成了 {got}"
+    assert got[f"{BATCH}-RIE-0001"] != "metrology"

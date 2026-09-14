@@ -336,16 +336,11 @@ const edgeTypes = { ortho: OrthoEdge }
    颜色＝表征族（沿用画布/左栏同一套 `--fam-metro-*` 变量，主题自动跟随）。
    ⚠️ 一个球 = **同一个被测 run 上的所有检测**（不是每个检测一枚）。
 ============================================================================ */
-const METRO_STAGE_FAMILY: Record<string,string> = {
-  SEM: 'metro_form', PROFILE: 'metro_form', TEM: 'metro_form',
-  ELLIP: 'metro_opt', STRESS: 'metro_opt',
-  XRD: 'metro_comp', XPS: 'metro_comp', AES: 'metro_comp', SIMS: 'metro_comp',
-}
-/* ⚠️ token 名用**连字符**（`--fam-metro-form`）—— 第一版按 JS 里的下划线族名拼成
-   `--fam-metro_form` ⇒ 变量解析失败、球整块不上色（计算值 fill 退成黑色）。已按 DOM 实测修。 */
-const metroColor = (stage: string) => {
-  const fam = METRO_STAGE_FAMILY[String(stage || '').toUpperCase()] || 'metro'
-  return `var(--fam-${fam.replace(/_/g, '-')})`
+/* ⚠️ 族色**不再在前端维护一份表**（会与后端漂移）：标记负载里已带 `family`
+   （后端 `engine.process_catalog.METRO_FAMILY` 是唯一真相），这里只做兜底。 */
+const metroColor = (m: any) => {
+  const fam = String(m?.family || 'metro').replace(/_/g, '-')
+  return `var(--fam-${fam})`
 }
 
 function MetroBall({ data }: any) {
@@ -353,7 +348,7 @@ function MetroBall({ data }: any) {
   const ms: any[] = data.markers || []
   const n = ms.length
   const R = 9, C = 11, SIZE = 22
-  const [a, b, c, d] = [0, 1, 2, 3].map(i => metroColor(ms[i]?.stage))
+  const [a, b, c, d] = [0, 1, 2, 3].map(i => metroColor(ms[i]))
   const title = `${t(n === 1 ? 'metro.ballTip1' : 'metro.ballTipN', { n })}\n` + ms.map(m =>
     `· ${m.stage}${m.run_id ? ` · ${m.run_id}` : ''}${m.date ? ` · ${m.date}` : ''}`).join('\n')
   // 扇区路径：从 12 点开始顺时针等分
@@ -383,7 +378,7 @@ function MetroBall({ data }: any) {
         {n >= 5 && <>
           {/* ≥5：不再真等分（每份不到 3px 等于没信息）⇒ 多色环 + 计数 */}
           {ms.map((m, i) => (
-            <circle key={i} cx={C} cy={C} r={R - 1} fill="none" stroke={metroColor(m.stage)} strokeWidth={3}
+            <circle key={i} cx={C} cy={C} r={R - 1} fill="none" stroke={metroColor(m)} strokeWidth={3}
               strokeDasharray={`${(2 * Math.PI * (R - 1)) / n - 1.4} 1.4`}
               strokeDashoffset={-((2 * Math.PI * (R - 1)) / n) * i} />
           ))}

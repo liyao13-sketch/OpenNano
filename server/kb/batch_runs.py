@@ -335,11 +335,17 @@ def parallels(modules: list[dict], batch: str) -> list[dict]:
 #: run 性质（数据线 2026-09-12 建议）—— 防"同 stage 同 stage_seq ⇒ 串行"的误读。
 #: ⚠️ 2026-09-13 owner定「界面全英文」⇒ 这些**界面标签**改英文；`nature` 的**键**（chain/trial/…）
 #:    一个字母都没动（它们是契约里的值，翻了对不上库）。
+from .expack import METROLOGY_STAGES as _METROLOGY_STAGES   # 表征 stage 的唯一真相
+
 NATURE_LABEL = {
     "chain": "chained",            # 有父 run ⇒ 真实上游链
     "trial": "standalone trial",   # 无父 + 有独立 sample ⇒ 与其他 run 并列的试验片
     "batch_level": "batch level (multi-die)",  # 无父 + 与兄弟同 stage/sample
     "unclassified": "unclassified",
+    # 2026-09-14（数据线协议 §15.3）：检测 run 的仪器 session —— 由数据线写入 core，
+    # 工具侧只负责**显示**。⚠️ 不许留空：留空会按 parent_run_id 推成 chain（把它当链环），
+    # 而检测不是工序、不在链上。
+    "metrology": "metrology session",
 }
 
 
@@ -373,6 +379,11 @@ def classify(modules: list[dict], batch: str) -> list[dict]:
         same_stage = by_stage[r["stage"]]
         if override in NATURE_LABEL:
             nature, why = override, "人工标注（域知识优先）"
+        elif (r.get("stage") or "").strip().upper() in _METROLOGY_STAGES:
+            # 检测 run（仪器 session）：**按 stage 认**，不看 parent —— 若走下面那条 parent 分支
+            # 会被推成 `chain`（＝当成链环），而那正是数据线协议 §15.3 警告的错标。
+            # core 的 run_nature 该列现在还是空的（数据线将同批补），所以这层兜底必须有。
+            nature, why = "metrology", "检测 run（仪器 session，不在工序链上）"
         elif r["parent_run_id"]:
             nature, why = "chain", f"上游 = {r['parent_run_id']}"
         elif (r["stage"] in WHOLE_WAFER_STAGES and "-DIE" not in (r["sample_id"] or "").upper()
