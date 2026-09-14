@@ -82,7 +82,10 @@ export const api = {
   configImport: (bundle: {library?:any; kb_entries?:any[]}) =>
     j<any>('/api/config/import', { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(bundle) }),
-  kb: (q?: string) => j<any[]>('/api/kb' + (q ? `?q=${encodeURIComponent(q)}` : '')),
+  /* `layer`（契约 §三 三层 taxonomy）：device / theory / lit / manual —— 供左栏分族 */
+  kb: (q?: string, layer?: string) => j<any[]>('/api/kb?' + new URLSearchParams({
+    ...(q ? { q } : {}), ...(layer ? { layer } : {}),
+  }).toString()),
   kbStats: () => j<any>('/api/kb/stats'),
   kbIngestUpload: (payload: {filename:string; content_b64:string; process_type?:string; material?:string; dry_run?:boolean}) =>
     j<any>('/api/kb/ingest_upload', { method:'POST', headers:{'Content-Type':'application/json'},

@@ -370,8 +370,14 @@ class KBStore:
     # ---- 读 ----
     def list(self, process_type: str | None = None, material: str | None = None,
              min_reliability: int | None = None, q: str | None = None,
-             limit: int = 200, include_theory: bool = True) -> list[dict]:
-        """检索。include_theory=True 时,按设备过滤也带上 THEORY_*(普适机理)。"""
+             limit: int = 200, include_theory: bool = True,
+             layer: str | None = None) -> list[dict]:
+        """检索。include_theory=True 时,按设备过滤也带上 THEORY_*(普适机理)。
+
+        `layer`（2026-09-14 加，契约 §三 三层 taxonomy）按**知识层**过滤，供前端分族：
+        `theory` / `lit` / `manual` 三个前缀层，`device` = 除这三层之外的设备级 code。
+        ⚠️ 与 `process_type` 是**两条独立的筛子**（同时给就 AND）。
+        """
         with self.Session() as s:
             stmt = select(KnowledgeEntry)
             if process_type:
@@ -381,6 +387,16 @@ class KBStore:
                         | KnowledgeEntry.process_type.like("THEORY\\_%", escape="\\"))
                 else:
                     stmt = stmt.where(KnowledgeEntry.process_type == process_type)
+            if layer:
+                pre = {"theory": "THEORY\\_%", "lit": "LIT\\_%",
+                       "manual": "MANUAL\\_%"}.get(layer)
+                if pre:
+                    stmt = stmt.where(KnowledgeEntry.process_type.like(pre, escape="\\"))
+                elif layer == "device":
+                    stmt = stmt.where(
+                        ~KnowledgeEntry.process_type.like("THEORY\\_%", escape="\\"),
+                        ~KnowledgeEntry.process_type.like("LIT\\_%", escape="\\"),
+                        ~KnowledgeEntry.process_type.like("MANUAL\\_%", escape="\\"))
             if min_reliability is not None:
                 stmt = stmt.where(KnowledgeEntry.reliability_score >= min_reliability)
             if q:

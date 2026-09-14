@@ -795,9 +795,10 @@ def api_config_import(req: ConfigImportReq):
 @app.get("/api/kb")
 def api_kb(process_type: str | None = None, material: str | None = None,
            min_reliability: int | None = None, q: str | None = None,
-           limit: int = 200):
+           limit: int = 200, layer: str | None = None):
+    """知识条目检索。`layer` = theory / lit / manual / device（契约 §三 三层 taxonomy）。"""
     return KB.list(process_type=process_type, material=material,
-                   min_reliability=min_reliability, q=q, limit=limit)
+                   min_reliability=min_reliability, q=q, limit=limit, layer=layer)
 
 
 @app.post("/api/kb")
