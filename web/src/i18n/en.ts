@@ -345,6 +345,8 @@ export const en = {
   "log.exportCard": "Exported process card \"{name}\"",
   "log.exportAppend": "Exported append package \"{name}\": {n} new runs",
   "log.importPack": "Imported package \"{name}\": {n} nodes / {e} links",
+  "log.libCorrupt": "Library file unreadable — kept a copy at {file}; nothing was written this run.",
+  "issue.libCorrupt": "Library file unreadable ({err}). Your copy was kept as {file} — this run will NOT write the library, so machines/templates/rules are showing defaults until you restore it.",
   "log.noTpl": "Canvas: equipment template \"{name}\" not found",
   "log.noMachine": "Canvas: machine \"{name}\" not found",
   "log.agentAdd": "Agent added node \"{name}\"",

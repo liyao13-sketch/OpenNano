@@ -376,7 +376,17 @@ export default function App() {
 
   useEffect(() => {
     api.catalog().then(c => { setCatalog(c.module_catalog); setFamilies(c.families) })
-    api.library().then(setLibrary)
+    /* 库文件损坏 → **必须说出来**：旧行为是后端静默退回默认值，用户看到"机台/模板都没了"
+       却不知道发生了什么。这里同时进「问题面板」（页签上有计数）与运行日志。 */
+    api.library().then(l => {
+      setLibrary(l)
+      if (l.load_error) {
+        const ts = new Date().toLocaleTimeString('en-GB', { hour12: false })
+        setIssues(is => [...is, { t: ts, text: t('issue.libCorrupt', {
+          err: l.load_error, file: l.corrupt_backup || '—' }) }])
+        pushLog('warn', t('log.libCorrupt', { file: l.corrupt_backup || '—' }))
+      }
+    })
     api.kbStats().then(s => setKbTotal(s.total)).catch(() => {})
     api.health().then(() => setOnline(true)).catch(() => setOnline(false))
     // 启动自动恢复最近编辑的项目(没有则保持空画布)

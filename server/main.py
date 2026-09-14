@@ -103,6 +103,10 @@ def api_library():
     """设备库 + 参数注册表 + 依赖边 + 默认 + 材料属性 + 影响规则。"""
     d = LIB.data
     return {
+        # 库文件损坏时要让**界面**说得出来（旧行为是静默退回默认值，用户以为自己的机台没了）
+        "load_error": getattr(LIB, "load_error", ""),
+        "corrupt_backup": getattr(LIB, "corrupt_backup", ""),
+        "save_blocked": getattr(LIB, "save_blocked", False),
         "categories": CATEGORIES,
         "equipment": d.get("equipment", {}),
         "params": d.get("params", {}),

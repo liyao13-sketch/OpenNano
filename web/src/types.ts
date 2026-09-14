@@ -34,4 +34,7 @@ export interface Library {
   param_links: {from:string;to:string}[]; defaults: any; film_props: Record<string, number>;
   influence_rules?: any[]; bias_table?: Record<string, number>;
   machines?: any[]; param_categories?: string[];
+  /** 库文件读不动时的原因（空 = 正常）；`corrupt_backup` 是留档路径、`save_blocked` 表示本次不落盘。
+      后端不再静默退回默认值 —— 界面必须把这件事说出来，否则用户以为自己的机台/模板"没了"。 */
+  load_error?: string; corrupt_backup?: string; save_blocked?: boolean;
 }

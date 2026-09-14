@@ -65,14 +65,38 @@ class LibraryStore:
             "film_props": {}, "params": {}, "param_links": [],
             "influence_rules": [],
         }
+        #: 库文件读不动时的**可读原因**（空 = 正常）。给界面看，不是给日志看。
+        self.load_error = ""
+        #: 损坏文件的留档路径（原文件改名保留，绝不删）
+        self.corrupt_backup = ""
+        #: 本次运行**禁止写库**（见 `_save`）
+        self.save_blocked = False
         self._load()
 
     def _load(self):
         if self.path.exists():
             try:
                 self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001
+                # ⚠️ 2026-09-13 审计：这里原来是**静默 `pass`**，而 `_save()` 是无条件覆盖 ——
+                #    于是"库文件损坏"的后果不是报警，而是**下次启动把用户的机台 / 参数注册表 /
+                #    影响规则整份换成默认值**（真丢资产）。改成三步：
+                #    ①损坏文件**原样改名留档**（不删、可救回）②本次运行**禁止写库**
+                #    ③原因挂到 `load_error`，由 API/界面显式告知。
+                self.load_error = f"{type(e).__name__}: {e}"
+                self._quarantine_corrupt()
+
+    def _quarantine_corrupt(self) -> None:
+        """把损坏的库文件改名留档，并禁止本次写盘（宁可这次不落盘，也不覆盖可能救得回的文件）。"""
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dest = self.path.with_name(f"{self.path.stem}.corrupt-{stamp}{self.path.suffix}")
+        try:
+            self.path.replace(dest)
+            self.corrupt_backup = str(dest)
+        except OSError:
+            self.corrupt_backup = ""      # 改名失败也不写：宁留一个读不动的文件，也不覆盖它
+        self.save_blocked = True
         for key in ("equipment", "materials", "recipes", "defaults",
                     "film_props", "params"):
             self.data.setdefault(key, {})
@@ -341,6 +365,10 @@ class LibraryStore:
                 self.data["defaults"]["equipment"][cat] = lst[0]["id"]
 
     def _save(self):
+        # 库文件读过但读不动时**不写盘**：此刻 `self.data` 只有默认值 + 播种，写下去就是
+        # 把用户的资产换成默认值（而损坏文件已留档，等用户处置）。带外说明见 `load_error`。
+        if self.save_blocked:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2),
                              encoding="utf-8")
