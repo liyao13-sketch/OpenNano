@@ -853,18 +853,24 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
   @keyframes tile-sheen { 0% { transform: translateX(-170%); } 30%, 100% { transform: translateX(320%); } }
 }
 
-/* —— 矮窗口再收一档：25 个方块（13 行）必须**不滚动**就能看全 ——
-   基准 34px/行（只有一行缩写）≈ 590px 总高；840px 以下 30px，760px 以下 26px。 */
+/* —— 矮窗口再收一档：只收紧**间距类**（gap / margin / padding / 圆角）——
+   ⚠️ 2026-09-13 审计：这里原来还有 `.lib-tile { min-height: 30px/26px }` 与
+   `.lib-tile .abbr { font-size: … }`，但它们在文件里更靠后那一段「左栏方块上下铺满」
+   （`.lib-tile { min-height: 0 }` 与 `.lib-tile .abbr { font-size: var(--fs-md) }`）里被
+   **同特异性、更晚的无条件规则整段压死** ⇒ 那 4 条声明从来没生效过（死代码），
+   而当时的注释还写着"矮窗口走 media query 行高有下限"——**文件在描述一件没发生的事**。
+   现在把死声明删掉、注释改成实话：
+     · 行高不再设下限 —— 方块由栅格 `1fr` 自适应，窗口越矮越扁（矮到看不全就滚动，
+       这是 `.lib-grid` 的既有行为，不靠 min-height）；
+     · 缩写字号由**容器查询** `clamp(var(--fs-xs), 26cqh, var(--fs-lg))` 随方块高度缩放，
+       已经覆盖了原 media query 想做的事，不需要第二套台阶。 */
 @media (max-height: 840px) {
-  .lib-tile { min-height: 30px; }
-  .lib-tile .abbr { font-size: var(--fs-xs); }   /* 同一行原来重复写了两遍，删掉一份 */
   .lib-grid { gap: 5px; }
   .sidebar h3 { margin: 8px 4px 5px; }
   .sidebar { padding: 6px 8px 10px; }
 }
 @media (max-height: 760px) {
-  .lib-tile { min-height: 26px; border-radius: 8px; }
-  .lib-tile .abbr { font-size: var(--fs-micro); }
+  .lib-tile { border-radius: 8px; }              /* 圆角没有被后来的规则覆盖，保留 */
   .lib-grid { gap: 4px; }
   .sidebar h3 { margin: 6px 4px 4px; font-size: var(--fs-micro); }
 }
@@ -875,7 +881,9 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
    而不是漏出下面很大一部分」）
    做法：侧栏改成 flex 列，两组方阵按**各自行数**分高度（PROCESS 5 行 / METROLOGY 8 行，
    比例由 JSX 给 `flexGrow`），行高一律 `1fr` ⇒ 有多少空间就长多高，不再固定 34px。
-   矮窗口仍走下面的 media query（行高有下限，超出就滚动）。
+   ⚠️ 措辞更正（2026-09-13 审计）：矮窗口**不设**行高下限——就是让方块继续变扁（看不全才滚动）；
+   缩写字号由下面的容器查询随方块高度缩放。原句"行高有下限"与事实相反（那两条 media 声明
+   正是被本段的无条件规则压死的，已删）。
    ---------------------------------------------------------------------------- */
 .sidebar { display: flex; flex-direction: column; }
 .sidebar h3 { flex: 0 0 auto; }
