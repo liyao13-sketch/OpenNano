@@ -639,15 +639,20 @@ class ExpackExportReq(BaseModel):
 def api_expack_export(req: ExpackExportReq):
     """画布流程 → 实验数据包 zip(core 列格式,measurements 为待填模板 + 人读流程卡 md)。"""
     from fastapi import Response as _R
+    proj = {"name": req.name, "modules": req.modules, "edges": req.edges,
+            "core_eq_state": req.core_eq_state}
     data, batch = expack_engine.build_expack(
-        {"name": req.name, "modules": req.modules, "edges": req.edges,
-         "core_eq_state": req.core_eq_state},
-        purpose=req.purpose, operator=req.operator, lib=LIB)
+        proj, purpose=req.purpose, operator=req.operator, lib=LIB)
     from urllib.parse import quote as _q
-    return _R(content=data, media_type="application/zip",
-              headers={"Content-Disposition":
-                       f"attachment; filename=experiment_package.zip; "
-                       f"filename*=UTF-8''{_q(batch + '.zip')}"})
+    # 口径告警（机台未登记 / 工程名派生出幻影批次）用**响应头**带回 UI —— 与追加包同一套做法。
+    # 为什么不只在包内 manifest：用户下载完就走，包里的告警要等落库时才被数据线看到。
+    warns = expack_engine.export_warnings(proj, LIB)
+    hdr = {"Content-Disposition":
+           f"attachment; filename=experiment_package.zip; "
+           f"filename*=UTF-8''{_q(batch + '.zip')}"}
+    if warns:
+        hdr["X-Export-Warn"] = _q(json.dumps(warns, ensure_ascii=False))
+    return _R(content=data, media_type="application/zip", headers=hdr)
 
 
 @app.post("/api/expack/card")

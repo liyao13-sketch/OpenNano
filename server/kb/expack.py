@@ -212,6 +212,46 @@ def unmapped_modules(project: dict, lib=None) -> list[dict]:
     return out
 
 
+def export_warnings(project: dict, lib=None) -> list[dict]:
+    """导出**前**的口径告警（`kind` / `subject` / `message`）。**列出即出声**，不静默。
+
+    两类（都来自 2026-09-14 的联调实测，不是假想）：
+
+    · `unregistered_machine` —— 画布选的机台在 core **没登记机台号**（库内 `tool_id` 为空或不在
+      `TOOL_DISPLAY` 里）。落 core 时该 run 只能写哨兵 `UNKNOWN`；数据线闸 ⑤ 会**拒收**未登记的名字，
+      所以"把库内标签当机台号"这条路两头都堵死 ⇒ 唯一的出路是**先登记**或**接受哨兵**，
+      而这件事必须让导出的人看见（实测库里真有：`RIBE-鲁汶` / `MA6`）。
+    · `batch_mismatch` —— 工程里有 run 属于批次 `X`，而工程名派生的批次号不是 `X`（如画布工作名
+      `AR50-T1-明天`）。新节点会被登记成**批次 `X` 之外**的 run ⇒ 幻影批次。
+      续做请用**追加包**（`build_append_pack`，只带新 run、批次沿用），或把工程名改成批次号。
+    """
+    machines = lib.machines() if lib else []
+    out: list[dict] = []
+    batches: dict[str, int] = {}
+    for m in project.get("modules", []):
+        if not resolve_stage(m, lib):
+            continue                                   # 未映射节点由 unmapped_modules 报，这里不重复
+        rid = m.get("core_run_id") or ""
+        tid, _tname, note = resolve_tool(m, machines, STAGE_CODES)
+        if note:
+            out.append({"kind": "unregistered_machine",
+                        "subject": rid or (m.get("name") or "(未命名)"),
+                        "message": note})
+        if rid:
+            b = (m.get("core_batch_id") or "").strip() or rid.rsplit("-", 2)[0]
+            if b:
+                batches[b] = batches.get(b, 0) + 1
+    derived = _sanitize_batch(project.get("name", "EXP"))
+    other = {b: n for b, n in batches.items() if b and b != derived}
+    if other:
+        detail = "、".join(f"`{b}`（{n} 条 run）" for b, n in sorted(other.items()))
+        out.append({"kind": "batch_mismatch", "subject": derived,
+                    "message": (f"工程名 `{project.get('name') or '—'}` 派生的批次号是 `{derived}`，"
+                                f"但工程里有 run 属于 {detail} ⇒ **新节点会被登记成 `{derived}` 的 run**。"
+                                f"若是这批的续做：请用「追加包」导出（批次沿用），或把工程名改成 `{sorted(other)[0]}`")})
+    return out
+
+
 def extract_rows(project: dict, purpose: str = "", operator: str = "",
                  lib=None) -> tuple[list, list, list, dict, str]:
     """画布项目 → (run_rows, step_rows, meas_rows, stage_counter, batch)。
@@ -261,7 +301,7 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         # 应用库的**显示名**（`DRIE-Bosch` / `PECVD` / `ICP-鲁汶`）—— 其中 `PECVD` 正好是 stage 名
         # （撞数据线机台闸 ②），其余看着合法却是**错的机台号**（`RIE-400iPB` / `ICP-PishowA` 才是真值），
         # 会静默入库把归属记错。解析顺序与理由见 `kb/core_vocab.resolve_tool`。
-        tool_id, tool_name = resolve_tool(m, machines, STAGE_CODES)
+        tool_id, tool_name, _warn = resolve_tool(m, machines, STAGE_CODES)
         # parent：**core 的语义优先，空就是空**。
         # ⚠️ 原实现是 `m.get("core_parent_run_id") or run_rows[-1][0]`（"导出顺序即执行顺序"）——
         #    这在"一个 batch 一次导出"的旧假设下勉强成立，但对**并存试验**（如 AR50-T1 的 6 条
@@ -527,6 +567,14 @@ def build_process_card(project: dict, purpose: str = "", operator: str = "",
                      f"subtype={u['subtype'] or '—'}）：{u['reason']}")
         L.append("")
 
+    warns = export_warnings(project, lib)
+    if warns:
+        L.append(f"> ⚠️ **导出告警（{len(warns)} 条）** —— 落 core 时会与画布上看着的不一样，请先处理：")
+        L.append(">")
+        for w in warns:
+            L.append(f"> - `{w['subject']}`：{w['message']}")
+        L.append("")
+
     # 逐工步
     L.append("## 步骤明细")
     L.append("")
@@ -544,7 +592,7 @@ def build_process_card(project: dict, purpose: str = "", operator: str = "",
                  + (f" ｜ 机台：{m.get('machine_name')}" if m.get("machine_name") else ""))
         # 机台口径（2026-09-14）：卡上断言的是**落 core 的那个机台号**。画布机台名与应用库显示名
         # 是两套字面量，过去卡上只有前者 ⇒ 人看不出这条 run 会被记到哪台机器名下。
-        _tid, _tname = resolve_tool(m, machines, STAGE_CODES)
+        _tid, _tname, _warn = resolve_tool(m, machines, STAGE_CODES)
         L.append(f"- 机台口径（core）：`{_tid}` · {_tname}")
         # 检测节点：**写清测的是哪条 run**（B+ 口径：检测 ＝ 对上游 run 的一次测量）。
         # 这一行是"游离于体系之外"的正面回答 —— 卡上不再是一个孤零零的 SEM，而是"测的是谁"。
@@ -656,6 +704,8 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
             "purpose": purpose, "operator": operator,
             "runs": len(run_rows), "planned_measurements": len(meas_rows),
             "unmapped_nodes": unmapped_modules(project, lib),   # 非空 = 有节点没进包,须处理
+            # 机台口径 / 批次号的告警：非空 = 落 core 会与画布上看着的不一样（不静默）
+            "warnings": export_warnings(project, lib),
         }, ensure_ascii=False, indent=2).encode(),
         "flow.json": json.dumps(project, ensure_ascii=False, indent=2).encode(),
         "batches.csv": _csv_bytes(

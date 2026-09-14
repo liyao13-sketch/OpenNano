@@ -108,6 +108,9 @@ export const en = {
   "alert.appendDateSrc": "run date source:",
   "alert.appendSavedTo": "written to:",
   "alert.appendNote": "manifest.source=tool-append ⇒ not skipped by the core-slice rule; existing sources win, old rows are never overwritten.",
+  // 口径告警（后端 export_warnings 原样带出：机台未登记 / 工程名派生出幻影批次）——
+  // ⚠️ 这些是**数据口径**问题，不写进弹窗就等于静默（本项目最忌讳的病）。
+  "alert.appendWarn": "⚠️ Exported, but deal with the following before it lands in core:",
   "prompt.packPath": "Experiment package path (folder or zip, e.g. ~/Downloads/AR50-T1):",
   "alert.workbookDone": "core workbook exported ({size} KB) — core 9 tables + quantity names + canvas (core stays authoritative)",
   "legend.family": "family",

@@ -29,7 +29,7 @@ from pathlib import Path
 from opennano_config import CORE_DIR      # server/ 在 sys.path 上（main 已保证）
 from . import form_contract as fc
 from .core_vocab import resolve_tool
-from .expack import STAGE_CODES
+from .expack import STAGE_CODES, export_warnings
 
 #: core 九表（列名照 core_schema，只读用）
 CORE_TABLES = ("batches", "samples", "runs", "steps", "measurements",
@@ -156,7 +156,7 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
             date = now
             date_src[rid] = "**未设计划日期 ⇒ 退回导出当天，请核对**"
         # 机台口径与整包导出**同一处解析**（2026-09-14）：写库内显示名会把机台归属记错。
-        tool_id, tool_name = resolve_tool(m, machines, STAGE_CODES)
+        tool_id, tool_name, _warn = resolve_tool(m, machines, STAGE_CODES)
         run_rows.append([rid, m.get("core_batch_id") or batch,
                          sample, stage,
                          m.get("core_stage_seq", ""), date,
@@ -256,6 +256,8 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
             z.writestr(f"{batch}_append/{n}", d)
     return buf.getvalue(), {
         "ok": True, "batch_id": batch, "new_runs": new,
+        # 机台口径 / 批次号告警（与整包导出同一处判定；空 = 无话说）
+        "warnings": export_warnings(project, lib),
         "sample_id_source": sample_src, "date_source": date_src,
         "stage_seq_source": stage_src,
         "runs": len(run_rows), "steps": len(step_rows),

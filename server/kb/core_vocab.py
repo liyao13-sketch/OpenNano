@@ -63,28 +63,53 @@ def _machine_match(m: dict, machines: list[dict]) -> dict | None:
 
 
 def resolve_tool(m: dict, machines: list[dict] | None = None,
-                 stage_codes=()) -> tuple[str, str]:
-    """画布模块 → `(tool_id, tool 显示名)`。**导出侧唯一入口**（`expack` / `append_pack` 共用）。
+                 stage_codes=()) -> tuple[str, str, str]:
+    """画布模块 → `(tool_id, tool 显示名, 告警)`。**导出侧唯一入口**（`expack` / `append_pack` 共用）。
 
     `tool_id` 解析顺序：
       1. `m["core_tool_id"]` —— 从 core 导入时写入（与 `core_run_id`/`core_recipe_id` 同一套往返）。
-         **core 的记录优先**：已入库的 run，机台就是 core 里那台，画布上改机台不改记录；
-      2. 应用库机台档案的 `tool_id` —— 画布上新选的机台（这是库与 core 的共同口径）；
+         **core 的记录优先**：已入库的 run，机台就是 core 里那台，画布上改机台不改记录。
+         ⚠️ 这一路**照抄、不校验登记**：它是**记录**（未登记也是 core 自己的事，由数据线的闸报出来），
+         我们不能替 core 改记录；
+      2. 应用库机台档案的 `tool_id` —— 画布上新选的机台。⚠️ **只认已登记的**（`∈ TOOL_DISPLAY`）：
+         库内标签**不是** core 口径，冒充就是编（实测库里真有未登记的：`RIBE-鲁汶`/`MA6`）。
+         若数据线闸 ⑤ 拒收未登记 `tool_id`，冒充的结果是**整包被拒**；
       3. 哨兵 `UNKNOWN`（**不留空** —— 空的语义是"漏填"，与"机台未记录"必须分得开）。
     `stage_codes` 非空时再兜一道：**撞 stage 词的绝不写进 `tool_id`**（那是"把工序名当机台号"）。
 
     显示名解析顺序：core 原值（`core_tool`，且必须与最终 `tool_id` 同源）→ `TOOL_DISPLAY`
     → 库内机台名 → 哨兵显示名。**一个 `tool_id` 在一个包里只能有一个显示名**（数据线机台闸 ③）。
+
+    第三条 = 人类可读告警（空串＝无话说）。**调用方必须把它带出去**（卡 / manifest / 摘要），
+    否则"机台没登记"这件事就是静默的 —— 那正是这套闸要治的病。
     """
     machines = machines or []
     core_tid = (m.get("core_tool_id") or "").strip()
     core_name = (m.get("core_tool") or "").strip()
     mc = None
+    note = ""
     tid = core_tid
     if not tid:
         mc = _machine_match(m, machines)
-        tid = (mc.get("tool_id") or "").strip() if mc else ""
-    if not tid or (stage_codes and tid in stage_codes):
+        cand = (mc.get("tool_id") or "").strip() if mc else ""
+        if cand and cand in TOOL_DISPLAY and not (stage_codes and cand in stage_codes):
+            tid = cand
+        else:
+            tid = TOOL_ID_SENTINEL
+            if mc is not None:
+                label = (mc.get("name") or "").strip() or "（无名机台）"
+                if not cand:
+                    note = (f"机台 `{label}` 在应用库里没填 `tool_id`（core 机台号）⇒ 本 run 的 "
+                            f"`tool_id` 落哨兵 `{TOOL_ID_SENTINEL}`")
+                else:
+                    note = (f"机台 `{label}` 的 `tool_id='{cand}'` **不在 core 的 `TOOL_DISPLAY` 里**"
+                            f"（数据线机台闸 ⑤ 会拒收）⇒ 本 run 的 `tool_id` 落哨兵 `{TOOL_ID_SENTINEL}`；"
+                            f"要用真机台号请先把它登记进 `core_schema.TOOL_DISPLAY`")
+    elif stage_codes and tid in stage_codes:
+        # core 原值撞 stage 词（历史遗留/外部包）：仍不许写出去（② 是**格式**问题，与登记无关）
+        note = f"`core_tool_id='{tid}'` 撞 stage 代号 ⇒ 改落哨兵 `{TOOL_ID_SENTINEL}`"
+        tid = TOOL_ID_SENTINEL
+    if not tid:
         tid = TOOL_ID_SENTINEL
     # 显示名：core 原值只在"就是 core 那个 tool_id"时才算数（换了机台 ⇒ 旧显示名不许跟过来）
     name = core_name if (core_tid and tid == core_tid and core_name) else ""
@@ -92,4 +117,4 @@ def resolve_tool(m: dict, machines: list[dict] | None = None,
         name = tool_display(tid)
     if not name and mc is not None:
         name = (mc.get("name") or "").strip()
-    return tid, (name or TOOL_UNKNOWN_DISPLAY)
+    return tid, (name or TOOL_UNKNOWN_DISPLAY), note

@@ -42,7 +42,8 @@ from batch_fixtures import batch_rows, run_rows, sample_rows
 from kb.append_pack import build_append_pack
 from kb.core_vocab import (TOOL_DISPLAY, TOOL_ID_SENTINEL, TOOL_UNKNOWN_DISPLAY,
                            resolve_tool)
-from kb.expack import STAGE_CODES, build_expack, extract_rows, parse_expack
+from kb.expack import (STAGE_CODES, build_expack, export_warnings, extract_rows,
+                       parse_expack)
 
 BATCH = "TID-T1"
 TOOL_COL, TOOL_ID_COL = 8, 9            # runs.csv 列序（见 expack.build_expack 的表头）
@@ -324,8 +325,118 @@ def test_exported_package_passes_the_four_gates_end_to_end():
 def test_resolve_tool_prefers_id_over_a_stale_display_name():
     """机台档案按 **id** 认（id 是我们自己发的，最硬）；名字只是回退，且**认不到就哨兵**。"""
     lib = _Lib()
-    tid, name = resolve_tool({"machine_id": "mc_drie", "machine_name": "写错了的名字"},
-                             lib.machines(), STAGE_CODES)
+    tid, name, _ = resolve_tool({"machine_id": "mc_drie", "machine_name": "写错了的名字"},
+                                lib.machines(), STAGE_CODES)
     assert (tid, name) == ("RIE-400iPB", TOOL_DISPLAY["RIE-400iPB"])
-    tid2, name2 = resolve_tool({"core_tool_id": "SEM"}, lib.machines(), STAGE_CODES)
+    tid2, name2, _ = resolve_tool({"core_tool_id": "SEM"}, lib.machines(), STAGE_CODES)
     assert (tid2, name2) == (TOOL_ID_SENTINEL, TOOL_UNKNOWN_DISPLAY)   # ② 兜底：stage 名绝不入 tool_id
+
+
+# ================================================================
+# 数据线 2026-09-14 加的第 ⑤ 条闸：`tool_id ∉ TOOL_DISPLAY` ⇒ **拒收整包**
+# ================================================================
+
+class _Lib2(_Lib):
+    """在 `_Lib` 上补齐**真实库里那两台"未登记机台"**（2026-09-14 实测 `~/.opennano/library.json`）：
+
+      · `RIBE-鲁汶`：库内 `tool_id='RIBE-鲁汶'`，core 的 `TOOL_DISPLAY` 里**没有**；
+      · `MA6`：库内 `tool_id='MA6'`，既没登记，又**与 stage 代号同名** ⇒ 连数据线闸 ② 也会拦。
+
+    这两台不是编的：它们就在owner的应用库里。数据线加第 ⑤ 条闸后，"把库内标签当 core 机台号"
+    会从**静默记错**变成**整包拒收** —— 两种都不能接受 ⇒ 导出必须落哨兵 **并出声**。
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.data["machines"] = self.data["machines"] + [
+            {"id": "mc_ribe", "name": "RIBE-鲁汶", "tool_id": "RIBE-鲁汶"},
+            {"id": "mc_ma6", "name": "MA6", "tool_id": "MA6"},
+        ]
+
+
+def test_unregistered_library_tool_id_falls_back_to_the_sentinel():
+    """库内机台的 `tool_id` **未登记** ⇒ 落哨兵（不许把应用库的标签冒充 core 机台号）。
+
+    ⚠️ 与"core 原值"分开处理：`core_tool_id` 是**记录**（照抄，哪怕未登记 —— 那是 core 自己的事，
+    由闸报出来）；库内 `tool_id` 是我们这边的**标签**，冒充 core 口径就是编。
+    """
+    proj = {"name": BATCH, "edges": [],
+            "modules": [_mod("m1", "RIE", machine_id="mc_ribe", machine_name="RIBE-鲁汶")]}
+    row = _runs(proj, _Lib2())[0]
+    assert row[TOOL_ID_COL] == TOOL_ID_SENTINEL
+    assert row[TOOL_COL] == TOOL_UNKNOWN_DISPLAY
+    assert _gate([row]) == []
+
+
+def test_machine_named_like_a_stage_is_still_blocked():
+    """`MA6` 这种"机台名 == stage 代号"的机器：`tool_id` 绝不能写 `MA6`（闸 ② + ⑤ 双拦）。"""
+    proj = {"name": BATCH, "edges": [],
+            "modules": [_mod("m1", "UV Exposure", machine_id="mc_ma6", machine_name="MA6")]}
+    row = _runs(proj, _Lib2())[0]
+    assert row[3] == "MA6"                       # stage 是 MA6（对）
+    assert row[TOOL_ID_COL] == TOOL_ID_SENTINEL  # 机台号不能是 MA6
+    assert _gate([row]) == []
+
+
+def test_unregistered_machine_is_loud_not_silent():
+    """**不许静默丢机台名**：落哨兵的同时要把"这台机 core 没登记"讲出来（卡/manifest 里看得见）。"""
+    proj = {"name": BATCH, "edges": [],
+            "modules": [_mod("m1", "RIE", machine_id="mc_ribe", machine_name="RIBE-鲁汶")]}
+    warns = export_warnings(proj, _Lib2())
+    kinds = {w["kind"] for w in warns}
+    assert "unregistered_machine" in kinds
+    hit = next(w for w in warns if w["kind"] == "unregistered_machine")
+    assert "RIBE-鲁汶" in hit["message"] and "UNKNOWN" in hit["message"]
+
+
+def test_exported_rows_pass_the_data_line_gate():
+    """**跨线判据（效力最强的一条）**：把我们的导出结果**直接喂给数据线的** `validate_tool_ids`。
+
+    为什么要这一条：他们的闸是会**长**的 —— 第 ⑤ 条（`tool_id ∉ TOOL_DISPLAY` ⇒ 拒收）就是
+    2026-09-14 联调后加的，而"应用库里有未登记机台"这件事**只有这条判据能自动照出来**。
+    今后他们再加闸，这条会先红一次，不必等下一轮联调。
+    """
+    p = WS_ROOT / "个人空间/18_工艺数据资产/03_实验数据/ingest/core_schema.py"
+    if not p.exists():
+        pytest.skip("工作区里没有数据线的 core_schema.py（评测环境）")
+    spec = importlib.util.spec_from_file_location("_core_schema_gate_probe", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    proj = {"name": BATCH, "edges": [],
+            "modules": [_mod("m1", "PECVD", machine_id="mc_pecvd", machine_name="PECVD"),
+                        _mod("m2", "DRIE (Bosch)", machine_id="mc_drie", machine_name="DRIE-Bosch"),
+                        _mod("m3", "RIE", machine_id="mc_ribe", machine_name="RIBE-鲁汶"),
+                        _mod("m4", "UV Exposure", machine_id="mc_ma6", machine_name="MA6"),
+                        _mod("m5", "ICP Etch", machine_id="mc_sentech", machine_name="ICP-Sentech"),
+                        _mod("m6", TEM_TMPL, subtype="tem"),
+                        _mod("m7", "Plasma Strip", machine_id="mc_rie10", machine_name="RIE10NR")]}
+    rows = [{"run_id": r[0], "tool": r[TOOL_COL], "tool_id": r[TOOL_ID_COL],
+             "stage": r[3]} for r in _runs(proj, _Lib2())]
+    assert rows, "一条 run 都没导出来，判据本身失效"
+    assert mod.validate_tool_ids(rows) == [], (
+        f"我们导出的包会被他们的机台闸拒收：{mod.validate_tool_ids(rows)}")
+
+
+# ---------------------------------------------------------------- 批次号（幻影批次）
+
+def test_project_name_that_mints_a_phantom_batch_is_reported():
+    """**工程名当批次号**：`AR50-T1-明天` 这种工作名 + 一批属于 `AR50-T1` 的 run ⇒
+    新节点会被登记成**根本不存在的批次**（数据线 2026-09-14 回执③里正好问到这个）。
+    判定："工程里有 run 属于别的批次，而工程名不是那个批次" ⇒ **出声**（不许静默造批次）。
+    """
+    proj = {"name": "AR50-T1-明天", "edges": [],
+            "modules": [_mod("m1", "PECVD", core_run_id="AR50-T1-PECVD-0001",
+                             core_batch_id="AR50-T1", core_tool_id="PECVD-SAMCO"),
+                        _mod("m2", "RIE")]}
+    warns = export_warnings(proj)
+    hit = next((w for w in warns if w["kind"] == "batch_mismatch"), None)
+    assert hit is not None, warns
+    assert "AR50-T1" in hit["message"] and "AR50-T1-明天" in hit["message"]
+
+
+def test_no_batch_warning_when_the_project_name_is_the_batch():
+    """反例（判据要两向）：工程名**就是**批次号 ⇒ 不出声（否则告警会变成噪音，没人看）。"""
+    proj = {"name": "AR50-T1", "edges": [],
+            "modules": [_mod("m1", "PECVD", core_run_id="AR50-T1-PECVD-0001",
+                             core_batch_id="AR50-T1")]}
+    assert [w for w in export_warnings(proj) if w["kind"] == "batch_mismatch"] == []

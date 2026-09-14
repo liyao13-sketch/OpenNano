@@ -32,12 +32,14 @@ async function j<T>(url: string, opts?: RequestInit): Promise<T> {
 }
 
 /** POST 取文件并触发下载(文件名取自响应头)。返回字节数。 */
-export async function download(url: string, body: any): Promise<number> {
+export async function download(url: string, body: any,
+                               sink?: (h: Headers) => void): Promise<number> {
   const r = await fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!r.ok) throw new Error(await errorText(r))     // 同上：导出失败也要说得出原因
+  if (sink) sink(r.headers)      // 后端把"口径告警"放在响应头里带回（如 X-Export-Warn）
   const cd = r.headers.get('Content-Disposition') || ''
   const star = /filename\*=UTF-8''([^;]+)/.exec(cd)
   const m = /filename="?([^";]+)"?/.exec(cd)

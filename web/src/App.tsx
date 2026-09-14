@@ -986,15 +986,25 @@ export default function App() {
   const exportExpack = async () => {
     try {
       const purpose = prompt(t('prompt.purposePack'), '') ?? ''
+      // 后端把口径告警（机台未登记 / 工程名派生出幻影批次）放在 X-Export-Warn 里带回 —— 不静默
+      let warn = ''
       const size = await download('/api/expack/export', {
         name: projectName, purpose, core_eq_state: (window as any).__dshEqState || [],
         modules: nodes.map(n => n.data.module as Module),
         edges: edges.map(e => ({ src: e.source, dst: e.target })),
+      }, h => {
+        const raw = h.get('X-Export-Warn')
+        if (!raw) return
+        try {
+          warn = (JSON.parse(decodeURIComponent(raw)) || [])
+            .map((w: any) => `${w.kind === 'unregistered_machine' ? '🔧' : '📦'} ${w.message}`).join('\n')
+        } catch { warn = '' }
       })
       pushLog('edit', t('log.exportPack', { name: projectName }))
       alert(t('alert.packDone', { size: (size / 1024).toFixed(0) }) + '\n\n'
         + t('alert.packBody1', { project: projectName, batch: projectName }) + '\n'
         + t('alert.packBody2') + '\n'
+        + (warn ? `\n${t('alert.appendWarn')}\n${warn}\n` : '')
         + t('alert.packBody3'))
     } catch (e: any) { alert(t('alert.exportFail', { msg: e.message })) }
   }
@@ -1037,10 +1047,13 @@ export default function App() {
       pushLog('edit', t('log.exportAppend', { name: projectName, n: pv.new_runs.length }))
       const dates = Object.entries(info.date_source || {}).map(([k, v]: any) => `  ${k}: ${v}`).join('\n')
       const samples = Object.entries(info.sample_id_source || {}).map(([k, v]: any) => `  ${k}: ${v}`).join('\n')
+      // 口径告警（后端 export_warnings）：机台未登记 / 工程名派生出幻影批次 —— 不静默
+      const warns = (info.warnings || []).map((w: any) => `${w.kind === 'unregistered_machine' ? '🔧' : '📦'} ${w.message}`).join('\n')
       alert(t('alert.appendDone', { size: (blob.size / 1024).toFixed(1) }) + '\n\n'
         + t('alert.appendRuns', { n: pv.new_runs.length, list: pv.new_runs.join(', ') }) + '\n'
         + (samples ? `\n${t('alert.appendSampleSrc')}\n${samples}\n` : '')
         + (dates ? `\n${t('alert.appendDateSrc')}\n${dates}\n` : '')
+        + (warns ? `\n${t('alert.appendWarn')}\n${warns}\n` : '')
         + (info.saved_to ? `\n${t('alert.appendSavedTo')} ${info.saved_to}\n` : '')
         + `\n${t('alert.appendNote')}`)
     } catch (e: any) { alert(t('alert.exportFail', { msg: e.message })) }
