@@ -7,6 +7,10 @@ export interface Module {
   equipment_id: string;
   equipment_name?: string;
   machine_id?: string; machine_name?: string; family?: string; family_label?: string;
+  /** core 口径的机台号 / 显示名（`core_schema.TOOL_DISPLAY` 那套字面量）。
+   *  画布的 `machine_name` 是**应用库显示名**（`DRIE-Bosch` / `PECVD`），与 core 机台号是两套；
+   *  导出走 `core_tool_id` 优先，缺省才回落到库内机台档案（见 `kb/core_vocab.resolve_tool`）。 */
+  core_tool_id?: string; core_tool?: string;
   param_inputs: string[]; param_outputs: string[]; formulas: Record<string, string>;
   material: Record<string, any>; key_values: Record<string, number>;
   doe: any; annotations: any[]; sim_result: any;

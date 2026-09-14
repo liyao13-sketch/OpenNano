@@ -28,6 +28,8 @@ from pathlib import Path
 
 from opennano_config import CORE_DIR      # server/ 在 sys.path 上（main 已保证）
 from . import form_contract as fc
+from .core_vocab import resolve_tool
+from .expack import STAGE_CODES
 
 #: core 九表（列名照 core_schema，只读用）
 CORE_TABLES = ("batches", "samples", "runs", "steps", "measurements",
@@ -93,7 +95,7 @@ def _module_by_run(project: dict) -> dict[str, dict]:
 
 
 def build_append_pack(project: dict, purpose: str = "", operator: str = "",
-                      batch: str = "") -> tuple[bytes | None, dict]:
+                      batch: str = "", lib=None) -> tuple[bytes | None, dict]:
     """画布 → **追加包** zip（只含 core 里还没有的 run）。
 
     返回 (zip 字节 | None, 摘要)。没有新 run 时返回 (None, {...reason})。
@@ -106,6 +108,7 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
                       "reason": "该工程没有「尚未入库」的 run（core 里都已有）⇒ 无需导出追加包"}
     batch = batch or (new[0].rsplit("-", 2)[0] if len(new[0].rsplit("-", 2)) == 3 else "APPEND")
     mods = _module_by_run(project)
+    machines = lib.machines() if lib else []
     now = datetime.now().strftime("%Y-%m-%d")
 
     # ---- runs：只带新 run；parent/stage_seq 照画布（工具算好的值）
@@ -152,10 +155,12 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
         else:
             date = now
             date_src[rid] = "**未设计划日期 ⇒ 退回导出当天，请核对**"
+        # 机台口径与整包导出**同一处解析**（2026-09-14）：写库内显示名会把机台归属记错。
+        tool_id, tool_name = resolve_tool(m, machines, STAGE_CODES)
         run_rows.append([rid, m.get("core_batch_id") or batch,
                          sample, stage,
                          m.get("core_stage_seq", ""), date,
-                         "", "", m.get("equipment_name") or stage, m.get("machine_name") or "",
+                         "", "", tool_name, tool_id,
                          m.get("core_recipe_id") or "", operator or "",
                          purpose or "", parent,
                          "", "", "planned", m.get("comment") or ""])

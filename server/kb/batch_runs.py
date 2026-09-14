@@ -101,7 +101,9 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
             "run_nature": (m.get("core_run_nature") or m.get("run_nature")
                            or f.get("run_nature") or ""),
             "status": m.get("run_state") or f.get("status") or "planned",
-            "tool_id": m.get("machine_name") or f.get("tool_id") or "",
+            # 机台口径：core 原值优先（画布 `machine_name` 是应用库显示名，不是 core 机台号）
+            "tool_id": (m.get("core_tool_id") or m.get("machine_name")
+                        or f.get("tool_id") or ""),
             "date": (m.get("core_date") or f.get("date") or ""),
             "title": m.get("name") or "",
             "note": m.get("comment") or "",

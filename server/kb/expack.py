@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import core_source as core
+from .core_vocab import TOOL_ID_SENTINEL, resolve_tool
 from .result_fields import field_meta
 
 # ---- stage ⇄ 画布模板 ----
@@ -54,6 +55,10 @@ STAGE_TO_TEMPLATE: dict[str, tuple[str, str]] = {
     "CV": ("cv", "电容-电压（C-V）"), "IR": ("ir", "红外热成像"),
 }
 TEMPLATE_TO_STAGE = {tmpl: st for st, (_sub, tmpl) in STAGE_TO_TEMPLATE.items()}
+
+#: 全部 stage 代号（= core_schema.STAGES 的 28 个；跨线逐字判据钉住）——
+#: 用途只有一个：**拦住"把 stage 名当机台号"写进 `tool_id`**（数据线机台闸 ② 类错误）。
+STAGE_CODES = frozenset(STAGE_TO_TEMPLATE)
 
 # 工艺大类 → 缺省 stage(模板名匹配不到时)
 CATEGORY_TO_STAGE = {"etch": "RIE", "deposition": "PECVD", "graphic": "EBL",
@@ -216,6 +221,7 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
     """
     batch = _sanitize_batch(project.get("name", "EXP"))
     modules = project.get("modules", [])
+    machines = lib.machines() if lib else []       # 机台口径解析用（画布选的机台 → core tool_id）
     now = datetime.now().strftime("%Y-%m-%d")
     run_rows, step_rows, meas_rows = [], [], []
     stage_counter: dict[str, int] = {}
@@ -251,7 +257,11 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         m.setdefault("core_batch_id", batch)
         m.setdefault("core_stage", stage)
         m.setdefault("core_stage_seq", seq_in_stage)
-        tool_id = m.get("machine_name") or ""
+        # 机台口径：**只从这里出**（2026-09-14）。过去的 `tool_id = m.get("machine_name") or ""` 写的是
+        # 应用库的**显示名**（`DRIE-Bosch` / `PECVD` / `ICP-鲁汶`）—— 其中 `PECVD` 正好是 stage 名
+        # （撞数据线机台闸 ②），其余看着合法却是**错的机台号**（`RIE-400iPB` / `ICP-PishowA` 才是真值），
+        # 会静默入库把归属记错。解析顺序与理由见 `kb/core_vocab.resolve_tool`。
+        tool_id, tool_name = resolve_tool(m, machines, STAGE_CODES)
         # parent：**core 的语义优先，空就是空**。
         # ⚠️ 原实现是 `m.get("core_parent_run_id") or run_rows[-1][0]`（"导出顺序即执行顺序"）——
         #    这在"一个 batch 一次导出"的旧假设下勉强成立，但对**并存试验**（如 AR50-T1 的 6 条
@@ -270,7 +280,7 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         parent = m.get("core_parent_run_id") or ""
         run_rows.append([rid, batch, m.get("core_sample_id") or "", stage,
                          m.get("core_stage_seq", seq_in_stage), now,
-                         "", "", m.get("equipment_name") or stage, tool_id,
+                         "", "", tool_name, tool_id,
                          m.get("core_recipe_id") or "", operator or "", purpose or "",
                          parent, "", "", "planned",
                          m.get("comment") or ""])
@@ -479,6 +489,7 @@ def build_process_card(project: dict, purpose: str = "", operator: str = "",
     run_rows, step_rows, meas_rows, stage_counter, batch = extract_rows(
         project, purpose, operator, lib)
     modules = [m for m in project.get("modules", []) if m.get("core_run_id")]
+    machines = lib.machines() if lib else []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     L: list[str] = []
     L.append(f"# {batch} · 实验流程卡")
@@ -531,6 +542,10 @@ def build_process_card(project: dict, purpose: str = "", operator: str = "",
         L.append("")
         L.append(f"- 设备：{m.get('equipment_name') or '—'}"
                  + (f" ｜ 机台：{m.get('machine_name')}" if m.get("machine_name") else ""))
+        # 机台口径（2026-09-14）：卡上断言的是**落 core 的那个机台号**。画布机台名与应用库显示名
+        # 是两套字面量，过去卡上只有前者 ⇒ 人看不出这条 run 会被记到哪台机器名下。
+        _tid, _tname = resolve_tool(m, machines, STAGE_CODES)
+        L.append(f"- 机台口径（core）：`{_tid}` · {_tname}")
         # 检测节点：**写清测的是哪条 run**（B+ 口径：检测 ＝ 对上游 run 的一次测量）。
         # 这一行是"游离于体系之外"的正面回答 —— 卡上不再是一个孤零零的 SEM，而是"测的是谁"。
         if is_metrology_stage(stage_from_run_id(rid) or m.get("core_stage") or ""):
@@ -874,6 +889,13 @@ def parse_expack(path: Path, lib) -> dict:
             m["core_sample_id"] = r["sample_id"]
         if r.get("recipe_id"):
             m["core_recipe_id"] = r["recipe_id"]
+        # 机台口径也往返（2026-09-14）：画布的 `machine_name` 是**应用库显示名**，
+        # 与 core 的 `tool_id`/`tool` 是两套字面量 —— 不把 core 原值带回来，再导出就只能
+        # 拿显示名去顶（`DRIE-Bosch` 顶掉 `RIE-400iPB`，静默把机台归属记错）。
+        if (r.get("tool_id") or "").strip():
+            m["core_tool_id"] = r["tool_id"].strip()
+        if (r.get("tool") or "").strip():
+            m["core_tool"] = r["tool"].strip()
         if r.get("stage_seq"):
             m["core_stage_seq"] = r["stage_seq"]
         if r.get("date"):

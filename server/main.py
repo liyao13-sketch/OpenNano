@@ -504,7 +504,7 @@ def api_expack_append(req: AppendPackReq):
     proj = {"name": req.project_name, "modules": mods, "edges": req.edges,
             "core_eq_state": req.core_eq_state}
     blob, info = ap.build_append_pack(proj, purpose=req.purpose,
-                                      operator=req.operator, batch=req.batch)
+                                      operator=req.operator, batch=req.batch, lib=LIB)
     if blob is None:
         return info                                   # 没有新 run：回 JSON 说明，不产空包
     name = f"{info['batch_id']}_append.zip"

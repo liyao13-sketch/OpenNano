@@ -26,6 +26,8 @@ import argparse
 import json
 from pathlib import Path
 
+from . import core_vocab
+
 
 def _rows() -> tuple[list[dict], dict[str, list[dict]]]:
     from .batch_runs import core_runs_path
@@ -68,10 +70,10 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in (s or "").lower() if ch.isalnum())
 
 
-#: core 里「机台未记录 / 尚未定」的**唯一哨兵**（数据线 `core_schema.TOOL_ID_SENTINEL` 的同名值）。
-#: ⚠️ 我们**不能 import 他们的模块**（产品代码不许依赖用户数据目录），所以这里复写一份常量，
-#: 并在跨线逐字判据里对齐（`tests/test_machine_defaults.py`）。
-TOOL_ID_SENTINEL = "UNKNOWN"
+#: core 里「机台未记录 / 尚未定」的**唯一哨兵** —— 工具侧只有 `kb/core_vocab.py` 一处字面量
+#: （2026-09-14 起：`resolve_tool` 也要用它，两处复写必然漂移）。跨线逐字判据见
+#: `tests/test_tool_identity.py` / `tests/test_machine_defaults.py`。
+TOOL_ID_SENTINEL = core_vocab.TOOL_ID_SENTINEL
 
 
 def _match_machine(tool_id: str, machines: list[dict]) -> dict | None:

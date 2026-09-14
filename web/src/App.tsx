@@ -1099,7 +1099,7 @@ export default function App() {
         }
         if (op.machine_name) {
           const mc = (library?.machines || []).find((x: any) => x.name === op.machine_name || x.tool_id === op.machine_name)
-          if (mc) { m.machine_id = mc.id; m.machine_name = mc.name }
+          if (mc) { m.machine_id = mc.id; m.machine_name = mc.name; m.core_tool_id = mc.tool_id || '' }
           else pushLog('warn', t('log.noMachine', { name: op.machine_name }))
         }
         if (op.params && Object.keys(op.params).length) m.params = { ...(m.params || {}), ...op.params }
@@ -1162,19 +1162,21 @@ export default function App() {
   useEffect(() => {
     const mid = rawM?.machine_id
     const nm = rawM?.machine_name
+    const tid = rawM?.core_tool_id            // core 口径优先：machine_name 是库内显示名，常常对不上
     const st = rawM?.core_stage || rawM?.subtype || ''
-    if (!rawM || (!mid && !nm)) { setMachDef(null); return }
+    if (!rawM || (!mid && !nm && !tid)) { setMachDef(null); return }
     let alive = true
     api.machineDefaults(/drie/i.test(String(st)) ? 'DRIE' : '').then(d => {
       if (!alive || !d?.available) { setMachDef(null); return }
       const g = (d.groups || []).find((x: any) => x.machine_id && x.machine_id === mid)
+        || (d.groups || []).find((x: any) => tid && x.tool_id === tid)
         || (d.groups || []).find((x: any) => x.tool_id === nm || x.model === nm)
         || null
       setMachDef(g)
       setMachPhase(g?.phases?.length === 1 ? g.phases[0] : '')
     }).catch(() => setMachDef(null))
     return () => { alive = false }
-  }, [rawM?.id, rawM?.machine_id, rawM?.machine_name])
+  }, [rawM?.id, rawM?.machine_id, rawM?.machine_name, rawM?.core_tool_id])
 
   const m: Module | undefined = rawM && {
     ...rawM,
@@ -1629,7 +1631,9 @@ export default function App() {
                 <div className="row" style={{ marginTop:6 }}>
                   <select value={m.machine_id || ''} onChange={e => {
                     const mc = (library?.machines || []).find((x: any) => x.id === e.target.value)
-                    updateModule({ machine_id: e.target.value, machine_name: mc?.name || '' })
+                    // core 口径一起带上：导出/追加包据此写 `tool_id`（库内显示名不是 core 机台号）
+                    updateModule({ machine_id: e.target.value, machine_name: mc?.name || '',
+                                   core_tool_id: mc?.tool_id || '' })
                   }}>
                     <option value="">{t('panel.machine')}</option>
                     {(library?.machines || [])
