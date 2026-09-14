@@ -166,7 +166,7 @@ def test_调试线端点_有视图给数据_没有也给原因(client, monkeypat
     con.execute('CREATE VIEW v_tune_line AS SELECT "T1" AS tune_id, "1" AS tune_step,'
                 ' "X-ICP-0001" AS run_id, "2026-09-01" AS date, "ICP" AS stage,'
                 ' "t" AS tool, "s" AS sample_id, NULL AS t_set_s, NULL AS t_dwell_s,'
-                ' 750 AS source_w, 150 AS bias_w, NULL AS bias_w_actual,'
+                ' 750 AS source_w, 150 AS bias_w,'
                 ' NULL AS chf3_sccm, NULL AS ar_sccm, NULL AS o2_sccm, NULL AS cf4_sccm,'
                 ' NULL AS sf6_sccm, NULL AS cd_delta_nm, NULL AS depth_nm, NULL AS er_nm_min,'
                 ' NULL AS selectivity, NULL AS film_thickness_nm, NULL AS stress_mpa,'

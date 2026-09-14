@@ -20,7 +20,10 @@ import sqlite3
 from pathlib import Path
 
 #: 视图列分两组（与数据线 v_tune_line 的列序一致；画图/制表都按这个分组）
-PARAM_COLS = ["t_set_s", "t_dwell_s", "source_w", "bias_w", "bias_w_actual",
+#: 参数轴列。⚠️ 2026-09-14：owner裁定**退掉 `bias_w_actual`**（与 `bias_w` 归一后同值 ⇒ 两列重复，
+#: 留着会让"参数轴"出现两个一模一样的列）。数据线同批改 `datasets_ar50.py` 的 param_json +
+#: `core_schema.py` 的视图定义 + 重跑；**两侧必须同批**，否则 `v_tune_line` 少一列、这里还去查它。
+PARAM_COLS = ["t_set_s", "t_dwell_s", "source_w", "bias_w",
               "chf3_sccm", "ar_sccm", "o2_sccm", "cf4_sccm", "sf6_sccm"]
 RESPONSE_COLS = ["cd_delta_nm", "depth_nm", "er_nm_min", "selectivity",
                  "film_thickness_nm", "stress_mpa", "refractive_index"]

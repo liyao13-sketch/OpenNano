@@ -12,26 +12,20 @@ import pytest
 from batch_fixtures import BATCH
 
 COLS = ["tune_id", "tune_step", "run_id", "date", "stage", "tool", "sample_id",
-        "t_set_s", "t_dwell_s", "source_w", "bias_w", "bias_w_actual",
+        "t_set_s", "t_dwell_s", "source_w", "bias_w",
         "chf3_sccm", "ar_sccm", "o2_sccm", "cf4_sccm", "sf6_sccm",
         "cd_delta_nm", "depth_nm", "er_nm_min", "selectivity",
         "film_thickness_nm", "stress_mpa", "refractive_index"]
 
 ROWS = [
     # TUNE1 四轮（照 AR50-T1 现状：step2 只有 depth、step3 全空）
-    (f"{BATCH}-ICP-TUNE1", "1", f"{BATCH}-ICP-0002", "2026-09-06", "ICP", "PishowA", f"{BATCH}-01-DIE4",
-     300, None, 750, 150, None, 45, 20, None, None, None, "639", None, None, None, None, None, None),
-    (f"{BATCH}-ICP-TUNE1", "2", f"{BATCH}-ICP-0003", "2026-09-06", "ICP", "PishowA", f"{BATCH}-01-DIE4",
-     300, None, 752, 205, None, 45, 20, None, None, None, None, "888.8", None, None, None, None, None),
-    (f"{BATCH}-ICP-TUNE1", "3", f"{BATCH}-ICP-0005", "2026-09-07", "ICP", "PishowA", f"{BATCH}-01-DIE4",
-     240, None, 749, 222, None, 45, 20, None, None, None, None, None, None, None, None, None, None),
-    (f"{BATCH}-ICP-TUNE1", "4", f"{BATCH}-ICP-0006", "2026-09-07", "ICP", "PishowA", f"{BATCH}-01-DIE4",
-     240, None, 793, 223, None, 45, 20, None, None, None, "114", None, "252", None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "1", f"{BATCH}-ICP-0002", "2026-09-06", "ICP", "PishowA", f"{BATCH}-01-DIE4", 300, None, 750, 150, 45, 20, None, None, None, "639", None, None, None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "2", f"{BATCH}-ICP-0003", "2026-09-06", "ICP", "PishowA", f"{BATCH}-01-DIE4", 300, None, 752, 205, 45, 20, None, None, None, None, "888.8", None, None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "3", f"{BATCH}-ICP-0005", "2026-09-07", "ICP", "PishowA", f"{BATCH}-01-DIE4", 240, None, 749, 222, 45, 20, None, None, None, None, None, None, None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "4", f"{BATCH}-ICP-0006", "2026-09-07", "ICP", "PishowA", f"{BATCH}-01-DIE4", 240, None, 793, 223, 45, 20, None, None, None, "114", None, "252", None, None, None, None),
     # 另一条扫描（只有 2 轮，都在 PECVD）
-    (f"{BATCH}-PECVD-TUNE1", "1", f"{BATCH}-PECVD-0001", "2026-09-01", "PECVD", "PECVD-1", f"{BATCH}-01",
-     None, None, None, None, None, None, None, None, None, None, None, None, None, None, "899.7", "-35.2", "1.4623"),
-    (f"{BATCH}-PECVD-TUNE1", "2", f"{BATCH}-PECVD-0002", "2026-09-02", "PECVD", "PECVD-1", f"{BATCH}-01",
-     None, None, None, None, None, None, None, None, None, None, None, None, None, None, "905.1", "-33.0", "1.4619"),
+    (f"{BATCH}-PECVD-TUNE1", "1", f"{BATCH}-PECVD-0001", "2026-09-01", "PECVD", "PECVD-1", f"{BATCH}-01", None, None, None, None, None, None, None, None, None, None, None, None, None, "899.7", "-35.2", "1.4623"),
+    (f"{BATCH}-PECVD-TUNE1", "2", f"{BATCH}-PECVD-0002", "2026-09-02", "PECVD", "PECVD-1", f"{BATCH}-01", None, None, None, None, None, None, None, None, None, None, None, None, None, "905.1", "-33.0", "1.4619"),
 ]
 
 
@@ -53,7 +47,7 @@ def db(tmp_path, monkeypatch):
     # 视图不可写 ⇒ 用表 + 同名视图替换：先建临时表插数，再重建视图为 SELECT *
     con.execute("DROP VIEW v_tune_line")
     con.execute(f'CREATE TABLE _tune_src ({coldef})')
-    con.executemany(f"INSERT INTO _tune_src VALUES ({','.join('?' * len(COLS))})", ROWS)
+    con.executemany(f"INSERT INTO _tune_src VALUES ({', '.join('?' * len(COLS))})", ROWS)
     con.execute("CREATE VIEW v_tune_line AS SELECT * FROM _tune_src")
     con.commit()
     con.close()

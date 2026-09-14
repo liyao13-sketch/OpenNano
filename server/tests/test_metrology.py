@@ -407,3 +407,25 @@ def test_classifier_calls_a_metrology_run_metrology_not_chain():
         br.runs_of_batch = orig
     assert got[f"{BATCH}-SEM-0001"] == "metrology", f"检测被推成了 {got}"
     assert got[f"{BATCH}-RIE-0001"] != "metrology"
+
+
+def test_cross_line_vocabulary_is_byte_identical():
+    """**跨线词表逐字比对**（顺序也算）—— 我们与数据线的 16 个表征代号必须一模一样。
+
+    这条是有来历的：2026-09-14 数据线发现**两侧 `METROLOGY_STAGES` 的 `PROFILE/STRESS` 顺序不同**
+    （内容相同、顺序不同），他们以我们为准改齐，并把"逐字比对"做成他们侧的机器判据
+    （`tool_id_guard_test.py` G 段）。**我们这侧也要有同一条** —— 否则下次漂移只有一侧会红。
+    ⚠️ 只读数据线的文件（`18_工艺数据资产/` 对我们只读）：缺失则跳过（评测/CI 环境没有它）。
+    """
+    import importlib.util
+    from conftest import WS_ROOT
+    p = WS_ROOT / "个人空间/18_工艺数据资产/03_实验数据/ingest/core_schema.py"
+    if not p.exists():
+        pytest.skip("工作区里没有数据线的 core_schema.py（评测环境）")
+    spec = importlib.util.spec_from_file_location("_core_schema_probe", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)                                  # 只读导入，不写任何东西
+    assert tuple(mod.METROLOGY_STAGES) == tuple(METROLOGY_STAGES), (
+        f"跨线词表不一致（顺序也算）：\n  我们 {tuple(METROLOGY_STAGES)}\n  他们 {tuple(mod.METROLOGY_STAGES)}")
+    assert set(METROLOGY_STAGES) <= set(mod.STAGES), "我们有代号没进他们的 STAGES"
+    assert len(mod.STAGES) == len(set(mod.STAGES)), "他们的 STAGES 有重复值"

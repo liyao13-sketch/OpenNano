@@ -9,13 +9,11 @@ import { useMemo, useState } from 'react'
 const PARAM_LABEL: Record<string, string> = {
   /* 参数键（core 键）→ 界面短标签。**键不翻**，只翻显示用的标签 */
   t_set_s: 't set (s)', t_dwell_s: 't dwell (s)', source_w: 'source W', bias_w: 'bias W',
-  bias_w_actual: 'bias actual', chf3_sccm: 'CHF₃', ar_sccm: 'Ar', o2_sccm: 'O₂',
   cf4_sccm: 'CF₄', sf6_sccm: 'SF₆',
 }
 const RESP_LABEL: Record<string, string> = {
   /* 量名词（core 键）→ 界面短标签。**键不翻**，只翻这些显示用标签 */
   t_set_s: 't set (s)', t_dwell_s: 't dwell (s)', source_w: 'source W', bias_w: 'bias W',
-  bias_w_actual: 'bias actual', chf3_sccm: 'CHF₃', ar_sccm: 'Ar', o2_sccm: 'O₂',
   cd_delta_nm: 'cd delta', depth_nm: 'depth', er_nm_min: 'etch rate',
   selectivity: 'selectivity', film_thickness_nm: 'thickness', stress_mpa: 'stress',
   refractive_index: 'n',
