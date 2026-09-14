@@ -48,6 +48,16 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
     by_id = {m.get("id"): m for m in mods}
     issues: list[dict] = []
 
+    # ── 检测模块在画布上是**标记（球）**、不是节点（2026-09-14 owner拍板形态）──
+    #    所以：几何检查（重叠/列距/间距）**只在流程节点之间做**，
+    #    检测的坐标是"被测 run 的出边中点"（本来就落在 72px 的缝里，按 190px 方块去量必然误报）。
+    from .expack import is_metrology_stage, stage_from_run_id
+    def _metro(m: dict) -> bool:
+        return is_metrology_stage(str(m.get("core_stage") or "")
+                                  or stage_from_run_id(str(m.get("core_run_id") or "")))
+    flow = [m for m in mods if not _metro(m)]
+    metro = [m for m in mods if _metro(m)]
+
     #: 只报不拦的项（结构没错，属于"可优化"/"观感"）
     WARN_KINDS = {"orphan", "fanout", "hidden_gap", "gap_uneven"}
 
@@ -57,7 +67,7 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
 
     # ① 重叠 / 过近
     boxes = [(m, float(m.get("x") or 0), float(m.get("y") or 0), _node_height(m, comment_lines))
-             for m in mods]
+             for m in flow]
     for (a, ax, ay, ah), (b, bx, by, bh) in itertools.combinations(boxes, 2):
         if abs(ax - bx) < NODE_W and abs(ay - by) < max(ah, bh) + MIN_GAP_Y:
             add("overlap", f"{a.get('core_run_id') or a.get('name')} 与 "
@@ -108,7 +118,7 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
     #       ⇒ 一列里出现多个工序**本身不是错**。真正要拦的是：某个节点的工序比该列**脊柱**
     #       （最上面那条）还靠后 —— 那才会读成"更晚的工序挤在同一列"。
     by_x: dict[float, list] = {}
-    for m in mods:
+    for m in flow:
         by_x.setdefault(float(m.get("x") or 0), []).append(m)
     for x, items in by_x.items():
         top = min(items, key=lambda mm: float(mm.get("y") or 0))
@@ -120,7 +130,7 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
                     f"x={x:.0f}：{m.get('core_run_id')} 的工序 {st} 比同列脊柱 "
                     f"{top.get('core_run_id')} 的 {top_stage} 还靠后 ⇒ 会读成更晚的工序挤在同一列")
     touched = {e.get("src") for e in edges} | {e.get("dst") for e in edges}
-    for m in mods:
+    for m in flow:                       # 检测是标记、没有边，不算孤立节点
         if m.get("id") not in touched and m.get("run_nature") != "season":
             add("orphan", f"孤立节点（无任何边，也不是 season）：{m.get('core_run_id') or m.get('name')}")
 
@@ -133,7 +143,7 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
                               f"{min(float(m.get('y') or 0) for m in hidden) - max(ys):.0f}px 空白")
 
     # ⑨ 列间距
-    xs = sorted({float(m.get("x") or 0) for m in mods})
+    xs = sorted({float(m.get("x") or 0) for m in flow})
     for a, b in zip(xs, xs[1:]):
         if b - a < NODE_W + MIN_GAP_X:
             add("col_tight", f"两列太近：x={a:.0f} 与 x={b:.0f}（间距 {b-a:.0f} < {NODE_W + MIN_GAP_X}）")
@@ -142,7 +152,7 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
     #    ⚠️ 2026-09-13 改判据：并列分支收成 2 列子格后，**右列整体下错 STAGGER** ⇒
     #       纵向间距会出现 `GAP` 与 `GAP+STAGGER` 两种值，这是**故意的错位**、不是毛病。
     #       所以：横向一律 == GAP；纵向只要求"不小于 GAP（不许挤）且不大于 GAP+STAGGER（不许空太多）"。
-    g = geom_gaps({"modules": mods}, comments_shown=bool(comment_lines))
+    g = geom_gaps({"modules": flow}, comments_shown=bool(comment_lines))
     if g["h_gaps"] and g["v_gaps"]:
         hs, vs = g["h_gaps"], g["v_gaps"]
         bad_h = [x for x in hs if abs(x - GAP) > 2]
@@ -160,14 +170,23 @@ def audit(project: dict, comment_lines: int = 0) -> dict:
     #    （导出时入边写成 core 的 `parent_run_id`）。没有入边的检测节点既导不出归属、
     #    也没法在画布上读出被测对象 —— 这正是owner说的"游离于体系之外"。
     #    只报 warn：用户可能正画到一半（刚拖进来还没连线）。
-    from .expack import is_metrology_stage, resolve_stage, stage_from_run_id
-    has_in = {e.get("dst") for e in edges}
-    for m in mods:
-        stage = (stage_from_run_id(m.get("core_run_id") or "")
-                 or m.get("core_stage") or resolve_stage(m))
-        if is_metrology_stage(stage) and m.get("id") not in has_in:
-            add("metrology_no_input",
-                f"检测节点没有入边 ⇒ 说不出它在测哪条 run："
+    # 新模型（2026-09-14）：检测＝"锚在被测 run 上的标记"，**不再用边表达归属**
+    # ⇒ 判据从"有没有入边"改为"**锚点解不解得出**"（解不出就是真的说不出测谁，
+    #   那才是owner最初报的"游离于体系之外"）。归属由 `parent_run_id` 上溯得出。
+    run_by_id = {(m.get("core_run_id") or "").strip(): m for m in mods if m.get("core_run_id")}
+    for m in metro:
+        cur = (m.get("core_parent_run_id") or "").strip()
+        anchor, hops = "", 0
+        while cur and hops < 32:
+            row = run_by_id.get(cur)
+            if row is None or not _metro(row):
+                anchor = cur
+                break
+            cur = (row.get("core_parent_run_id") or "").strip()
+            hops += 1
+        if not anchor:
+            add("metro_unanchored",
+                f"检测说不出它在测哪条 run（锚点解不出）："
                 f"{m.get('core_run_id') or m.get('name') or m.get('id')}")
 
     # ⑩ 扇出标签（观感噪声来源）

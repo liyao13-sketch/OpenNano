@@ -886,6 +886,13 @@ def parse_expack(path: Path, lib) -> dict:
         if _sri.get(r.get("run_id")):
             m["stage_run_index"] = _sri[r["run_id"]]
     edges = _edges_from_runs(runs_sorted, id_by_run, [m["id"] for m in modules])
+    # 检测＝"挂在被测 run 上的标记"（第 1 期：只显示）—— 把归属算好挂在**被测模块**上，
+    # 前端据此渲染球；检测模块本身仍在 modules 里（导出照旧），只是不再当节点画。
+    _markers = metro_markers(runs_sorted, id_by_run)
+    for _m in modules:
+        _ms = _markers.get(_m.get("id") or "")
+        if _ms:
+            _m["metro_markers"] = _ms
     _layout_modules(runs_sorted, modules, edges)       # 列=工序，主链一行、分支挂下
     # 解包目录**用完即清**：原来每次导入 zip 都在系统临时目录漏一个 `expack_*`（长期只增不减）
     if _tmpdir is not None:
@@ -897,6 +904,7 @@ def parse_expack(path: Path, lib) -> dict:
 #: 这里只把常用名字引进来，别在本文件里再写死尺寸。
 from .canvas_geom import GAP as LAYOUT_GAP, COL_PITCH as LAYOUT_COL   # noqa: E402
 from .canvas_geom import X0 as LAYOUT_X0, Y0 as LAYOUT_Y0, node_height as _node_h  # noqa: E402
+from .canvas_geom import NODE_W  # noqa: E402
 from .canvas_geom import STAGGER  # noqa: E402
 
 
@@ -996,6 +1004,32 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
         """按 run_id 的 stage 段判检测节点（计划节点没有 `stage` 字段，见 `stage_from_run_id`）。"""
         return is_metrology_stage(stage_from_run_id(rid))
 
+    # ── 检测**不再占工序列**（2026-09-14 owner拍板：检测＝连线上的球，不是工序）──
+    #    病根（旧观感）：检测被当成一道工序 ⇒ 一步后接三个测试就只能串成链（语义错）
+    #    或扇出再并回（可读性差）。现在检测从列布局里摘出去，主链直接连下一个工序。
+    #    ⚠️ 两个连带问题必须一起解，否则会留下"空列"或"检测跑到 0 列"：
+    #      ① 列号要按**可见工序**重排连续（PECVD=1/MA6=3/RIE=4 中间那格是 ELLIP 的，
+    #         它一走就空 -> 直接按"第几个可见工序"算列），
+    #      ② 检测自己的坐标最后单独给（贴在**被测 run 的出边中点**），不参与格子分配。
+    _metro_of = {rid: _is_metro_rid(rid) for rid in rid_of}
+    flow_rids = [rid for rid in rid_of if not _metro_of.get(rid)]
+    _seqs = sorted({seq_of.get(r, 0) for r in flow_rids if seq_of.get(r)})
+    _col_of_seq = {sq: i for i, sq in enumerate(_seqs)}
+
+    def _disp_col(rid: str) -> int:
+        """显示列＝该工序在**可见工序序列**里的序号（检测不占列 ⇒ 不留空档）。
+
+        ⚠️ 名字别叫 `_col`：本函数体下面有 `for _col, _rids in per_col.items()` 的循环变量，
+        同名会**遮蔽**这个函数（第一次就踩了 `TypeError: 'int' object is not callable`）。
+        """
+        sq = seq_of.get(rid, 0)
+        if sq in _col_of_seq:
+            return _col_of_seq[sq]
+        p = parent.get(rid)
+        if p and seq_of.get(p) in _col_of_seq:
+            return _col_of_seq[seq_of[p]]
+        return 0
+
     # ── 检测节点（metrology B+）：**列从父推导**，绝不落进第 0 列 ──
     #    病根：检测模块没有工序列号（计划节点 `stage_seq=0`）⇒ `col = max(seq-1, 0) = 0`
     #    ⇒ 排在 x=140 的最左列、**在被测 run 的左边**（2026-09-13 owner：「游离于体系之外」，
@@ -1036,7 +1070,7 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
     def place(rid: str, want: int) -> None:
         if rid in rows:
             return
-        col = max(seq_of.get(rid, 0) - 1, 0)
+        col = _disp_col(rid)
         rows[rid] = take(col, want)
         kids = children.get(rid, [])
         if not kids:
@@ -1063,7 +1097,7 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
         b = batch_of.get(rid) or ""
         if b not in lanes:
             lanes[b] = len(lanes)
-    main_rids = [r for r in rid_of if nat_of.get(r) != "season"]
+    main_rids = [r for r in flow_rids if nat_of.get(r) != "season"]
     # 按批次分组排：每条泳道内部各自从第 0 行起排（跨批次的边本来就不存在）
     by_batch: dict[str, list[str]] = {}
     for rid in main_rids:
@@ -1082,11 +1116,11 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
         lane_shift = {b: i * (max(rows.values(), default=0) + 2) for i, b in enumerate(by_batch)}
         for rid in main_rids:
             rows[rid] = rows.get(rid, 0) + lane_shift.get(batch_of.get(rid) or "", 0)
-    seasons = [r for r in rid_of if nat_of.get(r) == "season"]
+    seasons = [r for r in flow_rids if nat_of.get(r) == "season"]
     # season：全部排到主流程下方（成列但不参与主线行号）
     below = max(rows.values(), default=0) + 1
     for i, rid in enumerate(seasons):
-        col = max(seq_of.get(rid, 0) - 1, 0)
+        col = _disp_col(rid)
         rows[rid] = take(col, below + i)
 
     # ── 并列分支**块状排布**（owner 2026-09-13："四个 ICP 能不能做成 2×2，从 5 行变 3 行，
@@ -1103,8 +1137,8 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
     #    收益：主链每段横向间距都等于一个列距（262），整图窄 262px，T 字形观感消失。
     sub_of: dict[str, int] = {}
     per_col: dict[int, list[str]] = {}
-    for rid in rid_of:
-        per_col.setdefault(max(seq_of.get(rid, 0) - 1, 0), []).append(rid)
+    for rid in flow_rids:
+        per_col.setdefault(_disp_col(rid), []).append(rid)
     for _col, _rids in per_col.items():
         _ordered = sorted(_rids, key=lambda r: (rows.get(r, 0), r))
         _branches = _ordered[1:]                     # 第 0 条 = 脊柱（继续往下走的那条）
@@ -1123,14 +1157,14 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
     for _c, _rid in spine_of_col.items():
         cell[(_c, rows.get(_rid, 0))] = _rid
     # ② 并列分支：先试自己那列，格子被占（2×2 里同一行的另一半）才**借下一列的 x**
-    for _rid in sorted([r for r in rid_of if r not in set(spine_of_col.values())],
+    for _rid in sorted([r for r in flow_rids if r not in set(spine_of_col.values())],
                        key=lambda r: (rows.get(r, 0), r)):
-        _col = max(seq_of.get(_rid, 0) - 1, 0)
+        _c2 = _disp_col(_rid)
         _k = rows.get(_rid, 0)
         _i = 0
-        while (_col + _i, _k) in cell and _i < 7:
+        while (_c2 + _i, _k) in cell and _i < 7:
             _i += 1
-        cell[(_col + _i, _k)] = _rid
+        cell[(_c2 + _i, _k)] = _rid
         sub_of[_rid] = _i
 
     # ── 落点：**横纵间距等宽 + 行高自适应** ──
@@ -1149,14 +1183,95 @@ def _layout_once(runs_sorted: list[dict], modules: list[dict],
         row_y[k] = y
         y += row_h[k] + LAYOUT_GAP
     for m, rid in zip(modules, rid_of):
-        col = max(seq_of.get(rid, 0) - 1, 0)
+        if _metro_of.get(rid):
+            continue                                   # 检测：下面单独定位（贴在出边中点）
+        col = _disp_col(rid)
         m["x"] = float(LAYOUT_X0) + (col + sub_of.get(rid, 0)) * LAYOUT_COL
         m["y"] = row_y.get(rows.get(rid, 0), float(LAYOUT_Y0)) + (STAGGER if sub_of.get(rid) else 0)
+
+    # ── 检测模块的坐标：**被测 run 的出边中点**（没有后继工序时贴它右侧）──
+    #    它们不参与上面的格子分配，所以这里必须自己给坐标（否则会停在 0,0）；
+    #    前端第 1 期按"标记"渲染，坐标只在"切回节点显示"时才看得见。
+    resid_rows = {(r.get("run_id") or "").strip(): r for r in runs_sorted}
+    for m, rid in zip(modules, rid_of):
+        if not _metro_of.get(rid):
+            continue
+        anchor_rid = ""
+        cur = (resid_rows.get(rid, {}).get("parent_run_id") or "").strip()
+        for _ in range(32):
+            if not cur:
+                break
+            row = resid_rows.get(cur)
+            if row is None or not _is_metro_rid(cur):
+                anchor_rid = cur
+                break
+            cur = (row.get("parent_run_id") or "").strip()
+        a_mid = mid_of.get(anchor_rid)
+        a_mod = next((x for x in modules if x.get("id") == a_mid), None) if a_mid else None
+        if a_mod is not None:
+            m["x"] = float(a_mod.get("x") or LAYOUT_X0) + NODE_W + LAYOUT_GAP / 2
+            m["y"] = float(a_mod.get("y") or LAYOUT_Y0)
+        else:
+            m["x"], m["y"] = float(LAYOUT_X0), float(LAYOUT_Y0)
 
 
 #: 边的来源（**显示层要能区分**，否则"推断"会被当成"记录"）
 LINK_RECORDED = "recorded"      # core 的 `parent_run_id` 明确写的
 LINK_INFERRED = "inferred"      # 按工艺顺序（batches.planned_stages / stage_seq）补的**显示**边
+
+
+def metro_markers(runs_sorted: list[dict], id_by_run: dict) -> dict[str, list[dict]]:
+    """`{被测 run 的模块 id: [检测条目, …]}` —— 画布上那些"球"的数据来源（第 1 期：只显示）。
+
+    口径（2026-09-14 owner拍板形态）：
+      · 检测**不是工序**，是"对某个状态的一次观察" ⇒ 不再占工序列、不再生成扇出/并回；
+      · 每个检测**锚在它测的那条 run 上**（父是检测时继续上溯，见 `_metro_anchor`）；
+      · 同一个被测 run 上的多个检测**合成一个球**（1 个整圆 / 2 个两半 / 3–4 等分 / ≥5 计数环）——
+        所以这里返回的是**列表**，由前端按数量决定画法。
+    ⚠️ 只影响显示：检测 run 行照旧存在（仪器 session＝provenance），导出/入库一个字节不改。
+    """
+    row_of = {(r.get("run_id") or "").strip(): r for r in runs_sorted}
+
+    def _is_metro(run: dict) -> bool:
+        return is_metrology_stage(str(run.get("stage") or "") or
+                                  stage_from_run_id(str(run.get("run_id") or "")))
+
+    def _anchor(rid: str) -> str:
+        seen_rid: set[str] = set()
+        cur = rid
+        for _ in range(32):
+            if not cur or cur in seen_rid:
+                return ""
+            seen_rid.add(cur)
+            row = row_of.get(cur)
+            if row is None:
+                return ""
+            if not _is_metro(row):
+                return cur
+            cur = (row.get("parent_run_id") or "").strip()
+        return ""
+
+    out: dict[str, list[dict]] = {}
+    for r in runs_sorted:
+        rid = (r.get("run_id") or "").strip()
+        if not _is_metro(r):
+            continue
+        anchor_rid = _anchor((r.get("parent_run_id") or "").strip())
+        anchor_mid = id_by_run.get(anchor_rid)
+        if not anchor_mid:
+            continue                                  # 锚不到被测 run ⇒ 不画球（宁可少画，不编归属）
+        out.setdefault(anchor_mid, []).append({
+            "run_id": rid,
+            "stage": str(r.get("stage") or stage_from_run_id(rid)),
+            "module_id": id_by_run.get(rid) or "",
+            "sample_id": (r.get("sample_id") or "").strip(),
+            "date": (r.get("date") or "").strip(),
+            "tool_id": (r.get("tool_id") or "").strip(),
+            "stage_seq": r.get("stage_seq") or "",
+        })
+    for k in out:                                     # 顺序稳定（run_id 升序）⇒ 颜色/分段不抖动
+        out[k].sort(key=lambda x: x["run_id"])
+    return out
 
 
 def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[str]) -> list[dict]:
@@ -1181,6 +1296,7 @@ def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[
     """
     edges: list[dict] = []
     seen: set[tuple[str, str]] = set()
+    row_of = {(r.get("run_id") or "").strip(): r for r in runs_sorted}
 
     def _add(src: str, dst: str, link: str) -> None:
         if not src or not dst or src == dst or (src, dst) in seen:
@@ -1191,10 +1307,35 @@ def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[
     def _is_season(run: dict) -> bool:
         return (run.get("run_nature") or "").strip() == "season"
 
+    def _is_metro(run: dict) -> bool:
+        return is_metrology_stage(str(run.get("stage") or "") or
+                                  stage_from_run_id(str(run.get("run_id") or "")))
+
+    def _metro_anchor(rid: str) -> str:
+        """沿 `parent_run_id` 上溯、**跳过检测 run**，返回"被测的那条 run"。
+
+        为什么必须跳过：core 里检测 run 是**链中的一环**（AR50-T2：PECVD→ELLIP→MA6 里
+        MA6 的父是 ELLIP），而显示上检测不再是节点 ⇒ 连线要**穿过它直连**，
+        否则主链会断在检测处、或者又变成"扇出+并回"。
+        """
+        seen_rid: set[str] = set()
+        cur = rid
+        for _ in range(32):                       # 深度兜底：脏数据成环也不能死循环
+            if not cur or cur in seen_rid:
+                return ""
+            seen_rid.add(cur)
+            row = row_of.get(cur)
+            if row is None:
+                return ""
+            if not _is_metro(row):
+                return cur
+            cur = (row.get("parent_run_id") or "").strip()
+        return ""
+
     def _nearest_upstream(idx: int, my_seq: int) -> str | None:
-        """最近的**非 season** 上一工序 run 的模块 id（推断边的合法上游）。"""
+        """最近的**非 season、非检测**上一工序 run 的模块 id（推断边的合法上游）。"""
         for cand in reversed(runs_sorted[:idx]):
-            if _is_season(cand):
+            if _is_season(cand) or _is_metro(cand):
                 continue
             if int(cand.get("stage_seq") or 0) >= my_seq:
                 continue
@@ -1217,11 +1358,20 @@ def _edges_from_runs(runs_sorted: list[dict], id_by_run: dict, module_ids: list[
             continue
         if _is_season(r):
             continue                                 # season：本身不挂任何边
+        if _is_metro(r):
+            continue                                 # 检测：不再当节点画边，改为"锚在被测 run 上的标记"
         my_seq = int(r.get("stage_seq") or 0)
         parent_rid = (r.get("parent_run_id") or "").strip()
-        parent_row = next((x for x in runs_sorted
-                           if (x.get("run_id") or "").strip() == parent_rid), None)
+        parent_row = row_of.get(parent_rid)
         src = id_by_run.get(parent_rid)
+        # ⚠️ 父是检测 ⇒ 改成"连到被测的那条 run"（穿过检测直连）
+        if parent_row is not None and _is_metro(parent_row):
+            anchor = _metro_anchor(parent_rid)
+            src = id_by_run.get(anchor) or src
+            if src:
+                _add(src, dst, LINK_RECORDED)
+                continue
+            parent_row = None                        # 锚点解不出 ⇒ 退回落推断边
         if src and parent_row is not None and not _is_season(parent_row):
             _add(src, dst, LINK_RECORDED)             # ① core 明确写的（且父不是 season）
             continue

@@ -87,6 +87,16 @@ def relayout_project(path: Path, batch: str = "", write: bool = False) -> dict:
          "parent_run_id": (m.get("core_parent_run_id") or "")}
         for rid, m in by_run.items() if rid not in seen_rid]
     layout_mods = [by_run[r["run_id"]] for r in layout_runs]
+    # 检测标记：与 `parse_expack` 同一份推导（两条路必须同源，否则回灌与重排会不一样）
+    from .expack import metro_markers
+    _mk = metro_markers(layout_runs, {r["run_id"]: m["id"] for r, m in zip(layout_runs, layout_mods)
+                                      if r.get("run_id")})
+    for _m in layout_mods:
+        _mk2 = _mk.get(_m.get("id") or "")
+        if _mk2:
+            _m["metro_markers"] = _mk2
+        else:
+            _m.pop("metro_markers", None)      # 摘掉旧的，避免锚点变了还留着陈标记
     _layout_modules(layout_runs, layout_mods, edges)
     # 「本工序第几次」（run1/run2/…）：**core 全量算**，不是只看图上有的那几条
     # ⇒ 这样 `ICP-0008` 会显示 run5（前四次是 0002/0003/0005/0006），序号不连续也读得出"第几次"

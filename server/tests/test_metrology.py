@@ -22,14 +22,15 @@ import csv
 import io
 import zipfile
 
-from kb.expack import (_bad_edges, _layout_modules, build_expack, build_process_card,
-                       extract_rows, is_metrology_stage, resolve_stage, stage_run_index,
-                       unmapped_modules)
-from kb.canvas_geom import COL_PITCH
+from kb.expack import (_bad_edges, _edges_from_runs, _layout_modules, build_expack,
+                       build_process_card, extract_rows, is_metrology_stage, metro_markers,
+                       resolve_stage, stage_run_index, unmapped_modules)
+from kb.canvas_geom import COL_PITCH, GAP, NODE_W
 
 BATCH = "MT-T1"
 SEM_TMPL = "扫描电镜（SEM）"
 ELLIP_TMPL = "椭偏仪"
+ELLIP_STAGE = "ELLIP"
 
 
 def _mod(mid, eq, **kw):
@@ -120,23 +121,99 @@ def _layout_case():
     return runs, mods, edges
 
 
-def test_metrology_sits_one_column_right_of_what_it_measures():
+def test_metrology_sits_on_the_out_edge_and_consumes_no_column():
+    """**新显示契约（2026-09-14）**：检测不再占工序列，而是**贴在被测 run 的出边中点**上。
+
+    旧行为（昨天）是"排在被测 run 右侧一列"——那仍然把检测当一道工序（占列、留空档、
+    多步之后只能串链或扇出）。现在：检测在缝里（`父右缘 + GAP/2`），列由**流程节点**独占。
+    """
     runs, mods, edges = _layout_case()
     _layout_modules(runs, mods, edges)
     x = {m["id"]: m["x"] for m in mods}
-    assert x["m3"] == x["m1"] + COL_PITCH          # 被测 run 右侧一列（不是第 0 列）
-    assert x["m3"] > x["m1"]
-    assert _bad_edges(runs, mods, edges) == []     # 修前这里会给出"向左的边"
+    assert x["m3"] == x["m1"] + NODE_W + GAP / 2, "检测没落在被测 run 的出边中点上"
+    assert x["m2"] == x["m1"] + COL_PITCH, "流程节点之间仍应恰好一格（列距不变）"
+    assert _bad_edges(runs, mods, edges) == []
 
 
-def test_metrology_never_steals_the_spine():
-    """主线必须还是工艺链：检测节点不许把真正的接棒者挤下去。"""
-    runs, mods, edges = _layout_case()
+def test_metrology_does_not_push_the_next_process_step_right():
+    """**第 1 期要解决的正是这个**：检测插在中间时，下一个工序**不许多占一格**。
+
+    core 里 AR50-T2 写成 `PECVD → ELLIP → MA6`（检测是链中一环）；显示上若照抄，
+    MA6 会被推到第 3 格、整图右侧多出空档，且多一个检测就多一列。
+    """
+    runs = [{"run_id": f"{BATCH}-PECVD-0001", "batch_id": BATCH, "stage_seq": 1,
+             "run_nature": "", "parent_run_id": ""},
+            {"run_id": f"{BATCH}-ELLIP-0001", "batch_id": BATCH, "stage_seq": 2,
+             "run_nature": "", "parent_run_id": f"{BATCH}-PECVD-0001"},
+            {"run_id": f"{BATCH}-MA6-0001", "batch_id": BATCH, "stage_seq": 3,
+             "run_nature": "", "parent_run_id": f"{BATCH}-ELLIP-0001"}]
+    mods = [_mod("m1", "PECVD"), _mod("m2", ELLIP_TMPL), _mod("m3", "UV Exposure")]
+    idmap = {r["run_id"]: mid for r, mid in zip(runs, ("m1", "m2", "m3"))}
+    edges = _edges_from_runs(runs, idmap, ["m1", "m2", "m3"])
     _layout_modules(runs, mods, edges)
-    pos = {m["id"]: (m["x"], m["y"]) for m in mods}
-    assert pos["m2"][1] == pos["m1"][1]            # 工艺子节点继承父行 ⇒ 主链一条直线
-    assert pos["m3"][1] > pos["m1"][1]             # 检测节点挂到下一行
-    assert pos["m3"][0] == pos["m2"][0]            # 同在被测 run 右侧那一列
+    x = {m["id"]: m["x"] for m in mods}
+    assert x["m3"] == x["m1"] + COL_PITCH, "检测占了列，把下一个工序推远了"
+    assert x["m2"] == x["m1"] + NODE_W + GAP / 2
+
+
+def test_edges_contract_through_metrology():
+    """连线**穿过检测直连**：`P → M(检测) → X` 在显示上是 `P → X`，且没有任何边端点落在检测上。
+
+    不这样做的话主链会**断在检测处**（core 里 X 的父是 M，不是 P），或者又变成扇出+并回。
+    """
+    runs = [{"run_id": f"{BATCH}-PECVD-0001", "batch_id": BATCH, "stage_seq": 1,
+             "run_nature": "", "parent_run_id": ""},
+            {"run_id": f"{BATCH}-SEM-0001", "batch_id": BATCH, "stage_seq": 2,
+             "run_nature": "", "parent_run_id": f"{BATCH}-PECVD-0001"},
+            {"run_id": f"{BATCH}-MA6-0001", "batch_id": BATCH, "stage_seq": 3,
+             "run_nature": "", "parent_run_id": f"{BATCH}-SEM-0001"}]
+    idmap = {r["run_id"]: mid for r, mid in zip(runs, ("m1", "m2", "m3"))}
+    got = _edges_from_runs(runs, idmap, ["m1", "m2", "m3"])
+    assert got == [{"src": "m1", "dst": "m3", "_link": "recorded"}], got
+
+
+def test_markers_anchor_to_the_measured_run_and_never_fabricate():
+    """标记的归属＝沿 `parent_run_id` **上溯跳过检测**得到的那条 run；解不出就不画（不编归属）。"""
+    runs = [{"run_id": f"{BATCH}-PECVD-0001", "batch_id": BATCH, "stage_seq": 1,
+             "run_nature": "", "parent_run_id": ""},
+            {"run_id": f"{BATCH}-ELLIP-0001", "batch_id": BATCH, "stage": "ELLIP",
+             "stage_seq": 2, "run_nature": "", "parent_run_id": f"{BATCH}-PECVD-0001"},
+            # 连着的两个检测（父子都是检测）⇒ 都锚到 PECVD
+            {"run_id": f"{BATCH}-SEM-0001", "batch_id": BATCH, "stage": "SEM",
+             "stage_seq": 3, "run_nature": "", "parent_run_id": f"{BATCH}-ELLIP-0001"},
+            # 锚不出来的检测（没有 core 父）⇒ 不进标记（宁可少画，不编归属）
+            {"run_id": f"{BATCH}-PROFILE-0001", "batch_id": BATCH, "stage": "PROFILE",
+             "stage_seq": 4, "run_nature": "", "parent_run_id": ""}]
+    idmap = {r["run_id"]: mid for r, mid in zip(runs, ("m1", "m2", "m3", "m4"))}
+    mk = metro_markers(runs, idmap)
+    assert sorted(b["stage"] for b in mk.get("m1", [])) == ["ELLIP", "SEM"]
+    assert "m4" not in mk and all("m4" not in [b["module_id"] for b in v] for v in mk.values())
+
+
+def test_metrology_at_the_end_anchors_to_the_last_process_run():
+    """末道工序后的检测（没有后继）也要锚住 —— 它是"这条 run 的观测"，不是孤点。"""
+    runs = [{"run_id": f"{BATCH}-RIE-0001", "batch_id": BATCH, "stage": "RIE",
+             "stage_seq": 1, "run_nature": "", "parent_run_id": ""},
+            {"run_id": f"{BATCH}-SEM-0001", "batch_id": BATCH, "stage": "SEM",
+             "stage_seq": 2, "run_nature": "", "parent_run_id": f"{BATCH}-RIE-0001"}]
+    mk = metro_markers(runs, {r["run_id"]: mid for r, mid in zip(runs, ("m1", "m2"))})
+    assert [b["run_id"] for b in mk["m1"]] == [f"{BATCH}-SEM-0001"]
+
+
+def test_layout_without_metrology_is_unchanged():
+    """**回归锁**：没有检测的项目，布局一个像素都不许动（老的列距语义）。"""
+    runs = [{"run_id": f"{BATCH}-PECVD-0001", "batch_id": BATCH, "stage_seq": 1,
+             "run_nature": "", "parent_run_id": ""},
+            {"run_id": f"{BATCH}-MA6-0001", "batch_id": BATCH, "stage_seq": 2,
+             "run_nature": "", "parent_run_id": f"{BATCH}-PECVD-0001"},
+            {"run_id": f"{BATCH}-RIE-0001", "batch_id": BATCH, "stage_seq": 5,
+             "run_nature": "", "parent_run_id": f"{BATCH}-MA6-0001"}]
+    mods = [_mod("m1", "PECVD"), _mod("m2", "UV Exposure"), _mod("m3", "RIE")]
+    idmap = {r["run_id"]: mid for r, mid in zip(runs, ("m1", "m2", "m3"))}
+    edges = _edges_from_runs(runs, idmap, ["m1", "m2", "m3"])
+    _layout_modules(runs, mods, edges)
+    x = {m["id"]: m["x"] for m in mods}
+    assert x["m2"] == x["m1"] + COL_PITCH and x["m3"] == x["m1"] + 2 * COL_PITCH
 
 
 # ---------------------------------------------------------------- 卡 / CSV 一致
@@ -179,19 +256,44 @@ def test_build_expack_actually_uses_lib_so_card_and_csv_agree():
 
 # ---------------------------------------------------------------- 画布体检：游离要报出来
 
-def test_layout_audit_flags_a_metrology_node_with_no_input():
-    """检测节点没有入边 ⇒ 体检器要报「说不出在测谁」（owner原话：游离于体系之外）。"""
+def test_layout_audit_checks_the_anchor_not_the_edge():
+    """新模型下判据从"有没有入边"改为"**锚点解不解得出**"（检测不再用边表达归属）。"""
     from kb.layout_audit import audit
-    proj = {"name": BATCH, "edges": [],
-            "modules": [_mod("m1", SEM_TMPL, x=400, y=80)]}
-    got = {i["kind"] for i in audit(proj)["issues"]}
-    assert "metrology_no_input" in got
+    # ① 锚得住（core 父指向被测 run）⇒ 不该报，也不该因为"没有边"被当成孤立节点
+    ok = {"name": BATCH, "edges": [{"src": "mp", "dst": "m0", "_link": "recorded"}],
+          "modules": [{"id": "mp", "equipment_name": "PECVD", "core_run_id": f"{BATCH}-PECVD-0001",
+                       "core_parent_run_id": "", "core_stage_seq": 1, "x": 140, "y": 80},
+                      {"id": "m0", "equipment_name": "RIE", "core_run_id": f"{BATCH}-RIE-0001",
+                       "core_parent_run_id": f"{BATCH}-PECVD-0001", "core_stage_seq": 2,
+                       "x": 402, "y": 80},
+                      {"id": "m1", "equipment_name": SEM_TMPL, "core_run_id": f"{BATCH}-SEM-0001",
+                       "core_parent_run_id": f"{BATCH}-RIE-0001",
+                       "x": 402 + NODE_W + GAP / 2, "y": 80}]}
+    kinds = {i["kind"] for i in audit(ok)["issues"]}
+    assert "metro_unanchored" not in kinds and "orphan" not in kinds
 
-    # 连上被测 run 之后就不该再报（同一条规则的两面）
-    proj2 = {"name": BATCH, "edges": [{"src": "m0", "dst": "m1", "_link": "recorded"}],
-             "modules": [_mod("m0", "PECVD", x=140, y=80), _mod("m1", SEM_TMPL, x=402, y=80)]}
-    got2 = {i["kind"] for i in audit(proj2)["issues"]}
-    assert "metrology_no_input" not in got2
+    # ② 锚不出（没有核心父）⇒ 报「说不出测谁」
+    bad = {"name": BATCH, "edges": [],
+           "modules": [{"id": "m1", "equipment_name": SEM_TMPL,
+                        "core_run_id": f"{BATCH}-SEM-0001", "core_parent_run_id": "",
+                        "x": 140, "y": 80}]}
+    assert "metro_unanchored" in {i["kind"] for i in audit(bad)["issues"]}
+
+
+def test_layout_audit_ignores_marker_geometry():
+    """检测是**标记**不是方块：它落在缝里，不该被"重叠/列太近/间距不均"误报。"""
+    from kb.layout_audit import audit
+    proj = {"name": BATCH, "edges": [{"src": "m0", "dst": "m1", "_link": "recorded"}],
+            "modules": [{"id": "m0", "equipment_name": "PECVD", "core_run_id": f"{BATCH}-PECVD-0001",
+                         "core_parent_run_id": "", "core_stage_seq": 1, "x": 140, "y": 80},
+                        {"id": "m1", "equipment_name": "RIE", "core_run_id": f"{BATCH}-RIE-0001",
+                         "core_parent_run_id": f"{BATCH}-PECVD-0001", "core_stage_seq": 2,
+                         "x": 402, "y": 80},
+                        {"id": "m2", "equipment_name": SEM_TMPL, "core_run_id": f"{BATCH}-SEM-0001",
+                         "core_parent_run_id": f"{BATCH}-RIE-0001",
+                         "x": 402 + NODE_W + GAP / 2, "y": 80}]}
+    kinds = {i["kind"] for i in audit(proj)["issues"]}
+    assert not (kinds & {"overlap", "col_tight", "gap_uneven", "orphan"}), kinds
 
 
 def test_process_card_says_what_the_metrology_node_measures():

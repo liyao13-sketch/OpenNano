@@ -323,7 +323,79 @@ function spreadFanout(routes: Record<string, Pt[]>, edges: any[], nodes: any[]):
 
 const edgeTypes = { ortho: OrthoEdge }
 
-const nodeTypes = { process: ProcessNode }
+/* ============================================================================
+   检测＝连线上的「球」（2026-09-14 owner拍板形态 · 第 1 期：只显示）
+
+   为什么不再画成节点：检测**不是一道工序**，而是"对某个状态的观察"。旧画法里每个检测
+   占一个工序列 ⇒ 一步后接三个测试就只能串成链（语义错，AR50-T2 的 PECVD→ELLIP→MA6 就是）
+   或扇出再并回（可读性差）。现在：检测降为**锚在被测 run 上的一枚标记**，
+   连线穿过它直连 ⇒ 没有扇出、没有并回，主链永远一条直线。
+
+   形状规则（≤4 用几何分块，≥5 退化为"计数 + 多色环"）：
+     1 整圆 · 2 两半 · 3 三等分 · 4 四等分 · ≥5 环 + 数字
+   颜色＝表征族（沿用画布/左栏同一套 `--fam-metro-*` 变量，主题自动跟随）。
+   ⚠️ 一个球 = **同一个被测 run 上的所有检测**（不是每个检测一枚）。
+============================================================================ */
+const METRO_STAGE_FAMILY: Record<string,string> = {
+  SEM: 'metro_form', PROFILE: 'metro_form', TEM: 'metro_form',
+  ELLIP: 'metro_opt', STRESS: 'metro_opt',
+  XRD: 'metro_comp', XPS: 'metro_comp', AES: 'metro_comp', SIMS: 'metro_comp',
+}
+/* ⚠️ token 名用**连字符**（`--fam-metro-form`）—— 第一版按 JS 里的下划线族名拼成
+   `--fam-metro_form` ⇒ 变量解析失败、球整块不上色（计算值 fill 退成黑色）。已按 DOM 实测修。 */
+const metroColor = (stage: string) => {
+  const fam = METRO_STAGE_FAMILY[String(stage || '').toUpperCase()] || 'metro'
+  return `var(--fam-${fam.replace(/_/g, '-')})`
+}
+
+function MetroBall({ data }: any) {
+  const { t } = useI18n()
+  const ms: any[] = data.markers || []
+  const n = ms.length
+  const R = 9, C = 11, SIZE = 22
+  const [a, b, c, d] = [0, 1, 2, 3].map(i => metroColor(ms[i]?.stage))
+  const title = `${t(n === 1 ? 'metro.ballTip1' : 'metro.ballTipN', { n })}\n` + ms.map(m =>
+    `· ${m.stage}${m.run_id ? ` · ${m.run_id}` : ''}${m.date ? ` · ${m.date}` : ''}`).join('\n')
+  // 扇区路径：从 12 点开始顺时针等分
+  const wedge = (i: number, k: number) => {
+    const a0 = -Math.PI / 2 + (2 * Math.PI * i) / k
+    const a1 = -Math.PI / 2 + (2 * Math.PI * (i + 1)) / k
+    const p = (ang: number) => `${(C + R * Math.cos(ang)).toFixed(2)} ${(C + R * Math.sin(ang)).toFixed(2)}`
+    return `M${C} ${C} L${p(a0)} A${R} ${R} 0 ${k > 2 ? 1 : 0} 1 ${p(a1)} Z`
+  }
+  return (
+    <div title={title} style={{ width: SIZE, height: SIZE, cursor: 'help', pointerEvents: 'all' }}>
+      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+        {n === 1 && <>
+          <circle cx={C} cy={C} r={R} fill="var(--raise)" stroke={a} strokeWidth={2} />
+          <circle cx={C} cy={C} r={R - 3} fill={a} />
+        </>}
+        {n === 2 && <>
+          <path d={`M${C} ${C - R} A${R} ${R} 0 0 0 ${C} ${C + R} Z`} fill={a} />
+          <path d={`M${C} ${C - R} A${R} ${R} 0 0 1 ${C} ${C + R} Z`} fill={b} />
+          <circle cx={C} cy={C} r={R} fill="none" stroke="var(--surface)" strokeWidth={2} />
+          <circle cx={C} cy={C} r={R + 0.6} fill="none" stroke="var(--border-2)" strokeWidth={1} />
+        </>}
+        {(n === 3 || n === 4) && <>
+          {ms.map((_, i) => <path key={i} d={wedge(i, n)} fill={[a, b, c, d][i]} />)}
+          <circle cx={C} cy={C} r={R + 0.6} fill="none" stroke="var(--border-2)" strokeWidth={1} />
+        </>}
+        {n >= 5 && <>
+          {/* ≥5：不再真等分（每份不到 3px 等于没信息）⇒ 多色环 + 计数 */}
+          {ms.map((m, i) => (
+            <circle key={i} cx={C} cy={C} r={R - 1} fill="none" stroke={metroColor(m.stage)} strokeWidth={3}
+              strokeDasharray={`${(2 * Math.PI * (R - 1)) / n - 1.4} 1.4`}
+              strokeDashoffset={-((2 * Math.PI * (R - 1)) / n) * i} />
+          ))}
+          <text x={C} y={C + 3.5} textAnchor="middle" fontSize={10} fontWeight={700}
+            fill="var(--text)" fontFamily="var(--mono)">{n}</text>
+        </>}
+      </svg>
+    </div>
+  )
+}
+
+const nodeTypes = { process: ProcessNode, metro: MetroBall }
 
 export default function App() {
   const { t } = useI18n()
@@ -1123,8 +1195,32 @@ export default function App() {
      过滤只作用于"渲染"，绝不动 nodes/edges 本体（保存/导出仍是全量）。 */
   const seasonIds = useMemo(() => new Set(
     nodes.filter(n => (n.data.module as Module).run_nature === 'season').map(n => n.id)), [nodes])
-  const viewNodes = useMemo(
-    () => (showSeason ? nodes : nodes.filter(n => !seasonIds.has(n.id))), [nodes, seasonIds, showSeason])
+  /* 检测模块 id：渲染层要把它们**换成球**（不动 nodes/edges 本体 ⇒ 保存/导出仍是全量）。
+     判据与后端同一套：`core_stage` 或 run_id 的 stage 段落在表征四值里。 */
+  const metroIds = useMemo(() => new Set(nodes.filter(n => {
+    const m = n.data.module as Module
+    const st = String(m.core_stage || '').toUpperCase()
+    const seg = String(m.core_run_id || '').split('-').slice(-2, -1)[0]?.toUpperCase() || ''
+    return ['SEM', 'ELLIP', 'PROFILE', 'STRESS'].includes(st || seg)
+  }).map(n => n.id)), [nodes])
+
+  const viewNodes = useMemo(() => {
+    const base = (showSeason ? nodes : nodes.filter(n => !seasonIds.has(n.id)))
+      .filter(n => !metroIds.has(n.id))
+    // 球：一个被测 run 一枚（该 run 上所有检测合成分段）；落在它**出边的中点**上
+    const balls: Node[] = []
+    for (const n of base) {
+      const ms = (n.data.module as any).metro_markers
+      if (!ms?.length) continue
+      const h = (n as any).height ?? 71              // React Flow 量过高度就用真实值
+      balls.push({
+        id: `mk-${n.id}`, type: 'metro', selectable: false, draggable: false,
+        position: { x: (n.position?.x ?? 0) + 190 + 72 / 2 - 11, y: (n.position?.y ?? 0) + h / 2 - 11 },
+        data: { markers: ms },
+      } as Node)
+    }
+    return [...base, ...balls]
+  }, [nodes, seasonIds, showSeason, metroIds])
   const viewEdges = useMemo(
     () => (showSeason ? edges : edges.filter(e => !seasonIds.has(e.source) && !seasonIds.has(e.target))),
     [edges, seasonIds, showSeason])
@@ -1723,7 +1819,12 @@ export default function App() {
       {/* 状态栏(BEAMER 式:项目/规模/选中/运行/后端) */}
       <div className="statusbar">
         <span className="sb-name" title={t('sb.project', { name: projectName })}>{t('sb.project', { name: projectName })}</span><span className="sb-sep" />
-        <span>{t('sb.counts', { n: nodes.length, e: edges.length })}</span><span className="sb-sep" />
+        {/* 计数要与**所见**一致：画布上的节点不含检测（检测已渲染成球），所以单列一项。
+            第一版直接用 nodes.length ⇒ 状态栏写 "5 nodes" 而画布只有 3 个节点（实测对不上）。 */}
+        <span>{t('sb.counts', { n: nodes.length - metroIds.size, e: edges.length })}</span>
+        {metroIds.size > 0 && <><span className="sb-sep" />
+          <span>{t('sb.metrology', { n: metroIds.size })}</span></>}
+        <span className="sb-sep" />
         <span>{t('sb.selected', { name: selectedNode ? (selectedNode.data.module as Module).name : '—' })}</span><span className="sb-sep" />
         <span>{running ? t('sb.running') : (nodes.some(n => (n.data.module as Module).run_state === 'ok') ? t('sb.done') : t('sb.idle'))}</span>
         <span className="spacer" />
