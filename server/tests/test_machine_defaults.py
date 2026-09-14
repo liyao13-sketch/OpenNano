@@ -107,3 +107,48 @@ def test_机台匹配_唯一才认否则如实报未匹配():
     assert _match_machine("ICP-PishowA", ms)["id"] == "4"          # 特征词 pishowa
     assert _match_machine("RIE", ms) is None                       # 多义 ⇒ 不猜
     assert _match_machine("SPUTTER", ms) is None                   # 档案里没有 ⇒ 报未匹配
+
+
+def test_sentinel_tool_id_is_excluded_and_counted(tmp_path, monkeypatch):
+    """哨兵 `tool_id=UNKNOWN`（机台未记录）**不能当机台出处**：那些 run 要排除，且**如实计数**。
+
+    为什么（数据线 2026-09-14 提出）：哨兵组的 run 可能来自**不同机器**，把它们混成一组再推荐
+    "这台机器的实测默认值"＝**编归属**。它与本模块既有口径一致（"机台匹配唯一才认/不猜"）。
+    """
+    import kb.machine_defaults as md
+    runs = RUNS + [
+        {"run_id": f"{BATCH}-RIE-0001", "batch_id": BATCH, "sample_id": ROOT, "stage": "RIE",
+         "stage_seq": "5", "date": "2026-09-09", "tool_id": "UNKNOWN"},
+    ]
+    steps = STEPS + [(f"{BATCH}-RIE-0001", 1, "etch", {"phase": "etch", "source_w": 999})]
+    d = seed_core(tmp_path / "core", batches=batch_rows(), samples=sample_rows(), runs=runs)
+    with (d / "steps.csv").open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        for rid, order, name, pj in steps:
+            w.writerow([f"{rid}.S{order:02d}", rid, order, order, name, name,
+                        "10", "", "", json.dumps(pj, ensure_ascii=False), ""])
+    monkeypatch.setenv("OPENNANO_CORE_DIR", str(d))
+    monkeypatch.setattr(md, "CORE_DIR", d, raising=False)
+    got = md.machine_defaults()
+    assert all((g.get("tool_id") or "") != md.TOOL_ID_SENTINEL for g in got["groups"]), \
+        "哨兵组仍被当成机台默认值推荐"
+    assert got["skipped_unknown_tool"] >= 1, "排除了却没说排除了几条（静默）"
+
+
+def test_sentinel_value_matches_the_data_line():
+    """跨线逐字：我们的 `TOOL_ID_SENTINEL` 必须与数据线 `core_schema.TOOL_ID_SENTINEL` 一致。
+
+    两边都写这个字面量（产品代码不许 import 用户数据目录），所以**必须有判据钉住**，
+    否则一边改字面量（比如改成 `unknown`）会静默漂移。只读导入，缺失则跳过。
+    """
+    import importlib.util
+    from conftest import WS_ROOT
+    from kb.machine_defaults import TOOL_ID_SENTINEL
+    p = WS_ROOT / "个人空间/18_工艺数据资产/03_实验数据/ingest/core_schema.py"
+    if not p.exists():
+        pytest.skip("工作区里没有数据线的 core_schema.py（评测环境）")
+    spec = importlib.util.spec_from_file_location("_core_schema_probe2", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert TOOL_ID_SENTINEL == mod.TOOL_ID_SENTINEL, \
+        f"哨兵值漂移：我们 {TOOL_ID_SENTINEL!r} vs 他们 {mod.TOOL_ID_SENTINEL!r}"

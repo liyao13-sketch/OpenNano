@@ -68,6 +68,12 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in (s or "").lower() if ch.isalnum())
 
 
+#: core 里「机台未记录 / 尚未定」的**唯一哨兵**（数据线 `core_schema.TOOL_ID_SENTINEL` 的同名值）。
+#: ⚠️ 我们**不能 import 他们的模块**（产品代码不许依赖用户数据目录），所以这里复写一份常量，
+#: 并在跨线逐字判据里对齐（`tests/test_machine_defaults.py`）。
+TOOL_ID_SENTINEL = "UNKNOWN"
+
+
 def _match_machine(tool_id: str, machines: list[dict]) -> dict | None:
     """把 core 的 `tool_id`（如 `ICP-PishowA`）对上机台档案。
 
@@ -133,6 +139,7 @@ def machine_defaults(stage: str = "") -> dict:
     machines = _machine_index()
 
     groups: dict[tuple[str, str], list[dict]] = {}
+    skipped_unknown = 0                              # 哨兵组被跳过的 run 数（如实报出，不静默）
     for r in runs:
         st = (r.get("stage") or "").strip()
         tool = (r.get("tool_id") or "").strip()
@@ -140,6 +147,11 @@ def machine_defaults(stage: str = "") -> dict:
             continue
         if not tool or not by_run.get(r.get("run_id") or ""):
             continue                                    # 没记机台 / 没参数步 ⇒ 不参与（不猜）
+        if tool == TOOL_ID_SENTINEL:
+            # 哨兵值＝"机台未记录"。**不能拿它当机台出处**：这些 run 可能来自不同机器，
+            # 把它们混成一组再推荐"这台机器的实测默认值"就是**编归属**（数据线 2026-09-14 指出）。
+            skipped_unknown += 1
+            continue
         groups.setdefault((tool, st), []).append(r)
 
     out, unmatched = [], set()
@@ -211,6 +223,9 @@ def machine_defaults(stage: str = "") -> dict:
         "groups": out,
         "count": len(out),
         "unmatched_tool_ids": sorted(unmatched),
+        #: 因 `tool_id` 是哨兵 `UNKNOWN`（机台未记录）而被排除的 run 数 —— **如实报出**，
+        #: 让界面/人能看出"这不是没有数据，而是那几条没记机台"。
+        "skipped_unknown_tool": skipped_unknown,
         "source": "core/runs.csv + core/steps.csv（只读）",
         "rule": ("**按段**（phase/role）分别取默认值：该段内**出现最多**的值（并列取最近那条）；"
                  "`per_key` 另给 n 次 / 不同值数 / min~max；每个值带 from_run+date 可追溯。"

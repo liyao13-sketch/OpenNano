@@ -15,6 +15,16 @@ import os
 import sys
 from pathlib import Path
 
+# ⚠️ **不写 .pyc**（2026-09-14 真实踩坑）：`__pycache__` 的有效性只按「源文件 mtime（**秒**）+ 大小」判断。
+#    我常用的"改一行 → 跑红 → 改回来"反向验证里，若改动**不改变字节数**（例如把
+#    `("A", "B")` 换成 `("B", "A")`）且还原发生在**同一秒**，Python 会继续用**打了补丁的 .pyc**
+#    ⇒ 跑出"改了却没生效/改回来了还是红"的鬼结果（我因此把一次失败误判成'代码没还原'，还在红灯下提交了一次）。
+#    关掉写入即断掉这一类；要更彻底可 `find . -name __pycache__ -exec rm -rf {} +`。
+sys.dont_write_bytecode = True
+# 进程内的开关**管不到子进程**（`test_cli.py` 这类用 subprocess 跑 `python -m kb.xxx`），
+# 所以再来一条**环境变量**——子进程会继承它。（实测：只加上面那行会漏 4 个 .pyc，加上这行后为 0。）
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]          # …/OpenNano/server （本仓根 = REPO.parent）
