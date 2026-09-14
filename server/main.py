@@ -671,7 +671,11 @@ def api_expack_import(req: ExpackImportReq):
     p_ = _P(req.path.strip()).expanduser()
     if not p_.exists():
         raise HTTPException(404, f"路径不存在: {p_}")
-    return expack_engine.parse_expack(p_, LIB)
+    try:
+        return expack_engine.parse_expack(p_, LIB)
+    except expack_engine.ExpackError as e:
+        # 坏包 / 不可信的包 ⇒ **400 带原因**，不要漏成 500（用户看不出哪里坏了）
+        raise HTTPException(400, str(e)) from e
 
 
 def _xlsx_response(data: bytes, stem: str):

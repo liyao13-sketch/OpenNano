@@ -24,6 +24,8 @@ import csv
 import io
 import json
 import re
+import shutil
+import stat
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -667,20 +669,86 @@ def _match_machine(tool_id: str, machines: list[dict]) -> dict | None:
     return best
 
 
+class ExpackError(ValueError):
+    """实验包不可用（含 zip 安全校验不通过）—— API 层应转 400，不要漏成 500。"""
+
+
+#: 解包硬上限（zip 炸弹/资源耗尽的第一道闸；测试里会 monkeypatch 成小值来验证判据）
+MAX_ZIP_MEMBERS = 4096
+MAX_ZIP_BYTES = 512 * 1024 * 1024        # 解压后总字节上限
+_COPY_CHUNK = 256 * 1024
+
+
+def _safe_extract_zip(z: zipfile.ZipFile, dest: Path) -> None:
+    """把 zip 解到 `dest`，**逐条校验**后再落盘（不再用 `extractall`）。
+
+    为什么不能直接 `extractall`（2026-09-13 审计发现）：
+      · **Zip Slip**：成员名可以是 `../../x` 或绝对路径 ⇒ 写出 `dest` 之外，覆盖任意文件；
+      · **符号链接**：成员可以是 symlink ⇒ 后续写入被重定向到别处；
+      · **zip 炸弹**：压缩比可以极大，`extractall` 会一直写满磁盘（本函数按**声明大小**累计设上限，
+        并边写边计数，声明值不可信时也能在超限时中止）。
+    只读用途（导入实验包）**不需要**任何越界能力，所以一律拒绝而不是"尽量兼容"。
+    """
+    dest = Path(dest)
+    base = dest.resolve()
+    total, count = 0, 0
+    for info in z.infolist():
+        name = info.filename or ""
+        if not name:
+            continue
+        if name.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", name):
+            raise ExpackError(f"包内成员是绝对路径，已拒绝：{name}")
+        parts = Path(name.replace("\\", "/")).parts
+        if any(p == ".." for p in parts):
+            raise ExpackError(f"包内成员试图跳出解包目录（zip slip），已拒绝：{name}")
+        mode = info.external_attr >> 16
+        if stat.S_ISLNK(mode):
+            raise ExpackError(f"包内含符号链接成员，已拒绝：{name}")
+        count += 1
+        if count > MAX_ZIP_MEMBERS:
+            raise ExpackError(f"包内成员数超过上限 {MAX_ZIP_MEMBERS}")
+        target = dest.joinpath(*parts)
+        if info.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        total += int(info.file_size or 0)
+        if total > MAX_ZIP_BYTES:
+            raise ExpackError(f"解压后总体积超过上限 {MAX_ZIP_BYTES} 字节（疑似 zip 炸弹）")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not str(target.parent.resolve()).startswith(str(base)):
+            raise ExpackError(f"成员落点越出解包目录，已拒绝：{name}")
+        with z.open(info) as src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst, _COPY_CHUNK)
+            if dst.tell() > MAX_ZIP_BYTES:
+                raise ExpackError("单个成员超过体积上限（疑似 zip 炸弹）")
+
+
+def _unpack_expack(path: Path) -> tuple[Path, Path | None]:
+    """包路径 → (包根目录, 需要清理的临时目录或 None)。zip 走**安全解包**。"""
+    import tempfile
+    if path.suffix.lower() != ".zip":
+        return path, None
+    tmp = Path(tempfile.mkdtemp(prefix="expack_"))
+    try:
+        with zipfile.ZipFile(path) as z:
+            _safe_extract_zip(z, tmp)
+    except ExpackError:
+        shutil.rmtree(tmp, ignore_errors=True)      # 校验失败也要把半截目录清掉
+        raise
+    except zipfile.BadZipFile as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise ExpackError(f"不是有效的 zip 包：{e}") from e
+    root = next((d for d in tmp.iterdir() if d.is_dir()), tmp)
+    return root, tmp
+
+
 def parse_expack(path: Path, lib) -> dict:
     """包路径(文件夹或 zip) → 画布项目 dict {name, modules, edges}。
 
     有 flow.json → 用它(保布局/连线),并把 measurements/observations 叠加到对应节点;
     无 flow.json(手工采集包) → 由 runs/steps 合成节点,按时序连线。
     """
-    import tempfile
-    if path.suffix.lower() == ".zip":
-        tmp = Path(tempfile.mkdtemp(prefix="expack_"))
-        with zipfile.ZipFile(path) as z:
-            z.extractall(tmp)
-        root = next((d for d in tmp.iterdir() if d.is_dir()), tmp)
-    else:
-        root = path
+    root, _tmpdir = _unpack_expack(path)
     manifest = {}
     mf = root / "manifest.json"
     if mf.exists():
@@ -819,6 +887,9 @@ def parse_expack(path: Path, lib) -> dict:
             m["stage_run_index"] = _sri[r["run_id"]]
     edges = _edges_from_runs(runs_sorted, id_by_run, [m["id"] for m in modules])
     _layout_modules(runs_sorted, modules, edges)       # 列=工序，主链一行、分支挂下
+    # 解包目录**用完即清**：原来每次导入 zip 都在系统临时目录漏一个 `expack_*`（长期只增不减）
+    if _tmpdir is not None:
+        shutil.rmtree(_tmpdir, ignore_errors=True)
     return {"name": batch, "modules": modules, "edges": edges}
 
 
