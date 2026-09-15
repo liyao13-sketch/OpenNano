@@ -40,6 +40,17 @@ TOOL_DISPLAY: dict[str, str] = {
     "DWL66": "Heidelberg DWL66（激光直写）",        # 内部设备总表 §一
     "EBPG5200": "Raith EBPG 5200（EBL）",          # 内部设备总表 §一
     "SPUTTER": "JSP-4（磁控溅射）",                 # 内部设备总表 §三（四腔磁控溅射 JSP-4）
+    # 2026-09-15 数据线登记 4 台（`TOOL_DISPLAY` 9→13）——**源于本单联调查出的"库内未登记机台"**：
+    #   · `RIBE-LoremR` 命名镜像 `ICP-PishowA`（工序-型号），依据 内部设备总表 §2b；
+    #   · `SUSS-MA6`   ⚠️ **不能叫 `MA6`**：撞 stage 代号，会被数据线闸 ② 当"把工序名当机台号"拦下（我提的，他们采纳）；
+    #   · `SI500`      依据 设备总表（SENTECH SI500）；
+    #   · `FST5000`    依据 core 自己的 `measurements.csv` note（"压应力；FST5000"）。
+    #   ⚠️ `CD-SEM` / `椭偏仪` **刻意不登记**（型号未核实，内部设备总表 §四 写"型号待补"）：
+    #      它们导出会落哨兵 + 出 `unregistered_machine` 告警 —— 宁可记"机台未记录"，不写没核实过的型号。
+    "RIBE-LoremR": "Hassrode Lorem R（RIBE）",
+    "SI500": "SENTECH SI500（ICP-RIE）",
+    "SUSS-MA6": "SUSS MA6（掩模对准曝光）",
+    "FST5000": "FST5000（薄膜应力）",
     TOOL_ID_SENTINEL: TOOL_UNKNOWN_DISPLAY,
 }
 
