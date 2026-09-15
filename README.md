@@ -57,6 +57,28 @@ samples/           synthetic demo data (no real lab data)
 docs/              design docs (architecture, optimization roadmap, package spec)
 ```
 
+## Repository scope
+
+This repository is the **tool layer**: how to *do* things (rules, judgments, mechanisms).
+It deliberately does **not** carry the case layer — real lab records, instrument
+inventories, vendor/model registries, or evidence pointers — which stay in the
+operator's private workspace and are injected at runtime as configuration.
+
+Three layers, kept apart on purpose:
+
+| Layer | Who sees it | May contain identifying detail |
+|---|---|---|
+| cases / raw records | the operator only | yes — that is the point |
+| rules / knowledge | the tool + the team (intranet) | yes — a rule is only accurate with it |
+| **this public repo** | everyone | **no** |
+
+⚠️ Consequence worth stating plainly: the instrument identities that remain in the
+source (e.g. entries in `server/kb/core_vocab.py`) are **known, deliberate debt**,
+scheduled to be externalised into a loadable inventory rather than deleted — a tool
+that cannot tell *which* machine it is looking at gives the wrong parameters.
+`server/tests/test_public_layer_hygiene.py` freezes that debt so it cannot grow,
+and `LICENSE` carries a neutral holder.
+
 ## Tests
 
 The regression net pins the rules that are expensive to re-derive: run numbering and
