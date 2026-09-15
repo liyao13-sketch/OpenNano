@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -18,6 +19,14 @@ from .process_catalog import CATEGORIES, PROCESSES  # 104 种工艺目录(数据
 CATEGORY_BY_SUBTYPE = {c: c for c in CATEGORIES}
 
 DEFAULT_PATH = Path.home() / ".opennano" / "library.json"
+
+
+def file_rev(path: Path) -> str:
+    """文件内容指纹（sha1 前 16 位）。不存在 → 空串。**用来判"盘上变了没有"，不用于安全。**"""
+    try:
+        return hashlib.sha1(Path(path).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return ""
 
 # 参数注册表种子(5 类关键参数;工艺条件类=设备参数,不重复入注册表)
 PARAMS_SEED = {
@@ -51,6 +60,18 @@ PARAM_LINKS_SEED = [
 ]
 
 
+class LibraryConflict(Exception):
+    """库文件在**本进程之外**被改过 ⇒ 拒绝覆盖（团队化的第一道保护）。
+
+    来历（2026-09-15，真实踩到）：内网服务器形态下，`library.json`（实测 ~90 KB）是**整份覆盖**写的。
+    我在会话里手改了 4 台机台的 `tool_id`，而**运行中的服务进程**内存里还是旧版本 ——
+    它下一次任何保存（加个参数、改台机）就会把我的手改**整份抹掉**，而且**没有任何声音**。
+    多人协同时这条更致命：两个人的改动必然有一个被静默丢弃。
+    ⇒ 加载时记住文件的 sha1，保存前比对；变了就**拒写并报出**（宁可这次不落盘，也不覆盖别人的改动）。
+    """
+
+
+
 def category_for_subtype(subtype: str) -> str | None:
     return CATEGORY_BY_SUBTYPE.get(subtype)
 
@@ -71,10 +92,13 @@ class LibraryStore:
         self.corrupt_backup = ""
         #: 本次运行**禁止写库**（见 `_save`）
         self.save_blocked = False
+        #: 加载/上次保存时的文件指纹（见 `LibraryConflict`）
+        self.loaded_rev = ""
         self._load()
 
     def _load(self):
         if self.path.exists():
+            self.loaded_rev = file_rev(self.path)
             try:
                 self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
             except Exception as e:  # noqa: BLE001
@@ -369,9 +393,31 @@ class LibraryStore:
         # 把用户的资产换成默认值（而损坏文件已留档，等用户处置）。带外说明见 `load_error`。
         if self.save_blocked:
             return
+        # 版本守卫（2026-09-15，见 `LibraryConflict`）：盘上变了就**拒写**，绝不整份覆盖别人的改动。
+        if self.loaded_rev and self.path.exists() and file_rev(self.path) != self.loaded_rev:
+            raise LibraryConflict(
+                "库文件在别处被改过（本进程加载后又有人保存/手改）⇒ 本次**拒绝写盘**，"
+                "以免覆盖对方的改动。请先 `POST /api/library/reload` 重新载入（或确认后重做本次修改）。")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2),
                              encoding="utf-8")
+        self.loaded_rev = file_rev(self.path)
+
+    def reload(self) -> str:
+        """丢弃内存副本、重新从盘上读（版本冲突后由用户显式触发）。"""
+        self.data = {
+            "version": 1,
+            "equipment": {}, "materials": {"resist": []}, "recipes": {},
+            "defaults": {"equipment": {}, "resist": ""},
+            "film_props": {}, "params": {}, "param_links": [],
+            "influence_rules": [],
+        }
+        self.load_error = ""
+        self.corrupt_backup = ""
+        self.save_blocked = False
+        self.loaded_rev = ""
+        self._load()
+        return self.loaded_rev
 
     # ---- 设备 ----
     def equipment_list(self, category: str) -> list[dict]:

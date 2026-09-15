@@ -65,9 +65,30 @@ export const api = {
     j<{key_values: Record<string,number>}>('/api/compute', { method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ params, handed, key_values, formulas, context: context || {} }) }),
-  saveProject: (name: string, modules: Module[], edges: any[]) =>
+  /** 保存工程。**必须带 `rev`**（载入时服务端给的版本）——团队化后它是"谁在我之前改过"的凭据：
+   *  不匹配 ⇒ 409（别人先保存过），界面要问人是否**确认覆盖**（`force`），覆盖会留痕。 */
+  saveProject: (name: string, modules: Module[], edges: any[], rev = '', force = false) =>
     j<any>('/api/project/save', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name, modules, edges }) }),
+      body: JSON.stringify({ name, modules, edges, rev, force }) }),
+  /** 库在别处被改过（`LibraryConflict`）后，显式接受盘上版本 */
+  reloadLibrary: () => j<any>('/api/library/reload', { method:'POST' }),
+  // ---- 团队账号（P0）：身份 / 成员 / 留痕 ----
+  authState: () => j<any>('/api/auth/state'),
+  authSetup: (username: string, name: string, password: string) =>
+    j<any>('/api/auth/setup', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username, name, password }) }),
+  authLogin: (username: string, password: string) =>
+    j<any>('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username, password }) }),
+  authLogout: () => j<any>('/api/auth/logout', { method:'POST' }),
+  authUsers: () => j<{users:any[]; error?:string}>('/api/auth/users'),
+  authAddUser: (u: {username:string; name:string; password:string; role:string}) =>
+    j<any>('/api/auth/users', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(u) }),
+  authPatchUser: (id: string, patch: any) =>
+    j<any>(`/api/auth/users/${id}`, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(patch) }),
+  audit: (limit = 200) => j<{rows:any[]}>(`/api/audit?limit=${limit}`),
   loadProject: (name?: string) => j<any>('/api/project' + (name ? `?name=${encodeURIComponent(name)}` : '')),
   projectList: () => j<{projects:{name:string;modules:number;edges:number;saved_at:string}[]}>('/api/project/list'),
   /** 各机台实测默认参数（只读 core；按段 chuck/etch/dechuck 分开） */

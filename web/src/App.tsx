@@ -407,6 +407,14 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
   const [projectName, setProjectName] = useState('Untitled')
+  // ---- 团队化（P0）：身份 / 团队面板 / 工程版本 ----
+  const [auth, setAuth] = useState<any>(null)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [teamOpen, setTeamOpen] = useState(false)
+  //: "本机还没建账号"时点按钮进初始化界面（`auto` 模式下默认不锁门）
+  const [forceGate, setForceGate] = useState(false)
+  //: 载入/保存时服务端给的工程版本 —— 保存时带回去，否则后端 409（那是"别人先改过"的凭据）
+  const [projectRev, setProjectRev] = useState('')
   const [loadOpen, setLoadOpen] = useState(false)
   const [projects, setProjects] = useState<{name:string;modules:number;edges:number;saved_at:string}[]>([])
   const importRef = useRef<HTMLInputElement>(null)
@@ -441,7 +449,7 @@ export default function App() {
   const chatRef = useRef<HTMLDivElement>(null)
   const flowRef = useRef<any>(null)
 
-  useEffect(() => {
+  const bootLoad = () => {
     api.catalog().then(c => { setCatalog(c.module_catalog); setFamilies(c.families) })
     /* 库文件损坏 → **必须说出来**：旧行为是后端静默退回默认值，用户看到"机台/模板都没了"
        却不知道发生了什么。这里同时进「问题面板」（页签上有计数）与运行日志。 */
@@ -462,6 +470,24 @@ export default function App() {
         loadProjectObj(d)
       }
     }).catch(() => {})
+  }
+
+  /* 开机第一问 = **身份**（团队化 P0）。未登录就不去拉业务数据 —— 后端本来也会 401，
+     但界面先问一遍能给出"请登录"的正脸，而不是一串加载失败的报错。 */
+  useEffect(() => {
+    api.authState().then(a => {
+      setAuth(a)
+      setAuthChecked(true)
+      if (a?.auth_required && !a?.user) return
+      if (a?.needs_setup) {
+        // `OPENNANO_AUTH=auto`（单人本地）默认不锁门，但"这台服务器还没建账号"必须**说出来**：
+        // 团队共用时忘了建账号，等于留一扇没锁的门。
+        const ts = new Date().toLocaleTimeString('en-GB', { hour12: false })
+        setIssues(is => [...is, { t: ts, text: t('issue.noAccounts') }])
+        pushLog('warn', t('log.noAccounts'))
+      }
+      bootLoad()
+    }).catch(() => { setAuthChecked(true); bootLoad() })   // 探测失败按"无认证"处理，别把工具锁死
   }, [])
 
   useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior:'smooth' }) }, [messages])
@@ -821,12 +847,33 @@ export default function App() {
     if (!name) return
     const modules = nodes.map(n => n.data.module as Module)
     const es = edges.map(e => ({ src: e.source, dst: e.target }))
-    const r = await api.saveProject(name, modules, es)
-    setProjectName(name)
-    alert(t('alert.saved', { name: r.name, n: r.modules }))
+    try {
+      const r = await api.saveProject(name, modules, es, projectRev)
+      setProjectName(name)
+      setProjectRev(r._rev || '')
+      alert(t('alert.saved', { name: r.name, n: r.modules }))
+    } catch (e: any) {
+      // 409 = 有人在你之前保存过（或"另存为"撞了同事的工程名）。**必须让人来决定**，
+      // 不能默认覆盖 —— 那正是团队协作里最容易丢改动的一步。
+      if (String(e.message || '').startsWith('409')) {
+        if (!confirm(t('alert.saveConflict', { msg: e.message }))) return
+        const r2 = await api.saveProject(name, modules, es, projectRev, true)   // 明确确认才 force
+        setProjectName(name)
+        setProjectRev(r2._rev || '')
+        alert(t('alert.savedForced', { name: r2.name }))
+        return
+      }
+      alert(t('alert.exportFail', { msg: e.message }))
+    }
   }
 
   saveRef.current = save
+
+  const doLogout = async () => {
+    await api.authLogout().catch(() => {})
+    setAuth((a: any) => ({ ...(a || {}), user: null }))
+    location.reload()          // 换人用同一台笔记本时，最干净的做法就是重新开局
+  }
 
   // ---- 项目载入(多项目) ----
   const openLoad = async () => {
@@ -924,6 +971,7 @@ export default function App() {
     })))
     setEdges((d.edges || []).map(edgeOf))
     setProjectName(d.name || 'EXP')
+    setProjectRev(d._rev || '')
     setSelectedId(null)
     setTimeout(() => fitMode('height'), 120)
   }
@@ -1317,6 +1365,17 @@ export default function App() {
   const topFilmName = inStack.length ? inStack[inStack.length - 1].film : 'Si'
   const stackDesc = ['Si', ...inStack.map(l => l.film + (l.thickness ? ` (${l.thickness} nm)` : ''))].join(' / ')
 
+  if (!authChecked) {
+    return <div className="auth-gate"><span className="dim">{t('auth.checking')}</span></div>
+  }
+  if ((auth?.auth_required && !auth?.user) || forceGate) {
+    return <AuthGate state={auth} onAuthed={(u: any) => {
+      setAuth((a: any) => ({ ...(a || {}), user: u, needs_setup: false }))
+      setForceGate(false)
+      bootLoad()
+    }} />
+  }
+
   return (
     <ErrorBoundary label={t('err.labelMain')}>
     <div className="app">
@@ -1330,6 +1389,25 @@ export default function App() {
           <span style={{ width:8, height:8, borderRadius:'50%', background: online ? 'var(--ok)' : 'var(--bad)' }} />
           {online ? t('topbar.online') : t('topbar.offline')}
         </span>
+        {auth?.needs_setup && (
+          <button className="btn-link" onClick={() => setForceGate(true)}>{t('auth.createAdmin')}</button>
+        )}
+        {/* 团队化：**当前是谁**必须一直可见（多人共用一台服务器时，"这是谁改的"靠它） */}
+        {auth?.user && (
+          <span style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:'var(--fs-xs)' }}>
+            <button className="user-chip" title={t('auth.whoTip', { u: auth.user.username })}
+              onClick={() => setTeamOpen(true)}>
+              <span style={{ width:16, height:16, borderRadius:'50%', background:'var(--accent)',
+                             color:'var(--accent-fg)', display:'inline-flex', alignItems:'center',
+                             justifyContent:'center', fontSize:'var(--fs-xs)' }}>
+                {(auth.user.name || auth.user.username || '?').slice(0, 1)}
+              </span>
+              {auth.user.name || auth.user.username}
+              <span className="dim">{t(auth.user.role === 'admin' ? 'auth.roleAdmin' : 'auth.roleMember')}</span>
+            </button>
+            <button className="btn-link" onClick={doLogout}>{t('auth.logout')}</button>
+          </span>
+        )}
         {inferredEdgeCount > 0 && (
           <span title={t('topbar.inferredTip')}
             style={{ fontSize: 'var(--fs-xs)', color:'var(--muted)', border:'1px solid var(--line)',
@@ -1868,6 +1946,8 @@ export default function App() {
         </div>
       )}
       {settingsOpen && <Settings onClose={() => { setSettingsOpen(false); api.library().then(setLibrary) }} />}
+      {teamOpen && <TeamPanel me={auth?.user} onClose={() => setTeamOpen(false)}
+                              onReloadLib={() => api.library().then(setLibrary)} />}
       {menu && (() => {
         const nd = menu.kind === 'node' ? nodes.find(n => n.id === menu.id) : null
         const m = nd?.data.module as Module | undefined
@@ -1912,5 +1992,200 @@ export default function App() {
       {edgeTip && <div style={{ position:'fixed', left: edgeTip.x + 14, top: edgeTip.y + 12, zIndex:1500, background:'var(--raise)', border:'1px solid var(--border-2)', borderRadius:10, padding:'8px 12px', fontSize: 'var(--fs-base)', pointerEvents:'none', boxShadow:'var(--shadow-2)' }} dangerouslySetInnerHTML={{ __html: edgeTip.html }} />}
     </div>
     </ErrorBoundary>
+  )
+}
+
+
+/* ============================================================================
+   团队化（P0 · 2026-09-15）：登录 / 初始化 与 团队面板
+   ⚠️ 这两个组件是**独立模块级组件**（在 App 之外）——它们要在 App 因为"未登录"提前 return
+   之前就能渲染，所以不能挂在 App 的 JSX 树里。
+   ========================================================================== */
+
+/** 登录 / 首次初始化。刻意**没有自助注册**：账号由管理员建（见 TeamPanel）。 */
+function AuthGate({ state, onAuthed }: { state: any; onAuthed: (u: any) => void }) {
+  const { t } = useI18n()
+  const setup = !!state?.needs_setup
+  const [username, setUsername] = useState('')
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const submit = async () => {
+    setErr('')
+    if (!username.trim()) { setErr(t('auth.errUsername')); return }
+    if (setup && password !== password2) { setErr(t('auth.errMismatch')); return }
+    if ((password || '').length < 6) { setErr(t('auth.errShort')); return }
+    setBusy(true)
+    try {
+      const r = setup ? await api.authSetup(username.trim(), name.trim(), password)
+                      : await api.authLogin(username.trim(), password)
+      onAuthed(r.user)
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="auth-gate">
+      <div className="auth-card">
+        <div className="auth-head">
+          <LogoMark />
+          <span className="brand-name">OpenNano</span>
+        </div>
+        <h2>{t(setup ? 'auth.setupTitle' : 'auth.loginTitle')}</h2>
+        <p className="auth-hint">{t(setup ? 'auth.setupHint' : 'auth.loginHint')}</p>
+        {state?.error && <div className="auth-err">{t('auth.fileErr', { msg: state.error })}</div>}
+        <label className="auth-field">
+          <span>{t('auth.username')}</span>
+          <input value={username} autoFocus autoComplete="username"
+            onChange={e => setUsername(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submit()} />
+        </label>
+        {setup && (
+          <label className="auth-field">
+            <span>{t('auth.name')}</span>
+            <input value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && submit()} />
+          </label>
+        )}
+        <label className="auth-field">
+          <span>{t('auth.password')}</span>
+          <input type="password" value={password} autoComplete="current-password"
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submit()} />
+        </label>
+        {setup && (
+          <label className="auth-field">
+            <span>{t('auth.password2')}</span>
+            <input type="password" value={password2}
+              onChange={e => setPassword2(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && submit()} />
+          </label>
+        )}
+        {err && <div className="auth-err">{err}</div>}
+        <button className="btn primary auth-submit" disabled={busy} onClick={submit}>
+          {t(busy ? 'auth.working' : (setup ? 'auth.setupBtn' : 'auth.loginBtn'))}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** 团队面板：成员管理（管理员）+ **操作留痕**（所有人可看）+ 库版本冲突后的重载入口。 */
+function TeamPanel({ me, onClose, onReloadLib }:
+                   { me: any; onClose: () => void; onReloadLib: () => void }) {
+  const { t } = useI18n()
+  const isAdmin = (me?.role || '') === 'admin'
+  const [users, setUsers] = useState<any[]>([])
+  const [rows, setRows] = useState<any[]>([])
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+  const [nu, setNu] = useState({ username: '', name: '', password: '', role: 'member' })
+
+  const load = async () => {
+    if (isAdmin) {
+      try { setUsers((await api.authUsers()).users) } catch (e: any) { setErr(e.message) }
+    }
+    try { setRows((await api.audit(120)).rows) } catch { /* 留痕读不到不该挡住管账号 */ }
+  }
+  useEffect(() => { load() }, [])
+
+  const addUser = async () => {
+    setErr(''); setMsg('')
+    try {
+      await api.authAddUser(nu)
+      setMsg(t('team.added', { u: nu.username }))
+      setNu({ username: '', name: '', password: '', role: 'member' })
+      load()
+    } catch (e: any) { setErr(e.message) }
+  }
+  const patch = async (id: string, p: any) => {
+    setErr('')
+    try { await api.authPatchUser(id, p); load() } catch (e: any) { setErr(e.message) }
+  }
+  const resetPw = async (u: any) => {
+    const pw = prompt(t('team.newPassword', { u: u.username }), '')
+    if (pw) await patch(u.id, { password: pw })
+  }
+
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal team-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>{t('team.title')}</h3>
+          <button className="btn" onClick={onClose}>{t('team.close')}</button>
+        </div>
+        {err && <div className="auth-err">{err}</div>}
+        {msg && <div className="team-msg">{msg}</div>}
+
+        {isAdmin && (
+          <section className="team-sec">
+            <h4>{t('team.members')}</h4>
+            <table className="team-table">
+              <thead><tr>
+                <th>{t('team.colUser')}</th><th>{t('team.colName')}</th>
+                <th>{t('team.colRole')}</th><th>{t('team.colState')}</th><th />
+              </tr></thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.id}>
+                    <td>{u.username}</td><td>{u.name}</td>
+                    <td>{t(u.role === 'admin' ? 'auth.roleAdmin' : 'auth.roleMember')}</td>
+                    <td>{t(u.active ? 'team.active' : 'team.disabled')}</td>
+                    <td className="team-actions">
+                      <button className="btn-link" onClick={() => resetPw(u)}>{t('team.resetPw')}</button>
+                      <button className="btn-link"
+                        onClick={() => patch(u.id, { active: !u.active })}>
+                        {t(u.active ? 'team.disable' : 'team.enable')}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="team-add">
+              <input placeholder={t('team.phUser')} value={nu.username}
+                onChange={e => setNu({ ...nu, username: e.target.value })} />
+              <input placeholder={t('team.phName')} value={nu.name}
+                onChange={e => setNu({ ...nu, name: e.target.value })} />
+              <input placeholder={t('team.phPassword')} type="password" value={nu.password}
+                onChange={e => setNu({ ...nu, password: e.target.value })} />
+              <select value={nu.role} onChange={e => setNu({ ...nu, role: e.target.value })}>
+                <option value="member">{t('auth.roleMember')}</option>
+                <option value="admin">{t('auth.roleAdmin')}</option>
+              </select>
+              <button className="btn primary" onClick={addUser}>{t('team.add')}</button>
+            </div>
+          </section>
+        )}
+
+        <section className="team-sec">
+          <h4>{t('team.audit')}</h4>
+          <p className="auth-hint">{t('team.auditHint')}</p>
+          <div className="team-audit">
+            {rows.length === 0 && <span className="dim">{t('team.auditEmpty')}</span>}
+            {rows.map((r, i) => (
+              <div className="team-audit-row" key={i}>
+                <span className="dim">{r.ts}</span>
+                <span className="team-actor">{r.actor}</span>
+                <span>{r.action}</span>
+                <span className="dim">{r.target}</span>
+                {r.detail && <span className="dim">{r.detail}</span>}
+                {r.ok === false && <span className="team-bad">✗</span>}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="team-sec">
+          <h4>{t('team.libTitle')}</h4>
+          <p className="auth-hint">{t('team.libHint')}</p>
+          <button className="btn" onClick={() => { onReloadLib(); setMsg(t('team.libReloaded')) }}>
+            {t('team.reloadLib')}
+          </button>
+        </section>
+      </div>
+    </div>
   )
 }

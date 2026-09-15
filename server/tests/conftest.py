@@ -217,3 +217,19 @@ def menu_export(ws_root):
     if not dumps:
         pytest.skip(f"{base} 下没有 `*_菜单导出` 目录")
     return dumps[-1]                                # 取最近一次导出
+
+
+@pytest.fixture(autouse=True)
+def _isolate_team_state(tmp_path, monkeypatch):
+    """**团队化（P0）隔离**：账号库 / 留痕 / 服务端密钥 / 口令迭代数一律指到本用例的临时目录。
+
+    两条口径：
+      ① 默认 `OPENNANO_AUTH=off` —— 老用例（200+ 条）不必逐个登录；**这不等于"测不到认证"**：
+         `tests/test_auth.py` 自己把 `on` 打开并断言"未登录就是 401"。
+      ② 账号/留痕**绝不碰真文件** —— 与 `OPENNANO_PROJECTS_DIR` 同一条教训（跑趟用例把真实资产顶掉）。
+    """
+    monkeypatch.setenv("OPENNANO_AUTH", "off")
+    monkeypatch.setenv("OPENNANO_ACCOUNTS", str(tmp_path / "users.json"))
+    monkeypatch.setenv("OPENNANO_AUDIT", str(tmp_path / "audit.log"))
+    monkeypatch.setenv("OPENNANO_SERVER_SECRET", str(tmp_path / ".server_secret"))
+    monkeypatch.setenv("OPENNANO_PBKDF2_ITERS", "1000")     # 测试里别真算 20 万次

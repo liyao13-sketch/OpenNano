@@ -36,3 +36,16 @@ PROJECTS_DIR = Path(os.environ.get("OPENNANO_PROJECTS_DIR")
 #: 知识库 SQLite（`~/.opennano/opennano.db`）
 DB_PATH = Path(os.environ.get("OPENNANO_DB")
                or (Path.home() / ".opennano" / "opennano.db"))
+
+# ---- 团队化（P0 · 2026-09-15）：账号 / 会话 / 留痕 ------------------------------------
+# ⚠️ 与上面两项同一条教训：**不许写死**。测试与脚本一律指到临时目录，
+#    否则"跑一趟用例"就能把真实账号库/留痕顶掉（工程目录那次是真踩过的）。
+#: 账号库（`~/.opennano/users.json`，0600）
+ACCOUNTS_PATH = Path(os.environ.get("OPENNANO_ACCOUNTS")
+                     or (Path.home() / ".opennano" / "users.json"))
+#: 服务端签名密钥（`~/.opennano/.server_secret`，0600；会话令牌用它签）
+SERVER_SECRET = Path(os.environ.get("OPENNANO_SERVER_SECRET")
+                     or (Path.home() / ".opennano" / ".server_secret"))
+#: 操作留痕（append-only JSONL）
+AUDIT_LOG = Path(os.environ.get("OPENNANO_AUDIT")
+                 or (Path.home() / ".opennano" / "audit.log"))

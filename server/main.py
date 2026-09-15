@@ -5,17 +5,22 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from engine import (CATEGORIES, CATEGORY_LABELS, PROCESSES, METROLOGY,
                     LibraryStore, formula_engine, generate_matrix,
                     module_catalog, build_module)
+from engine import auth as auth_engine
+from engine import audit as audit_engine
+from engine.library import LibraryConflict, file_rev
 from engine import rules as rule_engine
 from engine.process_catalog import family_for, family_label, FAMILY_LABELS
 from kb.store import KBStore
@@ -32,6 +37,185 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 LIB = LibraryStore()
 KB = KBStore()
 # （原 PROJECT_PATH = ~/.opennano/project.json 是**死代码**，全仓无引用 ⇒ 2026-09-13 删）
+
+
+# ============================================================================
+# P0 · 团队化（2026-09-15 owner：「各自笔记本连一台内网服务器」+「每人一个账号」）
+#
+# 三层各管一件事，**别混**：
+#   ① 身份（本段中间件）——"这是谁"：cookie 会话 → `request.state.actor`
+#   ② 留痕（audit）——"谁做了什么"：所有写请求落 append-only JSONL；关键动作另记语义摘要
+#   ③ 版本守卫（工程的 `_rev` / 库的 `LibraryConflict`）——"谁在我之前改过"：拒绝静默覆盖
+# ⚠️ `OPENNANO_AUTH=off|auto|on` 只影响①是否强制；②③**永远生效**。
+# ============================================================================
+
+@app.middleware("http")
+async def _auth_and_audit(request: Request, call_next):
+    user = auth_engine.user_from_request(request)
+    request.state.actor = (user or {}).get("username") or "anonymous"
+    request.state.user = user
+    request.state.audited = False
+    path = request.url.path
+    # ⚠️ OPTIONS 一律放行：跨源预检不带 cookie，拦了等于把跨源开发/部署全掐掉
+    if (request.method != "OPTIONS" and auth_engine.enforcement_needed()
+            and path.startswith("/api") and not auth_engine.is_public(path) and user is None):
+        return JSONResponse({"detail": "未登录：请先登录（团队账号；见 docs/deploy_intranet.md）"},
+                            status_code=401)
+    resp = await call_next(request)
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api") \
+            and not getattr(request.state, "audited", False):
+        audit_engine.record(request.state.actor, f"{request.method} {path}",
+                            ok=resp.status_code < 400, detail=f"HTTP {resp.status_code}")
+    return resp
+
+
+@app.exception_handler(LibraryConflict)
+async def _library_conflict(request: Request, exc: LibraryConflict):
+    """库版本冲突 → **409 带原因**（不是 500，更不是静默覆盖）。"""
+    audit_engine.record(auth_engine.actor_of(request), "library.conflict", ok=False,
+                        detail=str(exc))
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+def _actor(request: Request) -> str:
+    return auth_engine.actor_of(request)
+
+
+class AuthSetupReq(BaseModel):
+    username: str
+    name: str = ""
+    password: str
+
+
+class AuthLoginReq(BaseModel):
+    username: str
+    password: str
+
+
+class AuthUserReq(BaseModel):
+    username: str
+    name: str = ""
+    password: str
+    role: str = "member"
+
+
+class AuthPatchReq(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    active: bool | None = None
+    password: str | None = None
+
+
+def _require_admin(request: Request) -> dict:
+    u = auth_engine.user_from_request(request)
+    if u is None:
+        # `AUTH=off`/未建账号（单人本地）：不做管理员校验，但**留痕照记**
+        if not auth_engine.enforcement_needed():
+            return {"username": "anonymous", "role": "admin"}
+        raise HTTPException(401, "未登录")
+    if (u.get("role") or "member") != "admin":
+        raise HTTPException(403, "只有管理员能管账号")
+    return u
+
+
+def _set_session(resp: JSONResponse, uid: str) -> None:
+    resp.set_cookie(auth_engine.COOKIE_NAME, auth_engine.issue_token(uid),
+                    max_age=auth_engine.SESSION_TTL, httponly=True, samesite="lax", path="/")
+
+
+@app.get("/api/auth/state")
+def api_auth_state(request: Request):
+    """前端开机第一问：要不要初始化 / 要不要登录 / 我是谁。"""
+    return auth_engine.state_for(request)
+
+
+@app.post("/api/auth/setup")
+def api_auth_setup(req: AuthSetupReq, request: Request):
+    """**首次初始化**：只能在没有任何账号时用一次，建第一个管理员。
+
+    ⚠️ 刻意**没有默认口令** —— 有默认口令的部署等于没有身份，而且一定会被扫。
+    """
+    store = auth_engine.AccountStore()
+    if store.load_error:
+        raise HTTPException(409, f"账号文件读不动（{store.load_error}）⇒ 不初始化，请先处置该文件")
+    if store.users():
+        raise HTTPException(409, "已经初始化过了（已有账号）；请让管理员加号")
+    try:
+        u = store.add(req.username, req.name, req.password, role="admin")
+    except auth_engine.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    audit_engine.record(u["username"], "auth.setup", target=u["username"], detail="创建第一个管理员")
+    resp = JSONResponse({"ok": True, "user": auth_engine.AccountStore.public(u)})
+    _set_session(resp, u["id"])
+    return resp
+
+
+@app.post("/api/auth/login")
+def api_auth_login(req: AuthLoginReq, request: Request):
+    try:
+        u = auth_engine.AccountStore().verify(req.username, req.password)
+    except auth_engine.AuthError as e:
+        audit_engine.record(req.username or "anonymous", "auth.login", ok=False, detail=str(e))
+        raise HTTPException(401, str(e)) from e
+    audit_engine.record(u["username"], "auth.login")
+    resp = JSONResponse({"ok": True, "user": auth_engine.AccountStore.public(u)})
+    _set_session(resp, u["id"])
+    return resp
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout(request: Request):
+    audit_engine.record(_actor(request), "auth.logout")
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth_engine.COOKIE_NAME, path="/")
+    return resp
+
+
+@app.get("/api/auth/users")
+def api_auth_users(request: Request):
+    _require_admin(request)
+    st = auth_engine.AccountStore()
+    return {"users": [auth_engine.AccountStore.public(u) for u in st.users()],
+            "error": st.load_error}
+
+
+@app.post("/api/auth/users")
+def api_auth_user_add(req: AuthUserReq, request: Request):
+    me = _require_admin(request)
+    st = auth_engine.AccountStore()
+    try:
+        u = st.add(req.username, req.name, req.password, role=req.role)
+    except auth_engine.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    audit_engine.record(me["username"], "auth.user.add", target=u["username"], detail=f"role={u['role']}")
+    request.state.audited = True
+    return {"ok": True, "user": auth_engine.AccountStore.public(u)}
+
+
+@app.post("/api/auth/users/{uid}")
+def api_auth_user_patch(uid: str, req: AuthPatchReq, request: Request):
+    """管理员改账号：改名 / 改角色 / 停用 / **重置口令**（改自己的口令也走这里，uid=自己）。"""
+    me = _require_admin(request)
+    st = auth_engine.AccountStore()
+    if req.password:
+        st.set_password(uid, req.password)
+    try:
+        u = st.patch(uid, name=req.name, role=req.role, active=req.active)
+    except auth_engine.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    what = ", ".join(k for k, v in (("password", req.password), ("name", req.name),
+                                    ("role", req.role), ("active", req.active)) if v is not None)
+    audit_engine.record(me["username"], "auth.user.patch", target=u["username"], detail=what)
+    request.state.audited = True
+    return {"ok": True, "user": auth_engine.AccountStore.public(u)}
+
+
+@app.get("/api/audit")
+def api_audit(request: Request, limit: int = 200, actor: str = ""):
+    """操作留痕（只读）。**团队成员都能看** —— "谁改了什么"透明比保密更值钱。"""
+    if auth_engine.enforcement_needed() and auth_engine.user_from_request(request) is None:
+        raise HTTPException(401, "未登录")
+    return {"rows": audit_engine.tail(limit=limit, actor=actor)}
 
 
 # ---------- 请求/响应模型 ----------
@@ -63,6 +247,11 @@ class ProjectSaveReq(BaseModel):
     name: str = "Untitled"
     modules: list[dict] = []
     edges: list[dict] = []
+    #: 载入时服务端给的版本指纹（`GET /api/project` 返回 `_rev`）。**团队化后必填**：
+    #: 不匹配 = 别人在你之前保存过 ⇒ 409，绝不静默覆盖（见 `api_project_save`）。
+    rev: str = ""
+    #: 只有在**人明确确认**"我知道会覆盖对方改动"时才置真（会被留痕成 forced overwrite）。
+    force: bool = False
 
 
 class EntryReq(BaseModel):
@@ -107,6 +296,8 @@ def api_library():
         "load_error": getattr(LIB, "load_error", ""),
         "corrupt_backup": getattr(LIB, "corrupt_backup", ""),
         "save_blocked": getattr(LIB, "save_blocked", False),
+        #: 库文件版本指纹 —— 界面据此提示"库在别处被改过"（团队化的第三层守卫）
+        "rev": getattr(LIB, "loaded_rev", ""),
         "categories": CATEGORIES,
         "equipment": d.get("equipment", {}),
         "params": d.get("params", {}),
@@ -706,18 +897,32 @@ def _project_path(name: str) -> Path:
     return PROJECTS_DIR / f"{safe}.json"
 
 
+def _project_rev(d: dict) -> str:
+    """工程内容的版本指纹（**不含 `_rev` 自身**，否则递归）。"""
+    import hashlib
+    body = {k: v for k, v in d.items() if k != "_rev"}
+    raw = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _project_with_rev(p: Path) -> dict:
+    d = json.loads(p.read_text(encoding="utf-8"))
+    d["_rev"] = _project_rev(d) if not d.get("_rev") else d["_rev"]
+    return d
+
+
 @app.get("/api/project")
 def api_project_load(name: str | None = None):
-    """载入项目;不指定 name 时取最近修改的一个。"""
+    """载入项目;不指定 name 时取最近修改的一个。返回值带 `_rev`（保存时要带回来）。"""
     if name:
         p = _project_path(name)
         if not p.exists():
             raise HTTPException(404, f"project not found: {name}")
-        return json.loads(p.read_text(encoding="utf-8"))
+        return _project_with_rev(p)
     if not PROJECTS_DIR.exists() or not list(PROJECTS_DIR.glob("*.json")):
-        return {"name": "未命名项目", "modules": [], "edges": []}
+        return {"name": "未命名项目", "modules": [], "edges": [], "_rev": ""}
     latest = max(PROJECTS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime)
-    return json.loads(latest.read_text(encoding="utf-8"))
+    return _project_with_rev(latest)
 
 
 @app.get("/api/project/list")
@@ -740,18 +945,47 @@ def api_project_list():
 
 
 @app.post("/api/project/save")
-def api_project_save(req: ProjectSaveReq):
+def api_project_save(req: ProjectSaveReq, request: Request):
+    """保存工程 —— **带版本守卫**（团队化的第三层：谁在我之前改过）。
+
+    ⚠️ 这是多人共用一台服务器时**最容易丢改动**的地方：每个人 POST 的都是**整份工程**，
+    没有守卫的话"后保存的人"会把先保存的人的改动**整份抹掉，而且双方都以为存上了**。
+    规则：
+      · 盘上文件的 `_rev` == 请求带的 `rev` ⇒ 正常保存；
+      · 不等（别人改过）⇒ **409 带原因**，请重新载入（或者人明确确认后带 `force=true`）；
+      · 目标文件已存在但请求没带 `rev`（如"另存为"撞了别人的工程名）⇒ 同样 409，不许无声明覆盖。
+    覆盖一定留痕（`project.save` / `project.overwrite`），谁覆盖了谁在留痕里看得见。
+    """
     p = _project_path(req.name)
+    cur = _project_rev(json.loads(p.read_text(encoding="utf-8"))) if p.exists() else ""
+    if p.exists() and req.rev != cur:
+        if not req.force:
+            raise HTTPException(
+                409, f"工程 `{req.name}` 在你载入之后被改过（盘上版本 {cur or '—'} / 你手上的 "
+                     f"{req.rev or '（未带版本，可能是另存为撞名）'}）⇒ 为免覆盖对方的改动，本次**没有保存**。"
+                     f"请重新载入该工程，或把改动另存为别的名字；确要覆盖请显式确认。")
+        audit_engine.record(_actor(request), "project.overwrite", target=req.name,
+                            detail=f"forced：{req.rev or '(无)'} → {cur or '(无)'}", ok=True)
+    else:
+        audit_engine.record(_actor(request), "project.save", target=req.name,
+                            detail=f"modules={len(req.modules)}", ok=True)
+    request.state.audited = True
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(req.model_dump_json(indent=2), encoding="utf-8")
-    return {"saved": str(p), "name": req.name, "modules": len(req.modules)}
+    data = req.model_dump()
+    data.pop("rev", None)
+    data.pop("force", None)
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    new_rev = _project_rev(data)
+    return {"saved": str(p), "name": req.name, "modules": len(req.modules), "_rev": new_rev}
 
 
 @app.delete("/api/project/{name}")
-def api_project_delete(name: str):
+def api_project_delete(name: str, request: Request):
     p = _project_path(name)
     if p.exists():
         p.unlink()
+    audit_engine.record(_actor(request), "project.delete", target=name)
+    request.state.audited = True
     return {"ok": True}
 
 
@@ -1390,3 +1624,30 @@ def api_gds(req: GdsReq):
 def api_gds_live(req: GdsReq):
     from engine.klink_draw import live_draw
     return live_draw(req.model_dump())
+
+
+@app.post("/api/library/reload")
+def api_library_reload(request: Request):
+    """**丢弃内存副本、重新从盘上读库**（版本冲突后由人显式触发）。
+
+    为什么需要它：多人/多进程下，库是**整份覆盖**写的；`LibraryConflict` 会拒写以免覆盖别人的改动，
+    但拒写之后必须有一条"接受对方版本"的路 —— 否则用户就卡住了（点一下重载，再重做本次修改）。
+    """
+    rev = LIB.reload()
+    audit_engine.record(_actor(request), "library.reload", detail=f"rev={rev}")
+    request.state.audited = True
+    return {"ok": True, "rev": rev, "load_error": LIB.load_error}
+
+
+# ============================================================================
+# 静态托管（团队部署必需）：内网服务器上直接把 `web/dist` 发出去，
+# 让同事用浏览器访问 `http://<服务器>:8000` —— **每个人不用装 node、不用起 dev server**。
+# ⚠️ 必须 **mount 在所有 /api 路由之后**（否则 "/" 会抢在 API 前面）。
+# ⚠️ 同源也顺带解决了会话 cookie（SameSite=Lax 只在同源下随请求发送）。
+# 没构建过 dist 时不影响开发（前端仍走 vite dev + proxy）。
+# ============================================================================
+_WEB_DIST = Path(os.environ.get("OPENNANO_WEB_DIST")
+                 or (Path(__file__).resolve().parents[1] / "web" / "dist"))
+if _WEB_DIST.is_dir() and (_WEB_DIST / "index.html").exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=str(_WEB_DIST), html=True), name="web")

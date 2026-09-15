@@ -1070,3 +1070,79 @@ body::after{ z-index: 2; }           /* 微噪点（指针穿透） */
     background: linear-gradient(90deg, transparent, var(--fam, var(--accent-hi)), transparent);
   }
 }
+
+/* ============================================================================
+   团队化（P0 · 2026-09-15）：登录门禁 / 当前用户 / 团队面板
+   口径照 `docs/design.md`：字号只用 --fs-* 档、颜色只用主题变量（否则"设计语言体检"会红）
+   ========================================================================== */
+.auth-gate {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--text); font-size: var(--fs-base);
+}
+.auth-card {
+  width: 340px; padding: 22px 22px 18px;
+  background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-2, 0 18px 50px -20px rgba(0,0,0,.7));
+}
+.auth-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.auth-card h2 { margin: 0 0 6px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+.auth-hint { margin: 0 0 12px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.auth-field { display: block; margin-bottom: 10px; }
+.auth-field > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: var(--fs-xs); }
+.auth-field input {
+  width: 100%; padding: 7px 9px; font-size: var(--fs-base); color: var(--text);
+  background: var(--raise); border: 1px solid var(--border-2); border-radius: var(--r-md);
+}
+.auth-field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.auth-err { margin: 4px 0 10px; color: var(--bad); font-size: var(--fs-xs); line-height: 1.5; white-space: pre-wrap; }
+.auth-submit { width: 100%; justify-content: center; }
+.user-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px;
+  background: var(--surface); color: var(--text-2); font-size: var(--fs-xs);
+  border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+}
+.user-chip:hover { background: var(--hover); color: var(--text); }
+.btn-link {
+  background: none; border: none; padding: 0 2px; cursor: pointer;
+  color: var(--accent-text); font-size: var(--fs-xs);
+}
+.btn-link:hover { text-decoration: underline; }
+.modal-mask {
+  position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .45);
+}
+.team-modal {
+  width: 760px; max-width: 92vw; max-height: 84vh; overflow: auto; padding: 16px 18px;
+  background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-lg);
+  color: var(--text); font-size: var(--fs-base);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.modal-head h3 { margin: 0; font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+.team-sec { margin-top: 16px; }
+.team-sec h4 { margin: 0 0 6px; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); }
+.team-msg { margin: 4px 0; color: var(--ok); font-size: var(--fs-xs); }
+.team-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.team-table th {
+  text-align: left; padding: 5px 6px; color: var(--muted);
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1px solid var(--border);
+}
+.team-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+.team-actions { display: flex; gap: 8px; }
+.team-add { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.team-add input, .team-add select {
+  padding: 6px 8px; font-size: var(--fs-sm); color: var(--text);
+  background: var(--raise); border: 1px solid var(--border-2); border-radius: var(--r-md);
+}
+.team-audit {
+  max-height: 240px; overflow: auto; border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 6px 8px; background: var(--panel);
+}
+.team-audit-row {
+  display: flex; gap: 10px; align-items: baseline; padding: 3px 0;
+  border-bottom: 1px solid var(--border); font-size: var(--fs-xs);
+}
+.team-audit-row:last-child { border-bottom: none; }
+.team-actor { color: var(--accent-text); font-weight: var(--fw-medium); }
+.team-bad { color: var(--bad); }
