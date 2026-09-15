@@ -18,6 +18,7 @@ B+ 定案（**保留 run**，与已发布契约 §32 和 core 既有 3 条一致
 """
 from __future__ import annotations
 
+import pytest
 import csv
 import io
 import zipfile

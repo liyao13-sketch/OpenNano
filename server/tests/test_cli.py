@@ -1,6 +1,7 @@
 """CI 用到的命令行出口 —— 回归网必须能守住"推上去见绿灯"的那几条纪律。"""
 from __future__ import annotations
 
+import pytest
 import json
 import subprocess
 import sys
