@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 156 40" width="156" height="40"
      role="img" aria-label="OpenNano">
   <!--
-    OpenNano 横版锁定 · 2026-09-13 by the assistant · 深色底用
+    OpenNano 横版锁定 · 2026-09-13 by the tool line · 深色底用
     用法：mark 与字标间距 = 10px（= 1/3 标记高度，别小于它）；整体最小高度 24px。
     字标用系统 UI 字体栈（产品里也是这套）—— 不引第三方字体，免联网依赖。
   -->

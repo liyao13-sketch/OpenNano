@@ -392,7 +392,7 @@ def main() -> int:
     ap.add_argument("src", help="抽取文件(如 07_文献库/D29_知识抽取.md)")
     ap.add_argument("--batch", default="", help="批次号(默认 <文献号>-<日期>)")
     ap.add_argument("--db", default="", help="目标库(默认 ~/.opennano/opennano.db)")
-    ap.add_argument("--model", default="the assistant(DeepSeek)", help="抽取执行者,写进 extra_metadata")
+    ap.add_argument("--model", default="opennano-extractor", help="抽取执行者,写进 extra_metadata")
     ap.add_argument("--anchors", default="", help="JSON 文件:{条目id: {reliability_score, citation, …}}")
     ap.add_argument("--overrides", default="", help="JSON 文件:{条目id: {process_type}} 人工归位")
     ap.add_argument("--allow-reroute", action="store_true",

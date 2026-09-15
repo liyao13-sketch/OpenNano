@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <!--
-    OpenNano 页签图标：标记「N」坐在深色圆角砖上 · 2026-09-13 by the assistant
+    OpenNano 页签图标：标记「N」坐在深色圆角砖上 · 2026-09-13 by the tool line
     深砖是为了在任何浏览器主题下都看得见；砖色与产品顶栏同色（panel #0e0f11）。
     注意：XML 注释里不能出现连续两个减号，写 CSS 变量名时请绕开。
   -->

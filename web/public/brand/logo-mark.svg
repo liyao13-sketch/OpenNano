@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"
      role="img" aria-label="OpenNano">
   <!--
-    OpenNano 标记 · 2026-09-13 by the assistant
+    OpenNano 标记 · 2026-09-13 by the tool line
     构成：一个 N，由**三段工序**组成 —— 第一段点着强调色（靛紫），后两段走 currentColor。
     「N」= Nano；三段 = 工艺步骤；只有一段着色 = owner定的 Linear 原则（强调色唯一且克制）。
     颜色：着色段为强调色；另两段用 currentColor ⇒ 内联进页面时自动跟随主题。

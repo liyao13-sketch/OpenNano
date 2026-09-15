@@ -362,7 +362,7 @@ export const en = {
   "set.machineIntro3": " (model + serial + alias), attached to a process template.",
   "set.machineAliasPh": "alias / serial, e.g. RIE200NL #1",
   "set.machineModelPh": "model, e.g. RIE200NL",
-  "set.machineVendorPh": "vendor, e.g. SAMCO (Japan)",
+  "set.machineVendorPh": "vendor, e.g. ACME Corp",
   "set.machineMaxPh": "max sample, e.g. 8-inch",
   "set.machineSerialPh": "asset number",
   "set.machineTplPh": "— owning process template —",

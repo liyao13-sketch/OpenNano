@@ -169,7 +169,7 @@ class LibraryStore:
             self._patch_surface_defects()
             self.data["surface_version"] = 1
         if self.data.get("machines_version", 0) < 1:
-            # 播种机台(来自实验室设备清单文档;型号/编号留空由实验室按实际填)
+            # 播种机台(来自内部设备清单;型号/编号留空由实验室按实际填)
             self._seed_machines()
             self.data["machines_version"] = 1
         if self.data.get("machines_version", 0) < 2:
@@ -187,11 +187,11 @@ class LibraryStore:
                     m["tool_id"] = tid[m["name"]]
             self.data["machines_version"] = 6
         if self.data.get("machines_version", 0) < 5:
-            # 备注改用《内部设备清单.md》原文(早期是我按文档转述,不够准)
+            # 备注改用内部设备清单原文(早期是按文档转述,不够准)
             self._apply_equipment_list_notes()
             self.data["machines_version"] = 5
         if self.data.get("machines_version", 0) < 4:
-            # 按《个人空间/19_工艺资料/干法刻蚀/设备资料/内部设备清单.md》(实验室 2026-09-06)补全型号/厂家/能力
+            # 按内部设备清单（实验室 2026-09-06）补全型号/厂家/能力
             self._enrich_machines()
             # 清单备注:SENTECH SI500 在役与否待确认 → 状态改正(非填空,强制)
             for m in self.data.get("machines", []):
@@ -201,18 +201,15 @@ class LibraryStore:
         self._save()
 
     def _apply_equipment_list_notes(self):
-        """《个人空间/19_工艺资料/干法刻蚀/设备资料/内部设备清单.md》(实验室 2026-09-06)原文备注。"""
+        """内部设备清单（实验室 2026-09-06）原文备注。"""
         notes = {
-            "RIE10NR": "氟基 RIE(SAMCO 8寸):CHF₃/CF₄/SF₆/O₂/N₂/Ar 刻 Si/SiO₂/Si₃N₄。"
-                       "注:Type1 掩膜开窗实际用的是鲁汶 ICP PishowA,不是本台",
-            "RIE200NL": "氯基 RIE(SAMCO 8寸):BCl₃/Cl₂ 刻 Cr/Al/Nb/Ta/Mo(与 O₂ 互锁)。cl_rie 数据源",
-            "ICP-鲁汶": "双源 ICP(Source+Bias)+脉冲+冷台(约 20°C),江苏鲁汶 8寸;"
-                        "配方 Process\\Etch-SiO2-20C。Type1 掩膜开窗用此台",
-            "ICP-Sentech": "SENTECH SI500(HBr,含三五族);设备清单(09-06)未列,在役与否**待确认**",
-            "DRIE-Bosch": "SAMCO RIE-400iPB 深硅 Bosch,**最大 4 寸**(与 Type1/2 四寸片匹配);"
-                          "开腔清洁 recipe5 1H(2026-09-06 开腔 clean)",
-            "RIBE-鲁汶": "江苏鲁汶 HassrodeLoremR 8寸:离子束斜入射刻蚀,闪耀角 30°~90°、倾斜角 35°~89°",
-            "CD-SEM": "Thermo Fisher Apreo 2(表征设备,共用):CD/侧壁形貌",
+            "RIE10NR": "氟基 RIE：CHF₃/CF₄/SF₆/O₂/N₂/Ar 系，刻 Si/SiO₂/Si₃N₄",
+            "RIE200NL": "氯基 RIE：BCl₃/Cl₂ 系，刻 Cr/Al/Nb/Ta/Mo（与 O₂ 互锁）",
+            "ICP-鲁汶": "双源 ICP(Source+Bias)+脉冲+冷台(约 20°C)；配方 Process\\Etch-SiO2-20C",
+            "ICP-Sentech": "ICP-RIE(HBr,含三五族)；内部设备清单未列，在役与否**待确认**",
+            "DRIE-Bosch": "RIE-400iPB 深硅 Bosch；开腔清洁 recipe5 1H(2026-09-06 开腔 clean)",
+            "RIBE-鲁汶": "HassrodeLoremR 离子束斜入射刻蚀，闪耀角 30°~90°、倾斜角 35°~89°",
+            "CD-SEM": "Apreo 2(表征设备,共用)：CD/侧壁形貌",
             "EBPG5200": "100 keV 电子束曝光(EBL),~10 nm;dose-CD 基线",
             "DWL66": "激光直写(同事负责),~1 μm;dose-CD 基线",
             "MA6": "紫外曝光(I 线,同事负责),~2 μm;dose-CD 基线",
