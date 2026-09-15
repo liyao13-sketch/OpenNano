@@ -267,3 +267,187 @@ def test_config_paths_are_read_at_call_time_not_at_import(tmp_path, monkeypatch)
     other = tmp_path / "another"
     monkeypatch.setenv("OPENNANO_ACCOUNTS", str(other / "u.json"))
     assert auth._accounts_path() == other / "u.json"
+
+
+# ================================================================
+# A3 审计（5.6sol，2026-09-15）查出的缺陷 —— 每条都先复现红、再修、再钉判据
+#
+# 复现证据（修前，原脚本）：
+#   P0-1 并发 add      → 100/100 轮丢号
+#   P0-2 并发 setup    → 30/30 轮双 200（文件里只留一个管理员）
+#   P1-1 重置口令      → 旧 cookie 仍 200（期望 401）
+#   P1-2 未知用户名    → 中位 1.0ms vs 存在 15.0ms（**15.8×**，可远程枚举）
+#   可疑1 密钥首次生成 → 两进程返回**不同**密钥（跨 worker 会话随机失效）
+#   可疑2 坏密钥文件   → 口令正确的登录 **500**
+#   可疑3 patch 两次落盘 → 返回 400 但新口令已生效
+# 修后同一批脚本全绿。下面这些用例是它们的常驻版本。
+# ================================================================
+
+def test_concurrent_adds_do_not_lose_accounts(tmp_path):
+    """**P0-1**：并发 `add` 不许丢号（修前：内存快照整份覆盖 ⇒ 100% 丢一个）。"""
+    import threading
+    from engine.auth import AccountStore
+    from engine.atomic import file_lock                     # noqa: F401（顺带确认模块在）
+    for n in range(20):
+        p = tmp_path / f"users_{n}.json"
+        AccountStore(p).add("admin", "", "admin_pass", "admin")
+        barrier = threading.Barrier(2)
+        errs: list[str] = []
+
+        def _add(name):
+            try:
+                st = AccountStore(p)
+                barrier.wait()
+                st.add(name, "", "member_pass", "member")
+            except Exception as e:                          # noqa: BLE001
+                errs.append(repr(e))
+
+        ts = [threading.Thread(target=_add, args=(x,)) for x in ("alice", "bob")]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        names = {u["username"] for u in AccountStore(p).users()}
+        assert names == {"admin", "alice", "bob"}, f"第 {n} 轮丢号：{names} {errs}"
+
+
+def test_concurrent_setup_yields_exactly_one_admin(tmp_path, monkeypatch):
+    """**P0-2**：并发 `setup` 必须**恰好一个 200、一个 409**（修前：两个都 200）。"""
+    import concurrent.futures
+    monkeypatch.setenv("OPENNANO_AUTH", "on")
+    monkeypatch.setenv("OPENNANO_ACCOUNTS", str(tmp_path / "users.json"))
+    monkeypatch.setenv("OPENNANO_AUDIT", str(tmp_path / "audit.log"))
+    monkeypatch.setenv("OPENNANO_SERVER_SECRET", str(tmp_path / ".sec"))
+    import main
+    from fastapi.testclient import TestClient
+
+    def _setup(name):
+        with TestClient(main.app) as c:
+            return c.post("/api/auth/setup", json={"username": name, "name": name,
+                                                  "password": "password_1"}).status_code
+
+    for n in range(8):
+        (tmp_path / "users.json").unlink(missing_ok=True)   # 每轮重置成"未初始化"
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            codes = sorted(ex.map(_setup, ["admin_a", "admin_b"]))
+        assert codes == [200, 409], f"第 {n} 轮契约被突破：{codes}"
+        admins = [u for u in json.loads((tmp_path / "users.json").read_text(encoding="utf-8"))["users"]
+                  if u["role"] == "admin"]
+        assert len(admins) == 1, f"第 {n} 轮建出了 {len(admins)} 个管理员"
+
+
+def test_password_reset_revokes_the_old_session(team):
+    """**P1-1**：管理员重置口令 ⇒ 旧 cookie **立即**失效（修前：还能用满 7 天）。"""
+    c = team["client"]
+    _setup(c)
+    _add_member(team, c)
+    member = TestClient(team["main"].app, raise_server_exceptions=False)
+    member.post("/api/auth/login", json={"username": "bob", "password": "member_pass_1"})
+    assert member.get("/api/library").status_code == 200
+    uid = next(u["id"] for u in c.get("/api/auth/users").json()["users"] if u["username"] == "bob")
+    assert c.post(f"/api/auth/users/{uid}", json={"password": "brand_new_1"}).status_code == 200
+    assert member.get("/api/library").status_code == 401, "旧 cookie 在改口令后仍然可用"
+
+
+def test_role_change_revokes_the_old_session(team):
+    """降权/提权也递增会话版本（避免"降权了但手里的 cookie 还是管理员"）。"""
+    c = team["client"]
+    _setup(c)
+    _add_member(team, c)
+    member = TestClient(team["main"].app, raise_server_exceptions=False)
+    member.post("/api/auth/login", json={"username": "bob", "password": "member_pass_1"})
+    uid = next(u["id"] for u in c.get("/api/auth/users").json()["users"] if u["username"] == "bob")
+    assert c.post(f"/api/auth/users/{uid}", json={"role": "admin"}).status_code == 200
+    assert member.get("/api/library").status_code == 401
+
+
+def test_unknown_username_still_runs_the_kdf(team, monkeypatch):
+    """**P1-2**：用户名不存在时也必须跑一次 PBKDF2（修前不跑 ⇒ 实测 15.8× 耗时差，可枚举用户名）。
+
+    判据用**确定性**的调用计数（不靠掐时间 —— 那种判据在 CI 上会假红）：
+    未知用户名 ⇒ `verify_password` **照样被调用一次**。
+    """
+    from engine import auth as A
+    calls: list[str] = []
+    real = A.verify_password
+
+    def counting(pw, rec):
+        calls.append(rec.get("algo", "?"))
+        return real(pw, rec)
+
+    monkeypatch.setattr(A, "verify_password", counting)
+    with pytest.raises(A.AuthError):
+        A.AccountStore().verify("definitely_missing_user", "whatever_pass")
+    assert calls == ["pbkdf2_sha256"], f"未知用户名没跑 dummy PBKDF2：{calls}"
+
+
+def test_secret_file_is_created_exclusively_and_never_overwritten(tmp_path, monkeypatch):
+    """**可疑点 1**：密钥文件已存在时**绝不许覆盖**（修前两个进程各写一份 ⇒ 会话互不认）。"""
+    from engine import auth as A
+    p = tmp_path / "secret"
+    monkeypatch.setenv("OPENNANO_SERVER_SECRET", str(p))
+    first = A._server_secret()
+    p.write_text(first.hex(), encoding="utf-8")
+    assert A._server_secret() == first                    # 第二次读到的还是同一把
+    assert p.read_text(encoding="utf-8").strip() == first.hex()
+    (tmp_path / "secret").unlink()
+    again = A._server_secret()                            # 真没有时才创建
+    assert len(again) == 32
+
+
+def test_corrupt_secret_is_quarantined_and_does_not_500(tmp_path, monkeypatch):
+    """**可疑点 2**：密钥文件不是合法 hex ⇒ 隔离 + 轮换，**不许 500**（修前 setup/登录都 500）。"""
+    from engine import auth as A
+    monkeypatch.setenv("OPENNANO_AUTH", "on")
+    monkeypatch.setenv("OPENNANO_ACCOUNTS", str(tmp_path / "users.json"))
+    monkeypatch.setenv("OPENNANO_AUDIT", str(tmp_path / "audit.log"))
+    monkeypatch.setenv("OPENNANO_SERVER_SECRET", str(tmp_path / "secret"))
+    import main
+    c = TestClient(main.app, raise_server_exceptions=False)
+    assert c.post("/api/auth/setup", json={"username": "admin", "name": "",
+                                          "password": "admin_pass"}).status_code == 200
+    (tmp_path / "secret").write_text("not-hex", encoding="utf-8")      # 事后损坏
+    fresh = TestClient(main.app, raise_server_exceptions=False)
+    r = fresh.post("/api/auth/login", json={"username": "admin", "password": "admin_pass"})
+    assert r.status_code == 200, f"坏密钥文件把登录打成了 {r.status_code}"
+    assert fresh.get("/api/library").status_code == 200
+    assert list(tmp_path.glob("secret.corrupt-*")), "坏密钥文件没有被隔离留档"
+    assert "auth.secret.rotated" in (tmp_path / "audit.log").read_text(encoding="utf-8")
+    # 无 cookie 的 `/api/auth/state`（= 页面首次加载）也必须报出来，否则用户永远不知道被登出了
+    st = TestClient(main.app, raise_server_exceptions=False).get("/api/auth/state").json()
+    assert st["secret_rotated_at"], "页面首次加载看不到密钥轮换"
+
+
+def test_patch_is_all_or_nothing(team):
+    """**可疑点 3**：一次请求里的多项修改要么全成、要么全不成（修前：报 400 但口令已改）。"""
+    c = team["client"]
+    _setup(c)
+    _add_member(team, c)
+    uid = next(u["id"] for u in c.get("/api/auth/users").json()["users"] if u["username"] == "bob")
+    r = c.post(f"/api/auth/users/{uid}", json={"password": "new_pass_1", "role": "invalid_role"})
+    assert r.status_code == 400
+    assert TestClient(team["main"].app).post(
+        "/api/auth/login", json={"username": "bob", "password": "member_pass_1"}
+    ).status_code == 200, "报了 400，但旧口令已经不能用了（部分提交）"
+    assert TestClient(team["main"].app).post(
+        "/api/auth/login", json={"username": "bob", "password": "new_pass_1"}
+    ).status_code == 401, "报了 400，但新口令已经生效（部分提交）"
+
+
+def test_accounts_file_write_is_atomic_and_private(tmp_path):
+    """写入要**原子**（不留半截 JSON、不留临时文件）且权限 0600。"""
+    from engine.auth import AccountStore
+    p = tmp_path / "users.json"
+    AccountStore(p).add("alice", "", "alice_pass", "admin")
+    assert json.loads(p.read_text(encoding="utf-8"))["users"][0]["username"] == "alice"
+    assert oct(p.stat().st_mode)[-3:] == "600"
+    assert not list(tmp_path.glob("*.tmp")), "原子写留下了临时文件"
+
+
+def test_open_to_network_flag_when_auth_is_off(team, monkeypatch):
+    """**可疑点 4 的建议**：认证不强制 + 非回环监听 ⇒ 状态里要报出来（界面据此弹告警）。"""
+    from engine import auth as A
+    monkeypatch.setenv("OPENNANO_AUTH", "off")
+    monkeypatch.setenv("OPENNANO_HOST", "0.0.0.0")
+    assert A.open_to_network() is True
+    assert team["client"].get("/api/auth/state").json()["open_to_network"] is True
+    monkeypatch.setenv("OPENNANO_HOST", "127.0.0.1")
+    assert A.open_to_network() is False

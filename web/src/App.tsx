@@ -479,6 +479,16 @@ export default function App() {
       setAuth(a)
       setAuthChecked(true)
       if (a?.auth_required && !a?.user) return
+      // A3 审计后新增的两个状态：门是不是开着的 / 密钥是不是刚轮换过（会话全失效）
+      if (a?.open_to_network) {
+        const ts = new Date().toLocaleTimeString('en-GB', { hour12: false })
+        setIssues(is => [...is, { t: ts, text: t('issue.authOpen') }])
+        pushLog('warn', t('log.authOpen'))
+      }
+      if (a?.secret_rotated_at) {
+        const ts = new Date().toLocaleTimeString('en-GB', { hour12: false })
+        setIssues(is => [...is, { t: ts, text: t('issue.secretRotated', { at: a.secret_rotated_at }) }])
+      }
       if (a?.needs_setup) {
         // `OPENNANO_AUTH=auto`（单人本地）默认不锁门，但"这台服务器还没建账号"必须**说出来**：
         // 团队共用时忘了建账号，等于留一扇没锁的门。

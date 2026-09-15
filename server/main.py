@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -29,7 +31,30 @@ from kb.ingest import ingest_all
 from kb import core_source as core
 from kb import expack as expack_engine
 
-app = FastAPI(title="OpenNano Server", version="0.1.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """启动钩子：**认证不强制 + 非回环监听** 时大声警告（A3 审计可疑点 4 的建议）。
+
+    为什么值得单独做：`OPENNANO_AUTH` 默认 `auto`＝"有账号才强制"，而**首次部署还没有账号** ⇒
+    那一刻服务是全开的。单人本地无所谓（只听 127.0.0.1），但内网服务器上这一句可能没人注意到。
+    所以既打 stderr，也通过 `/api/auth/state` 的 `open_to_network` 让**界面**弹出来。
+    （用 `lifespan` 而不是 `@app.on_event`：后者在 FastAPI 里已弃用，会往回归网里加告警噪音。）
+    """
+    try:
+        if auth_engine.open_to_network():
+            print("=" * 78, file=sys.stderr)
+            print("⚠️⚠️  认证未强制（OPENNANO_AUTH=" + auth_engine.auth_mode()
+                  + "）且正在监听 " + (auth_engine.listen_host() or "?")
+                  + " —— 局域网内任何人无需登录即可读写数据！", file=sys.stderr)
+            print("     要么建第一个管理员（界面顶部「创建管理员」），要么设 OPENNANO_AUTH=on 并重启。",
+                  file=sys.stderr)
+            print("=" * 78, file=sys.stderr)
+    except Exception:                     # noqa: BLE001 —— 只是告警，不许挡住启动
+        pass
+    yield
+
+
+app = FastAPI(title="OpenNano Server", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
 
@@ -118,8 +143,11 @@ def _require_admin(request: Request) -> dict:
     return u
 
 
-def _set_session(resp: JSONResponse, uid: str) -> None:
-    resp.set_cookie(auth_engine.COOKIE_NAME, auth_engine.issue_token(uid),
+def _set_session(resp: JSONResponse, user: dict) -> None:
+    """写会话 cookie。**必须带上 `session_version`** —— 它让"改口令/改角色/停用"能立刻作废旧 cookie
+    （A3 审计 P1-1：原来只绑 uid+exp，重置口令后旧会话还能用满 7 天）。"""
+    resp.set_cookie(auth_engine.COOKIE_NAME,
+                    auth_engine.issue_token(user["id"], int(user.get("session_version") or 1)),
                     max_age=auth_engine.SESSION_TTL, httponly=True, samesite="lax", path="/")
 
 
@@ -138,15 +166,17 @@ def api_auth_setup(req: AuthSetupReq, request: Request):
     store = auth_engine.AccountStore()
     if store.load_error:
         raise HTTPException(409, f"账号文件读不动（{store.load_error}）⇒ 不初始化，请先处置该文件")
-    if store.users():
-        raise HTTPException(409, "已经初始化过了（已有账号）；请让管理员加号")
+    # ⚠️ A3 审计 P0-2：**判空与建号必须在同一把锁内**（原来分两步 ⇒ 两个并发请求各建一个管理员，
+    #    实测 30/30 轮双 200）。锁内重读由 `bootstrap_admin` 负责；谁先到谁赢，后者 409。
     try:
-        u = store.add(req.username, req.name, req.password, role="admin")
+        u = store.bootstrap_admin(req.username, req.name, req.password)
+    except auth_engine.AlreadyInitialized as e:
+        raise HTTPException(409, str(e)) from e
     except auth_engine.AuthError as e:
         raise HTTPException(400, str(e)) from e
     audit_engine.record(u["username"], "auth.setup", target=u["username"], detail="创建第一个管理员")
     resp = JSONResponse({"ok": True, "user": auth_engine.AccountStore.public(u)})
-    _set_session(resp, u["id"])
+    _set_session(resp, u)
     return resp
 
 
@@ -159,7 +189,7 @@ def api_auth_login(req: AuthLoginReq, request: Request):
         raise HTTPException(401, str(e)) from e
     audit_engine.record(u["username"], "auth.login")
     resp = JSONResponse({"ok": True, "user": auth_engine.AccountStore.public(u)})
-    _set_session(resp, u["id"])
+    _set_session(resp, u)
     return resp
 
 
@@ -197,10 +227,12 @@ def api_auth_user_patch(uid: str, req: AuthPatchReq, request: Request):
     """管理员改账号：改名 / 改角色 / 停用 / **重置口令**（改自己的口令也走这里，uid=自己）。"""
     me = _require_admin(request)
     st = auth_engine.AccountStore()
-    if req.password:
-        st.set_password(uid, req.password)
+    # ⚠️ A3 审计可疑点 3：原来 `set_password()` + `patch()` **两次落盘** ⇒ 提交
+    #    `{"password": 新口令, "role": 非法}` 会**返回 400 但口令已经改了**（实测新口令能登录）。
+    #    现在全部交给 `patch()` 一次完成：先校验、后修改、最后只写一次。
     try:
-        u = st.patch(uid, name=req.name, role=req.role, active=req.active)
+        u = st.patch(uid, password=req.password, name=req.name,
+                     role=req.role, active=req.active)
     except auth_engine.AuthError as e:
         raise HTTPException(400, str(e)) from e
     what = ", ".join(k for k, v in (("password", req.password), ("name", req.name),
