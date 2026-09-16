@@ -1483,8 +1483,9 @@ def health():
     `plugins` 里的每一项都**永不抛**：插件缺失/拒装/自爆只让它自己红，服务照常跑
     （见 `docs/extension-points.md` 的"失败隔离"）。
     """
+    from kb import machine_catalog as mc
     from kb import menu_reader as mr
-    plugins = {"menu_parser": mr.plugin_status()}
+    plugins = {"menu_parser": mr.plugin_status(), "machine_catalog": mc.status()}
     return {"ok": True, "service": "opennano", "version": "0.1.0",
             "plugins": plugins,
             "plugins_ok": all(p.get("ok") for p in plugins.values())}

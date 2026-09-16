@@ -300,8 +300,23 @@ class LibraryStore:
             })
 
     def _seed_machines(self):
-        """按工艺模板播种真实机台。名称取自实验室文档;型号默认留空(不编造)。"""
+        """播种机台：**优先外部清单**（若提供），否则用内建表（原行为）。
+
+        ⚠️ 2026-09-16（工单 B2-残C 的工具线侧接缝）：机台名写死在代码里 ⇒ 公开仓库带指纹、
+        加一台机要改代码发版。外部清单（`kb/machine_catalog.py`，路径 `~/.opennano/machines.json`
+        或 `OPENNANO_MACHINES`）存在时以它为准；**不存在时行为与以前一模一样**。
+        权威归属（代码 vs JSON）待数据线按工单 `§附 待裁①` 裁定 —— 本处只在"有清单就用"这一层接缝，
+        不做权威切换。**清单存在但坏 ⇒ 抛错出声**（不静默回退，免得主人以为清单生效了）。
+        """
         if self.data.get("machines"):
+            return
+        from kb import machine_catalog as mc
+        external = mc.load()                      # 不存在 → None（走内建表）；坏了 → 抛
+        if external is not None:
+            self.data.setdefault("machines", [])
+            for m in external:
+                self.data["machines"].append({k: v for k, v in m.items()
+                                              if k in mc.KNOWN_FIELDS or k.startswith("core_")})
             return
         tmpl = {}
         for cat in CATEGORIES:
