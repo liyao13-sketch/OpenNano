@@ -51,12 +51,12 @@ def test_run_facts_盘上改了要重建(tmp_path, monkeypatch):
     from kb import batch_runs as br
 
     _runs_csv(core, [{"run_id": "B1-RIE-0001", "batch_id": "B1", "stage": "RIE",
-                      "tool_id": "RIE10NR"}])
-    assert br._core_run_facts()["B1-RIE-0001"]["tool_id"] == "RIE10NR"
+                      "tool_id": "TOOL_A"}])
+    assert br._core_run_facts()["B1-RIE-0001"]["tool_id"] == "TOOL_A"
 
     _runs_csv(core, [{"run_id": "B1-RIE-0001", "batch_id": "B1", "stage": "RIE",
-                      "tool_id": "RIE200NL", "status": "done 改长一些改变尺寸"}])
-    assert br._core_run_facts()["B1-RIE-0001"]["tool_id"] == "RIE200NL"
+                      "tool_id": "TOOL_B", "status": "done 改长一些改变尺寸"}])
+    assert br._core_run_facts()["B1-RIE-0001"]["tool_id"] == "TOOL_B"
 
 
 def test_parent_map_core_部分盘上改了要重建(tmp_path, monkeypatch):
