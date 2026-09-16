@@ -116,3 +116,71 @@ def test_资产库路径可由_env_覆盖(tmp_path, monkeypatch):
         monkeypatch.delenv("OPENNANO_LIBRARY", raising=False)
         importlib.reload(cfg)
         importlib.reload(lib_mod)
+
+
+# ---------------------------------------------------------------- 播种/迁移链（2026-09-16 审计 P0）
+def test_全新安装必须播种并落盘(tmp_path):
+    """红证：修复前全新库是**空骨架**（无工艺目录/无机台/无参数），而且**不落盘**。
+
+    根因：整段播种+迁移链被缩进事故塞进了 `_quarantine_corrupt()` 的末尾 ⇒
+    只有"库文件损坏"那条路才会跑。新同事机器/新服务器/CI 全部中招。
+    """
+    p = _store(tmp_path)
+    lib = LibraryStore(p)
+    assert (lib.data.get("equipment") or {}), "全新库没有设备库（工艺目录没播种）"
+    assert len(lib.data.get("machines") or []) >= 10, "全新库没有机台"
+    assert lib.data.get("params"), "全新库没有默认参数"
+    assert lib.data.get("seed_version") == 7 and lib.data.get("machines_version") == 7
+    assert p.exists(), "播种后没落盘 ⇒ 下次启动又是空的"
+    # 型号/厂家是"迁移链顺序 bug"的直接受害者：<6 挡在 <4 前面 ⇒ enrich 永不执行。
+    # ⚠️ 这里**不写具体机台名**（真机台名是公开层指纹，判据会红）—— 只看结构。
+    assert any(m.get("vendor") and m.get("model") for m in lib.data["machines"]), \
+        "机台型号/厂家没补（顺序 bug：<6 挡在 <4 前面）"
+
+
+def test_老库载入要被迁移(tmp_path):
+    """合法 JSON 但很旧（无 seed_version / 无机台）⇒ 必须被迁移，而不是"载入即完事"。"""
+    p = _store(tmp_path)
+    p.write_text(json.dumps({"version": 1, "params": {"膜厚": {"unit": "nm", "category": "膜厚"}}},
+                            ensure_ascii=False), encoding="utf-8")
+    lib = LibraryStore(p)
+    assert lib.data.get("seed_version") == 7, "老库没被迁移（迁移链不可达）"
+    assert lib.data["params"].get("膜厚"), "迁移把用户已有的参数弄丢了"
+    assert len(lib.data.get("machines") or []) >= 10
+
+
+def test_v6_库要补做_enrich(tmp_path):
+    """已到 v6 但 `<4` 从未跑过的库（顺序 bug 的受害者）⇒ v7 补做，且**只填空字段**。
+
+    构造方式：先播种出新库、把机台字段人为抹空、版本退回 6 —— 这样源码里
+    **不必写任何真机台名**（机器名只作为运行期数据出现）。
+    """
+    p = _store(tmp_path)
+    fresh = LibraryStore(p)
+    ms = [dict(m) for m in fresh.data["machines"]]
+    assert ms, "播种没出机台，用例前提不成立"
+    for m in ms:
+        m["vendor"], m["model"] = "", ""
+    ms[0]["notes"] = "**用户手改的备注**"
+    ms[0]["vendor"] = "某厂"                       # 已填值：绝不许被覆盖
+    data = dict(fresh.data)
+    data["machines"] = ms
+    data["machines_version"] = 6                    # 退回受害版本
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    lib = LibraryStore(p)
+    got = {m["name"]: m for m in lib.data["machines"]}
+    assert sum(1 for m in lib.data["machines"] if m.get("vendor")) > 1, "v7 没补上缺的厂家"
+    assert got[ms[0]["name"]]["notes"] == "**用户手改的备注**", "补做覆盖了用户手改的备注"
+    assert got[ms[0]["name"]]["vendor"] == "某厂", "补做覆盖了已填值"
+    assert lib.data["machines_version"] == 7
+
+
+def test_迁移是幂等的(tmp_path):
+    """同一份库连续载入两次，数据不许被"迁移两遍"污染（影响规则/依赖边都是列表）。"""
+    p = _store(tmp_path)
+    a = LibraryStore(p)
+    first = json.dumps(a.data, ensure_ascii=False, sort_keys=True)
+    b = LibraryStore(p)
+    second = json.dumps(b.data, ensure_ascii=False, sort_keys=True)
+    assert first == second, "第二次载入又改动了库内容 ⇒ 迁移不幂等"

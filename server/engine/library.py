@@ -113,36 +113,20 @@ class LibraryStore:
                 #    ③原因挂到 `load_error`，由 API/界面显式告知。
                 self.load_error = f"{type(e).__name__}: {e}"
                 self._quarantine_corrupt()
+        self._migrate()
 
-    def _quarantine_corrupt(self) -> None:
-        """把损坏的库文件改名留档，并禁止本次写盘（宁可这次不落盘，也不覆盖可能救得回的文件）。"""
-        from datetime import datetime
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        dest = self.path.with_name(f"{self.path.stem}.corrupt-{stamp}{self.path.suffix}")
-        try:
-            self.path.replace(dest)
-            self.corrupt_backup = str(dest)
-        except OSError:
-            self.corrupt_backup = ""      # 改名失败也不写：宁留一个读不动的文件，也不覆盖它
-        self.save_blocked = True
-        for key in ("equipment", "materials", "recipes", "defaults",
-                    "film_props", "params"):
-            self.data.setdefault(key, {})
-        for key in ("param_links", "influence_rules", "machines"):
-            self.data.setdefault(key, [])
-        self.data.setdefault("param_categories",
-                             ["尺寸", "膜厚", "材料", "质量"])
-        # 常驻参数增补(幂等;老库也能补上,不动用户已有项)
-        for pname, pdef in (("scallop", {"unit": "nm", "category": "尺寸"}),
-                            ("侧壁粗糙度", {"unit": "nm", "category": "尺寸"}),
-                            ("表面脏污", {"unit": "", "category": "质量"}),
-                            ("形貌缺陷", {"unit": "", "category": "质量"}),
-                            ("侧壁角_光栅", {"unit": "°", "category": "尺寸"}),
-                            ("侧壁角_方块", {"unit": "°", "category": "尺寸"}),
-                            ("深度均匀性", {"unit": "%", "category": "尺寸"}),
-                            ("掩膜剩余", {"unit": "nm", "category": "膜厚"}),
-                            ("掩膜消耗", {"unit": "nm", "category": "膜厚"})):
-            self.data.setdefault("params", {}).setdefault(pname, dict(pdef))
+    def _migrate(self):
+        """播种 + 一次性迁移链，在 `_load()` **末尾**调用（新库/老库都要走）。
+
+        ⚠️ 2026-09-16 审计（P0）：这个链原来**整段落在 `_quarantine_corrupt()` 的末尾**
+        （缩进事故）⇒ 只有"库文件损坏"那条路才会执行它。后果：
+          · **全新安装**（新同事机器 / CI / 新服务器）拿到的是一份**空骨架** —— 没有 104 种工艺目录、
+            没有机台、没有默认参数、没有影响规则，而且**静默**（界面上就是一片空）；
+          · **老库**的迁移（含机台 `tool_id` 回填）**永远不会跑**。
+        修法：把整段搬进 `_migrate()`，`_load()` 末尾无条件调用；`_quarantine_corrupt()` 仍会调用它
+        （损坏后重建内存副本的既有行为不变）。
+        """
+
         if self.data.get("seed_version", 0) < 7:
             # 用 104 种工艺目录重建设备库:清空 9 类 + 删除旧分类键 + 重置失效默认
             for c in CATEGORIES:
@@ -180,6 +164,20 @@ class LibraryStore:
             # 补播种:表征设备(架构文档 §十一:CD-SEM + 椭偏仪 + 应力仪,共用)
             self._seed_metrology_machines()
             self.data["machines_version"] = 2
+        if self.data.get("machines_version", 0) < 4:
+            # 按内部设备清单（实验室 2026-09-06）补全型号/厂家/能力
+            self._enrich_machines()
+            # 清单备注:SENTECH SI500 在役与否待确认 → 状态改正(非填空,强制)
+            for m in self.data.get("machines", []):
+                if m.get("name") == "ICP-Sentech" and m.get("status") == "active":
+                    m["status"] = "待确认"
+            self.data["machines_version"] = 4
+
+        if self.data.get("machines_version", 0) < 5:
+            # 备注改用内部设备清单原文(早期是按文档转述,不够准)
+            self._apply_equipment_list_notes()
+            self.data["machines_version"] = 5
+
         if self.data.get("machines_version", 0) < 6:
             # 机台补 core tool_id(数据域权威机台标识,实验包/查询用它对齐)
             tid = {"RIE200NL": "RIE200NL", "RIE10NR": "RIE10NR",
@@ -190,19 +188,45 @@ class LibraryStore:
                 if m.get("name") in tid and not m.get("tool_id"):
                     m["tool_id"] = tid[m["name"]]
             self.data["machines_version"] = 6
-        if self.data.get("machines_version", 0) < 5:
-            # 备注改用内部设备清单原文(早期是按文档转述,不够准)
-            self._apply_equipment_list_notes()
-            self.data["machines_version"] = 5
-        if self.data.get("machines_version", 0) < 4:
-            # 按内部设备清单（实验室 2026-09-06）补全型号/厂家/能力
+
+        if self.data.get("machines_version", 0) < 7:
+            # 补做（2026-09-16）：修复"迁移链不可达 + 顺序 bug"期间落下的库 ——
+            # 它们已是 v6 但 `_enrich_machines()` 从未跑过（型号/厂家/最大片寸缺）。
+            # `_enrich_machines` 只填**空**字段，绝不覆盖已填/手改值。
             self._enrich_machines()
-            # 清单备注:SENTECH SI500 在役与否待确认 → 状态改正(非填空,强制)
-            for m in self.data.get("machines", []):
-                if m.get("name") == "ICP-Sentech" and m.get("status") == "active":
-                    m["status"] = "待确认"
-            self.data["machines_version"] = 4
+            self.data["machines_version"] = 7
         self._save()
+
+    def _quarantine_corrupt(self) -> None:
+        """把损坏的库文件改名留档，并禁止本次写盘（宁可这次不落盘，也不覆盖可能救得回的文件）。"""
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dest = self.path.with_name(f"{self.path.stem}.corrupt-{stamp}{self.path.suffix}")
+        try:
+            self.path.replace(dest)
+            self.corrupt_backup = str(dest)
+        except OSError:
+            self.corrupt_backup = ""      # 改名失败也不写：宁留一个读不动的文件，也不覆盖它
+        self.save_blocked = True
+        for key in ("equipment", "materials", "recipes", "defaults",
+                    "film_props", "params"):
+            self.data.setdefault(key, {})
+        for key in ("param_links", "influence_rules", "machines"):
+            self.data.setdefault(key, [])
+        self.data.setdefault("param_categories",
+                             ["尺寸", "膜厚", "材料", "质量"])
+        # 常驻参数增补(幂等;老库也能补上,不动用户已有项)
+        for pname, pdef in (("scallop", {"unit": "nm", "category": "尺寸"}),
+                            ("侧壁粗糙度", {"unit": "nm", "category": "尺寸"}),
+                            ("表面脏污", {"unit": "", "category": "质量"}),
+                            ("形貌缺陷", {"unit": "", "category": "质量"}),
+                            ("侧壁角_光栅", {"unit": "°", "category": "尺寸"}),
+                            ("侧壁角_方块", {"unit": "°", "category": "尺寸"}),
+                            ("深度均匀性", {"unit": "%", "category": "尺寸"}),
+                            ("掩膜剩余", {"unit": "nm", "category": "膜厚"}),
+                            ("掩膜消耗", {"unit": "nm", "category": "膜厚"})):
+            self.data.setdefault("params", {}).setdefault(pname, dict(pdef))
+        self._migrate()
 
     def _apply_equipment_list_notes(self):
         """内部设备清单（实验室 2026-09-06）原文备注。"""
