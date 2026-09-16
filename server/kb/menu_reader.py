@@ -43,6 +43,77 @@ class MenuParserUnavailable(RuntimeError):
     """找不到/无法加载共享解析器时抛出（提示怎么修，不静默降级）。"""
 
 
+# ---- 插件契约（T2 代码扩展点 v0.1 · 2026-09-16 · 见 `docs/extension-points.md`）----------
+#: 宿主支持的插件接口版本；插件 manifest 必须声明同版本，否则**拒装**（宁可装不上，别在运行期炸）。
+PLUGIN_API_VERSION = 1
+#: 插件必须提供的最小 API 面（缺一即拒装，并**点名缺了哪个**）。
+_REQUIRED_API = ("parse_grp", "parse_rcp")
+#: 允许的 kind（未知 kind 拒装）
+_ALLOWED_KINDS = ("menu_parser",)
+#: 插件状态（给 `/api/health` 与排障用；名字以 `_CACHE` 结尾 ⇒ 测试夹具会自动复位）
+_PLUGIN_STATUS_CACHE: dict | None = None
+
+
+def _plugin_fail(path: Path, name: str, msg: str) -> "MenuParserUnavailable":
+    """记下失败状态（好让 /api/health 说出来）并返回要抛的异常。"""
+    global _PLUGIN_STATUS_CACHE
+    _PLUGIN_STATUS_CACHE = {"path": str(path), "name": name, "ok": False,
+                            "manifest": False, "version": "", "api_version": None,
+                            "error": msg}
+    return MenuParserUnavailable(msg)
+
+
+def _validate_plugin(mod, path: Path) -> dict:
+    """校验 manifest 与 API 面 → 状态字典；不通过则抛（**出声，不静默降级**）。
+
+    规则（`docs/extension-points.md` §三）：
+      · 没有 `PLUGIN` manifest ⇒ 按 **legacy** 载入（向后兼容老式"暗插件"），但状态里标出来；
+      · `kind` 不在允许表 ⇒ 拒装；
+      · `api_version` 与宿主不符 ⇒ 拒装；
+      · **`writable=True` ⇒ 拒装** —— 红线做成字段，不靠自觉；
+      · 缺必需 API ⇒ 拒装并点名。
+    """
+    name = path.stem
+    man = getattr(mod, "PLUGIN", None)
+    status = {"path": str(path), "name": name, "ok": True, "manifest": bool(man),
+              "version": "", "api_version": None, "error": ""}
+    if isinstance(man, dict):
+        status["name"] = str(man.get("name") or name)
+        status["version"] = str(man.get("version") or "")
+        status["api_version"] = man.get("api_version")
+        kind = man.get("kind")
+        if kind not in _ALLOWED_KINDS:
+            raise _plugin_fail(path, status["name"],
+                               f"插件 kind 不受支持：{kind!r}（允许 {_ALLOWED_KINDS}）")
+        if man.get("api_version") != PLUGIN_API_VERSION:
+            raise _plugin_fail(path, status["name"],
+                               f"插件 api_version={man.get('api_version')!r} 与宿主 "
+                               f"{PLUGIN_API_VERSION} 不符 ⇒ 拒装（请同步插件或升级宿主）")
+        if man.get("writable") is True:
+            raise _plugin_fail(path, status["name"],
+                               "插件声明 writable=True ⇒ 拒装：插件只许产出提案/记录/包，"
+                               "落库一律由宿主过中心闸（见 docs/extension-points.md）")
+    else:
+        status["error"] = "插件未声明 PLUGIN manifest（按 legacy 载入；建议补 manifest）"
+    missing = [n for n in _REQUIRED_API if not callable(getattr(mod, n, None))]
+    if missing:
+        raise _plugin_fail(path, status["name"],
+                           f"插件缺少必需 API：{missing}（要求 {list(_REQUIRED_API)}）")
+    return status
+
+
+def plugin_status() -> dict:
+    """解析器插件现状（**永不抛**，给 `/api/health` 与排障用）。"""
+    try:
+        parser()
+    except MenuParserUnavailable as e:
+        st = dict(_PLUGIN_STATUS_CACHE or {"name": _parser_path().stem, "manifest": False,
+                                           "version": "", "api_version": None})
+        st.update(path=str(_parser_path()), ok=False, error=str(e))
+        return st
+    return dict(_PLUGIN_STATUS_CACHE or {"ok": True, "error": ""})
+
+
 def _workspace() -> Path:
     env = os.environ.get("OPENNANO_WORKSPACE")
     if env:
@@ -90,9 +161,11 @@ def parser():
     try:
         spec.loader.exec_module(mod)      # type: ignore[union-attr]
     except Exception as e:                # noqa: BLE001
-        raise MenuParserUnavailable(f"加载共享解析器失败（{p}）：{type(e).__name__}: {e}") from e
+        raise _plugin_fail(p, p.stem, f"加载共享解析器失败（{p}）：{type(e).__name__}: {e}") from e
     finally:
         sys.path[:] = backup
+    global _PLUGIN_STATUS_CACHE
+    _PLUGIN_STATUS_CACHE = _validate_plugin(mod, p)      # manifest/API 面校验（不通过即抛）
     _PARSER = mod
     return mod
 

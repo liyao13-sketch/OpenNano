@@ -1086,14 +1086,25 @@ def api_config_import(req: ConfigImportReq):
     import shutil
     result = {"library": "skipped", "kb_added": 0, "kb_updated": 0, "backup": None}
     if req.library:
+        # ⚠️ 先"试存"、成功才换内存（2026-09-16 审计 P2）：原来是
+        #    `LIB.data.clear(); LIB.data.update(...)` **再** `_save()` —— 一旦 _save 抛 409
+        #    或被 save_blocked 拦住，**内存已是新版、盘上还是旧版** ⇒ 之后 GET 全拿错数据。
+        if getattr(LIB, "save_blocked", False):
+            raise HTTPException(
+                409, "库文件处于「禁止写盘」状态（上次读到损坏文件，已留档）⇒ 本次导入**没有生效**。"
+                     "请先按 /api/library 返回的 load_error / corrupt_backup 处理损坏文件。")
         src = LIB.path
         if src.exists():
             bak = src.with_suffix(f".backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json")
             shutil.copy2(src, bak)
             result["backup"] = str(bak)
-        LIB.data.clear()
-        LIB.data.update(req.library)
-        LIB._save()
+        old = LIB.data
+        try:
+            LIB.data = dict(req.library)
+            LIB._save()                       # 冲突（409）/写不动 ⇒ 抛；下面把内存回滚
+        except Exception:
+            LIB.data = old
+            raise
         result["library"] = "replaced"
     if req.kb_entries:
         for e in req.kb_entries:
@@ -1467,7 +1478,16 @@ def api_opt_plot(model_id: str, kind: str = "contour",
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "opennano", "version": "0.1.0"}
+    """健康检查 + **插件现状**（2026-09-16：第一个代码扩展点扶正后，坏插件要看得见）。
+
+    `plugins` 里的每一项都**永不抛**：插件缺失/拒装/自爆只让它自己红，服务照常跑
+    （见 `docs/extension-points.md` 的"失败隔离"）。
+    """
+    from kb import menu_reader as mr
+    plugins = {"menu_parser": mr.plugin_status()}
+    return {"ok": True, "service": "opennano", "version": "0.1.0",
+            "plugins": plugins,
+            "plugins_ok": all(p.get("ok") for p in plugins.values())}
 
 
 # ---------- P3: Agent + RAG ----------

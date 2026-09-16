@@ -87,3 +87,25 @@ def test_doe_超大矩阵要拒收不是撑爆内存(client):
         "design_type": "full"})
     assert r.status_code in (400, 413, 422), (
         f"超大 DOE 没有被拒收（{r.status_code}）—— 会撑爆内存")
+
+
+# ---------------------------------------------------------------- 配置导入（内存/盘不许背离）
+def test_config_import_冲突时内存要回滚(client, tmp_path, monkeypatch):
+    """P2 修复的回归锁：`_save()` 抛冲突时，内存**不许**留下新版（否则 GET 全拿错数据）。
+
+    做法：把 LIB 换成一个"必定冲突"的库（loaded_rev 与盘上不一致）⇒ 导入必须 409 且
+    `LIB.data` 保持原样。
+    """
+    import main as m
+    from engine.library import LibraryStore, LibraryConflict
+
+    p = tmp_path / "lib.json"
+    p.write_text('{"params": {"原始键": {"unit": "nm", "category": "膜厚"}}}', encoding="utf-8")
+    lib = LibraryStore(p)                      # 正常载入 ⇒ loaded_rev = 盘上指纹
+    p.write_text('{"params": {"被外部改过": {}}}', encoding="utf-8")   # 盘上被别人改了
+    monkeypatch.setattr(m, "LIB", lib)
+    before = dict(lib.data)
+
+    r = client.post("/api/config/import", json={"library": {"params": {"新导入": {}}}})
+    assert r.status_code == 409, r.text
+    assert dict(lib.data) == before, "409 之后内存被换成了新版 ⇒ 盘与内存背离"
