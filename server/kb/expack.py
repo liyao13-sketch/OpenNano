@@ -291,12 +291,15 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         if not stage:
             continue
         rid = m["core_run_id"]
-        parsed = rid.rsplit("-", 2)
-        seq_in_stage = int(parsed[2]) if len(parsed) == 3 and parsed[2].isdigit() else \
-            stage_counter.get(stage, 1)
-        m.setdefault("core_batch_id", batch)
-        m.setdefault("core_stage", stage)
-        m.setdefault("core_stage_seq", seq_in_stage)
+        # ⚠️ stage_seq ＝ **工序序号**（core 语义），**不是**"本 stage 内第几个 run"（2026-09-16 审计 P0）。
+        #    原来用 run_id 尾数当兜底 ⇒ 多工序工程里每个工序的首个 run 都写成 1（PECVD/MA6/ICP/DRIE 全 1），
+        #    而且被 `setdefault` **写回模块**、追加包又优先读模块值 ⇒ 错值一路传下去。
+        #    正确来源＝`kb.batch_runs._stage_seq`（core 已入库值 → 画布已有值 → 习惯序表），追加包一直用它。
+        from .batch_runs import _stage_seq as _proc_stage_seq
+        seq_proc = _proc_stage_seq(modules, batch, stage)
+        m["core_batch_id"] = m.get("core_batch_id") or batch
+        m["core_stage"] = stage
+        m["core_stage_seq"] = seq_proc
         # 机台口径：**只从这里出**（2026-09-14）。过去的 `tool_id = m.get("machine_name") or ""` 写的是
         # 应用库的**显示名**（`DRIE-Bosch` / `PECVD` / `ICP-鲁汶`）—— 其中 `PECVD` 正好是 stage 名
         # （撞数据线机台闸 ②），其余看着合法却是**错的机台号**（`RIE-400iPB` / `ICP-PishowA` 才是真值），
@@ -318,8 +321,10 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         if not m.get("core_parent_run_id") and not was_in_core.get(id(m)):
             m["core_parent_run_id"] = run_rows[-1][0] if run_rows else ""
         parent = m.get("core_parent_run_id") or ""
-        run_rows.append([rid, batch, m.get("core_sample_id") or "", stage,
-                         m.get("core_stage_seq", seq_in_stage), now,
+        # batch_id 用节点自带的 `core_batch_id`（已入库 run 的批次）—— 原来无条件写"工程名派生批次"，
+        # 与 run_id 前缀/`core_batch_id` 自相矛盾（2026-09-16 审计 P2）。
+        run_rows.append([rid, m.get("core_batch_id") or batch, m.get("core_sample_id") or "", stage,
+                         seq_proc, now,
                          "", "", tool_name, tool_id,
                          m.get("core_recipe_id") or "", operator or "", purpose or "",
                          parent, "", "", "planned",
@@ -389,8 +394,12 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         for r in form_meas:                            # 不在接口输出里的量名也照记
             if id(r) in used_ids:
                 continue
-            n = len([x for x in meas_rows if x[0].startswith(rid)]) + 1
-            meas_rows.append([r.get("meas_id") or f"{rid}.M{n:02d}", rid,
+            # ⚠️ 也挂 host_rid（2026-09-16 审计 P1）：这个循环原来用 `rid` ⇒ **检测节点上表单填的
+            #    实测值会挂到检测 run 自己**，直接违反协议 §15.1（检测 run 上不许挂 measurement）。
+            #    触发面很大：表单量名走 §三 英文受控名，而 `param_outputs` 是画布中文名，映射不中
+            #    （例如 core 真值 `depth_nm` ≠ 映射键 `depth_center_nm`）就会落到这里。
+            n = len([x for x in meas_rows if x[0].startswith(host_rid)]) + 1
+            meas_rows.append([r.get("meas_id") or f"{host_rid}.M{n:02d}", host_rid,
                               r.get("sample_id") or m.get("core_sample_id") or "",
                               r.get("quantity", ""), str(r.get("value", "")).strip(),
                               r.get("unit", ""), r.get("method", ""), r.get("loc", ""),
@@ -850,10 +859,25 @@ def parse_expack(path: Path, lib) -> dict:
     无 flow.json(手工采集包) → 由 runs/steps 合成节点,按时序连线。
     """
     root, _tmpdir = _unpack_expack(path)
+    try:
+        return _parse_expack_root(root, lib)
+    finally:
+        # ⚠️ 2026-09-16 审计 P1：原来只有"无 flow.json"那条分支会清临时目录，
+        #    带 flow.json 的 zip 每次导入都在 TMPDIR 漏一份**整包副本**（实测每次 +1 个 expack_* 目录）。
+        if _tmpdir is not None:
+            shutil.rmtree(_tmpdir, ignore_errors=True)
+
+
+def _parse_expack_root(root: Path, lib) -> dict:
     manifest = {}
     mf = root / "manifest.json"
     if mf.exists():
-        manifest = json.loads(mf.read_text(encoding="utf-8"))
+        # ⚠️ 坏 manifest 要转成 ExpackError（2026-09-16 审计 P2）：原来 `json.JSONDecodeError`
+        #    直接冒到 API，而 API 只捕 ExpackError ⇒ 用户拿到裸 500，与本文件"坏包转 400"的承诺相反。
+        try:
+            manifest = json.loads(mf.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as e:
+            raise ExpackError(f"包内 manifest.json 读不动/不是合法 JSON：{type(e).__name__}: {e}") from e
     batch = manifest.get("batch_id") or root.name
 
     runs = _read_csv(root / "runs.csv")
@@ -1002,9 +1026,7 @@ def parse_expack(path: Path, lib) -> dict:
         if _ms:
             _m["metro_markers"] = _ms
     _layout_modules(runs_sorted, modules, edges)       # 列=工序，主链一行、分支挂下
-    # 解包目录**用完即清**：原来每次导入 zip 都在系统临时目录漏一个 `expack_*`（长期只增不减）
-    if _tmpdir is not None:
-        shutil.rmtree(_tmpdir, ignore_errors=True)
+    # （解包目录的清理已统一收到 `parse_expack` 的 finally —— 两条分支都要清，见那里的注释）
     return {"name": batch, "modules": modules, "edges": edges}
 
 

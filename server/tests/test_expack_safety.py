@@ -150,3 +150,44 @@ def test_import_endpoint_returns_404_for_a_missing_path(tmp_path):
     c = TestClient(main.app, raise_server_exceptions=False)
     r = c.post("/api/expack/import", json={"path": str(tmp_path / "nope")})
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------- 2026-09-16 审计补的护栏
+def test_带_flow_json_的_zip_导入后不留临时目录(tmp_path):
+    """审计 P1：只有"无 flow.json"那条分支清临时目录 ⇒ 带 flow.json 的 zip 每次导入漏一份整包副本。"""
+    import glob
+    import json as _json
+    import os
+    import tempfile
+    import zipfile
+
+    from kb import expack
+
+    src = tmp_path / "src"
+    (src / "sub").mkdir(parents=True)
+    (src / "flow.json").write_text(_json.dumps(
+        {"name": "X", "modules": [{"id": "m1", "core_run_id": "X-RIE-0001"}], "edges": []}),
+        encoding="utf-8")
+    (src / "runs.csv").write_text("run_id,batch_id,stage\nX-RIE-0001,X,RIE\n", encoding="utf-8")
+    z = tmp_path / "p.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        for p in src.rglob("*"):
+            if p.is_file():
+                f.write(p, p.relative_to(src))
+
+    before = set(glob.glob(os.path.join(tempfile.gettempdir(), "expack_*")))
+    expack.parse_expack(z, None)
+    after = set(glob.glob(os.path.join(tempfile.gettempdir(), "expack_*")))
+    assert after == before, f"解包目录泄漏：{sorted(after - before)}"
+
+
+def test_坏_manifest_转_ExpackError_而不是_500(tmp_path):
+    """审计 P2：`json.JSONDecodeError` 直接冒到 API ⇒ 用户拿到裸 500（与本文件"坏包转 400"承诺相反）。"""
+    from kb import expack
+
+    d = tmp_path / "pack"
+    d.mkdir()
+    (d / "manifest.json").write_text("{这不是合法 json", encoding="utf-8")
+    (d / "runs.csv").write_text("run_id\n", encoding="utf-8")
+    with pytest.raises(expack.ExpackError):
+        expack.parse_expack(d, None)
