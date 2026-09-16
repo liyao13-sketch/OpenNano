@@ -407,6 +407,30 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
                               r.get("source_artifact_id", ""),
                               r.get("measured_by") or operator or "",
                               r.get("verification") or "未核实", r.get("note", "")])
+
+        # ── 画布上的 `key_values` 也要进 measurements ────────────────────────────
+        # ⚠️ 2026-09-16 审计 P1（=会丢数据的那条）：**回灌/导入进来的实测值只落在
+        #    `key_values`**（`_meas_of` 经 `QUANTITY_TO_PARAM` 反写成画布键），而导出侧原来
+        #    只读 `core_measurements` / `param_outputs` ⇒ 真 core AR50-T1 回灌的 27 个实测值
+        #    再导出 `measurements.csv` **一行不剩**。若该包是实测值的唯一载体，等同丢数据。
+        # 口径：**只折受控量名**（§三 英文量名）—— `key_values` 里还有画布自己的中间量
+        #    （`size_nm`/`gds_bias` 之类），那些**不许**当测量写进 core（与审计 #6 同一条纪律）。
+        _known_q = set(PARAM_TO_QUANTITY.values())
+        _already = {(r[1], r[3]) for r in meas_rows if str(r[4]).strip() != ""}
+        for k_, v_ in (m.get("key_values") or {}).items():
+            if v_ is None or str(v_).strip() == "":
+                continue                              # 空＝未测，不当 0（与表单同一口径）
+            q_ = PARAM_TO_QUANTITY.get(k_, k_)
+            if q_ not in _known_q:
+                continue                              # 不是受控量名 ⇒ 不写 core（不发明量名）
+            if (host_rid, q_) in _already:
+                continue                              # 表单已填这条量 ⇒ 不重复写
+            _already.add((host_rid, q_))
+            n_ = len([x for x in meas_rows if x[0].startswith(host_rid)]) + 1
+            meas_rows.append([f"{host_rid}.M{n_:02d}", host_rid,
+                              host_m.get("core_sample_id") or "",
+                              q_, str(v_).strip(), field_meta(q_).get("unit", ""),
+                              "", "", "", "", "", operator or "", "未核实", ""])
     return run_rows, step_rows, meas_rows, stage_counter, batch
 
 
