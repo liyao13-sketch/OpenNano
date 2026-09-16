@@ -8,7 +8,40 @@
 
 ---
 
-## 一、三分钟起服务
+## 〇、两种常驻形态，先选对（2026-09-16 补，工单 20260916-01）
+
+服务要「一直在、数据真、进得去」，先二选一 —— **差别只在绑地址，认证都必须是 `on`**：
+
+| | 形态 A · 单人远程（推荐） | 形态 B · 团队内网 |
+|---|---|---|
+| 绑地址 | **`127.0.0.1`（回环）** | `0.0.0.0` |
+| 怎么访问 | SSH 隧道：`ssh -L 8000:127.0.0.1:8000 <用户>@<服务器>`，然后浏览器开 `http://127.0.0.1:8000` | 浏览器直接开 `http://<服务器内网IP>:8000` |
+| 认证 | `OPENNANO_AUTH=on` + 已建账号 | 同左（**少了这条等于把库敞开给整个网段**） |
+| 前提 | 服务器开了 SSH | 可信内网 + 口令强度；**HTTP 明文过网**（§五-2），别在不可信网段用 |
+
+⛔ **两种形态都适用的红线**：`OPENNANO_DB` / `OPENNANO_PROJECTS_DIR` / `OPENNANO_ACCOUNTS` /
+`OPENNANO_AUDIT` / `OPENNANO_SERVER_SECRET` **一律用默认的 `~/.opennano/`，绝不许指到 `/tmp`** ——
+系统会清 `/tmp`：2026-09-16 实测一个指到 `/tmp` 的测试实例，**数据目录整个被清掉而进程还开着**，
+写进去的东西连句再见都没有。一个"能打开、能录入、看起来正常"的界面，比一个打不开的界面危险得多。
+
+**常驻（macOS / launchd）**：`RunAtLoad` + `KeepAlive` + 日志落 `~/Library/Logs/`，
+`kill` 掉会自动拉起。plist 要点（完整示例见部署机 `~/Library/LaunchAgents/`）：
+
+```xml
+<key>ProgramArguments</key>
+<array><string>/bin/bash</string><string>/path/to/run_opennano_server.sh</string></array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<!-- 启动脚本里：cd server && export OPENNANO_AUTH=on
+     && exec .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 -->
+```
+
+⚠️ LaunchAgent 只在**图形登录后**才跑；若服务器开了 FileVault 且无自动登录，
+一次重启会停在解锁界面，服务不会自启 —— 要么关 FileVault，要么接受"断电后跑一趟"。
+
+---
+
+## 一、三分钟起服务（形态 B）
 
 ```bash
 # 1) 前端构建一次（服务器上只需要这一次）
@@ -62,6 +95,9 @@ http://<服务器内网IP>:8000
 | `OPENNANO_DB` | `~/.opennano/opennano.db` | 知识库 |
 | `OPENNANO_WEB_DIST` | `../web/dist` | 前端产物目录 |
 | `OPENNANO_PBKDF2_ITERS` | `200000` | 口令迭代数（测试会调小；老账号记着自己的迭代数，调大不影响它们） |
+| `OPENNANO_DATA_ROOT` | `<workspace>/个人空间/18_工艺数据资产/03_实验数据` | 实验数据根（core 只读） |
+| `OPENNANO_CORE_DIR` | `<DATA_ROOT>/core` | core 目录 |
+| `OPENNANO_DOE_DIR` | `<workspace>/个人空间/19_工艺资料/干法刻蚀/数据科学/DOE设计/执行表_2026-08-20` | DOE 执行表目录（服务端扫表用；⚠️ 2026-09-12 表已搬到此，旧默认指向已删除目录会**静默扫空**） |
 
 ## 四之二、并发与原子性（一台服务器多人同时写时靠它）
 
@@ -86,9 +122,7 @@ http://<服务器内网IP>:8000
 
 1. **`OPENNANO_AUTH=auto` 且还没建账号时，服务是全开的** —— 启动时会打醒目告警，`/api/auth/state` 也带 `open_to_network`，界面会把它顶到「问题」面板。**团队部署第一件事就是建管理员。**
 2. **内网 HTTP 下口令是明文过网的**。这套东西防的是"**记错人 / 互相覆盖 / 事后说不清**"，
-   **不防**能抓包的攻击者。要真防：上 TLS（反代加证书）或只在可信内网跑。
-2. **`OPENNANO_AUTH=auto` 且还没建账号时，服务是敞开的**（这是刻意的：不让单人本地被门挡在外面）。
-   所以团队部署**第一件事**就是把 `OPENNANO_AUTH=on` 设上并建管理员。界面上没建账号时会出告警。
+   **不防**能抓包的攻击者。要真防：上 TLS（反代加证书）或只在可信内网跑（形态 A 走 SSH 隧道则这条天然不成立——隧道本身就是加密的）。
 3. **闸只拦"没见过的名字"**：机台口径那道闸拦不住"已登记但填错"的机台号 —— 归属正确性靠原始记录与证据图
    （数据线 2026-09-14 写进 `core_schema.validate_tool_ids` 旁的同一条边界）。
 4. **服务器成了单点**：数据都在那台机器上。请给它配好备份（本项目至今**异盘备份仍缺**，是最该补的一环）。

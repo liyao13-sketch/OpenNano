@@ -27,7 +27,11 @@ DATA_ROOT = Path(os.environ.get("OPENNANO_DATA_ROOT")
                  or (WORKSPACE / "个人空间" / "18_工艺数据资产" / "03_实验数据"))
 CORE_DIR = Path(os.environ.get("OPENNANO_CORE_DIR") or (DATA_ROOT / "core"))
 DOE_DIR = Path(os.environ.get("OPENNANO_DOE_DIR")
-               or (WORKSPACE / "个人空间" / "00_每日任务" / "2026-08-20_DOE实验"))
+               or (WORKSPACE / "个人空间" / "19_工艺资料" / "干法刻蚀"
+                   / "数据科学" / "DOE设计" / "执行表_2026-08-20"))
+# ⚠️ DOE 执行表 2026-09-12 已从 00_每日任务/2026-08-20_DOE实验 搬到上面这个
+#    位置（M1 移交），旧默认值指向一个**已不存在的目录** ⇒ 服务端扫表静默为空
+#    （工单 20260916-助手线-to-工具线-01 · E1）。再搬家时改这里或用 env 覆盖。
 KLAYOUT = os.environ.get("OPENNANO_KLAYOUT", "/usr/local/bin/klayout")
 
 #: 画布工程目录（`~/.opennano/projects`）
