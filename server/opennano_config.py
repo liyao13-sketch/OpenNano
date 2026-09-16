@@ -53,3 +53,12 @@ SERVER_SECRET = Path(os.environ.get("OPENNANO_SERVER_SECRET")
 #: 操作留痕（append-only JSONL）
 AUDIT_LOG = Path(os.environ.get("OPENNANO_AUDIT")
                  or (Path.home() / ".opennano" / "audit.log"))
+
+# ---- 资产库 / 版图输出（2026-09-16 审计补：此前这三处写死在各自模块里）----------------
+# ⚠️ 与上面同一条教训（"不许写死"）：写死 ⇒ 测试与部署都改不动，跑趟用例就可能顶掉真实资产。
+#: 设备/参数/影响规则资产库（`~/.opennano/library.json`）
+LIBRARY_PATH = Path(os.environ.get("OPENNANO_LIBRARY")
+                    or (Path.home() / ".opennano" / "library.json"))
+#: GDS 输出目录（`~/.opennano/gds`）
+GDS_DIR = Path(os.environ.get("OPENNANO_GDS_DIR")
+               or (Path.home() / ".opennano" / "gds"))

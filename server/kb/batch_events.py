@@ -196,7 +196,11 @@ def run_proposer(proposal: dict, apply: bool = False, timeout: int = 120) -> dic
     exe = proposer_path()
     if not exe.exists():
         return {"ok": False, "error": f"找不到数据线脚本：{exe}（可用 OPENNANO_PROPOSE_APPLY 指定）"}
-    tmp = Path(os.environ.get("TMPDIR", "/tmp")) / f"opennano_proposal_{os.getpid()}.json"
+    # ⚠️ 一次性文件名（2026-09-16 审计 P1）：原来固定 `..._{pid}.json`，
+    #    同一进程内两个并发提案互踩 ⇒ 落账时可能写进**另一个人的提案**。
+    import uuid
+    tmp = (Path(os.environ.get("TMPDIR", "/tmp"))
+           / f"opennano_proposal_{os.getpid()}_{uuid.uuid4().hex[:8]}.json")
     tmp.write_text(json.dumps(proposal, ensure_ascii=False, indent=2), encoding="utf-8")
     cmd = ["python3", str(exe), "--proposal", str(tmp)] + (["--apply"] if apply else [])
     try:

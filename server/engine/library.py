@@ -14,11 +14,15 @@ import json
 import uuid
 from pathlib import Path
 
+from opennano_config import LIBRARY_PATH
+
 from .process_catalog import CATEGORIES, PROCESSES  # 104 种工艺目录(数据)
 
 CATEGORY_BY_SUBTYPE = {c: c for c in CATEGORIES}
 
-DEFAULT_PATH = Path.home() / ".opennano" / "library.json"
+#: 资产库默认路径（可用 `OPENNANO_LIBRARY` 覆盖）—— 2026-09-16 审计：原来写死在这里，
+#: 测试/部署都改不动（与 `opennano_config` 文件头"不许写死"的教训冲突）。
+DEFAULT_PATH = LIBRARY_PATH
 
 
 def file_rev(path: Path) -> str:
@@ -396,8 +400,10 @@ class LibraryStore:
                 "库文件在别处被改过（本进程加载后又有人保存/手改）⇒ 本次**拒绝写盘**，"
                 "以免覆盖对方的改动。请先 `POST /api/library/reload` 重新载入（或确认后重做本次修改）。")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2),
-                             encoding="utf-8")
+        # ⚠️ **原子写**（2026-09-16 审计 P1）：原来 `write_text` 整份覆盖 —— 崩在写一半，
+        #    盘上就是半截 JSON，整个共享资产库报废（rev 守卫只防"别人改过"，防不了这个）。
+        from . import atomic
+        atomic.write_json_atomic(self.path, self.data)
         self.loaded_rev = file_rev(self.path)
 
     def reload(self) -> str:

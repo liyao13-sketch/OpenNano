@@ -225,20 +225,26 @@ def _grp_slots(export_dir: str | Path) -> set[int]:
 
     用途：机台 `.rcp`（group 库）可能列了某 group，而 `.grp` 里**并没有**对应 recipe
     ⇒ 灌参前必须先问一句"这两个槽真的有配方吗"。
+
+    ⚠️ 缓存按**源文件指纹**失效（2026-09-16 随 A4 一起修）：同刻重导菜单（覆盖同名文件）
+    或新增 `.grp` 都会触发重建，不用重启服务。菜单目录文件很少，每次 rglob+stat 都便宜。
     """
     dm = parser()
     root = Path(export_dir).expanduser()
     key = str(root)
-    if key in _GRP_SLOTS_CACHE:
-        return _GRP_SLOTS_CACHE[key]
+    files = sorted(root.rglob("*.grp"))
+    sig = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in files)
+    hit = _GRP_SLOTS_CACHE.get(key)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
     slots: set[int] = set()
-    for p in sorted(root.rglob("*.grp")):
+    for p in files:
         for r in dm.parse_grp(p):
             try:
                 slots.add(int(r["recipe_id"][-3:]))
             except (KeyError, ValueError, TypeError):
                 continue
-    _GRP_SLOTS_CACHE[key] = slots
+    _GRP_SLOTS_CACHE[key] = (sig, slots)
     return slots
 
 

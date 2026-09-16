@@ -308,7 +308,11 @@ def _canvas_add_module(args: dict, ctx: Context) -> dict:
     sub = str(args.get("subtype") or args.get("stage") or "").strip()
     if not sub:
         return {"error": "需要 subtype(如 etch/deposition/graphic)或 stage(如 RIE/ICP/PECVD/SEM)"}
-    ref = f"t{abs(hash(sub + str(args.get('name') or ''))) % 10000}"
+    # ⚠️ ref 必须**每次唯一**（2026-09-16 审计 P1）：原来 `hash(sub+name)%10000` 是确定性哈希，
+    #    同 subtype 同 name（LLM 常不给 name ⇒ 两次都是 None）**必得同一个 ref**，
+    #    随后 `canvas_connect` 按 ref 找节点就挂到错的那个上，而且无声。
+    import uuid
+    ref = f"t{uuid.uuid4().hex[:8]}"
     return _op("add_module", ref=ref, subtype=sub, name=args.get("name"),
                equipment_name=args.get("equipment_name"),
                machine_name=args.get("machine_name"),

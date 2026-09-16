@@ -147,7 +147,16 @@ function RulesTab({ lib, refresh }: { lib: Library; refresh: () => void }) {
           id: `ir-${Date.now().toString(36)}`, from: '', to: '', when: '', expr: '',
           sign: '', mechanism: '', scope: 'global', source: '', reliability_score: 3, enabled: true,
         }])}>{tr('set.newRule')}</button>
-        <button className="btn" onClick={async () => { await api.rulesSave(rules); refresh() }}>{tr('set.saveRules', { n: rules.length })}</button>
+        <button className="btn" onClick={async () => {
+          // ⚠️ 2026-09-16 审计 P1：原来无 catch —— 409（库在别处被改）/500 时 unhandled
+          //    rejection，编辑态留在屏上，**用户会以为已经保存了**。失败必须出声。
+          try {
+            await api.rulesSave(rules); refresh()
+          } catch (e: any) {
+            alert((String(e.message || '').startsWith('409') ? tr('set.saveConflictHint') + '\n\n' : '')
+              + tr('set.saveFail', { msg: e.message }))
+          }
+        }}>{tr('set.saveRules', { n: rules.length })}</button>
       </div>
     </div>
   )

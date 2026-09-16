@@ -83,3 +83,36 @@ def test_healthy_library_behaves_exactly_as_before(tmp_path):
     lib.add_machine("M1")
     assert p.exists(), "正常库反而不写盘了"
     assert json.loads(p.read_text(encoding="utf-8"))["params"].get("膜厚")
+
+
+def test_库文件是原子写的不留半截(tmp_path):
+    """2026-09-16 审计 P1：`_save` 改走 `engine/atomic.write_json_atomic`。
+
+    原来裸 `write_text` 整份覆盖 —— 崩在写一半，盘上就是半截 JSON，整个共享资产库报废
+    （rev 守卫只防"别人改过"，防不了这个）。这里钉住：写完成功、内容完整、不留临时文件。
+    """
+    p = _store(tmp_path)
+    lib = LibraryStore(p)
+    lib.add_machine("M1")
+    assert p.exists() and json.loads(p.read_text(encoding="utf-8"))["machines"], "库没落盘/内容不完整"
+    leftovers = [f.name for f in tmp_path.iterdir() if f.name.endswith(".tmp")]
+    assert leftovers == [], f"原子写留下了临时文件：{leftovers}"
+
+
+def test_资产库路径可由_env_覆盖(tmp_path, monkeypatch):
+    """2026-09-16 审计 P2：`OPENNANO_LIBRARY` 可覆盖 —— 不许再写死在模块里。
+
+    口径与 `opennano_config` 其它项一致（**在 import 时读环境**）。
+    """
+    import importlib
+    monkeypatch.setenv("OPENNANO_LIBRARY", str(tmp_path / "custom.json"))
+    import opennano_config as cfg
+    from engine import library as lib_mod
+    importlib.reload(cfg)
+    importlib.reload(lib_mod)
+    try:
+        assert str(lib_mod.DEFAULT_PATH).endswith("custom.json")
+    finally:                                  # 复原，别污染同进程后续用例
+        monkeypatch.delenv("OPENNANO_LIBRARY", raising=False)
+        importlib.reload(cfg)
+        importlib.reload(lib_mod)

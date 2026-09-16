@@ -812,6 +812,13 @@ export default function App() {
     updateModule({ key_values: { ...m.key_values, [key]: val } })
   }
 
+  /** 连线提示 HTML。⚠️ 所有插值都必须**转义**（2026-09-16 审计 P1）：
+   *  设备名/模块名/膜层名都能被写入（Settings、配置导入、画布），而这里是
+   *  `dangerouslySetInnerHTML` ⇒ 未转义时含 `<img onerror=…>` 的名字会在**任何人悬停连线时执行**
+   *  （团队服务器形态下是真实的跨用户注入向量）。 */
+  const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+
   const edgeTipHtml = (edgeId: string) => {
     const e = edges.find(x => x.id === edgeId)
     if (!e) return ''
@@ -819,12 +826,12 @@ export default function App() {
     const dst = nodes.find(n => n.id === e.target)?.data?.module as Module | undefined
     if (!src || !dst) return ''
     const kv = src.key_values || {}
-    const hand = dst.param_inputs.filter(k => kv[k] != null).map(k => `${k} = ${kv[k]}`)
-    const lines = [`<b>${src.equipment_name || src.name} → ${dst.equipment_name || dst.name}</b>`,
+    const hand = dst.param_inputs.filter(k => kv[k] != null).map(k => `${esc(k)} = ${esc(kv[k])}`)
+    const lines = [`<b>${esc(src.equipment_name || src.name)} → ${esc(dst.equipment_name || dst.name)}</b>`,
                    `${t('panel.handoff')} ${hand.length ? hand.join(' · ') : '—'}`]
     if (src.material?.film) {
       const thk = Number(src.material.thickness) || 0
-      lines.push(`${t('panel.outFilm')} ${src.material.film}${thk ? ` (${thk} nm)` : ''}`)
+      lines.push(`${t('panel.outFilm')} ${esc(src.material.film)}${thk ? ` (${thk} nm)` : ''}`)
     }
     const top = outputTopFilm(e.source)
     const bias = library?.bias_table?.[top]
@@ -873,7 +880,7 @@ export default function App() {
         alert(t('alert.savedForced', { name: r2.name }))
         return
       }
-      alert(t('alert.exportFail', { msg: e.message }))
+      alert(t('alert.saveFail', { msg: e.message }))
     }
   }
 
@@ -935,7 +942,7 @@ export default function App() {
     updateModule({ params, param_defs: defs })
     const src = blk.per_key ? Object.values(blk.per_key)[0] as any : null
     pushLog('edit', t('log.applyMeasured', { tool: machDef.tool_id, phase: machPhase, n: Object.keys(blk.params).length })
-      + (src?.from_run ? ` · ${t('log.srcRun', { run: src.from_run, date: src.date })}` : '') + ')')
+      + (src?.from_run ? ` · ${t('log.srcRun', { run: src.from_run, date: src.date })}` : ''))
   }
 
   /* 详情栏左边缘拖拽调宽 */
@@ -987,7 +994,15 @@ export default function App() {
   }
 
   const loadProjectByName = async (name: string) => {
-    const d = await api.loadProject(name)
+    // ⚠️ 2026-09-16 审计 P2：原来无 try/catch —— 载入失败（404/401/坏文件）**界面毫无反应**，
+    //    用户以为点了没生效；现在把原因报出来。
+    let d: any
+    try {
+      d = await api.loadProject(name)
+    } catch (e: any) {
+      alert(t('alert.loadFail', { msg: e.message }))
+      return
+    }
     setNodes((d.modules || []).map((m: Module) => ({
       id: m.id, type: 'process', position: { x: m.x ?? 0, y: m.y ?? 0 }, data: { module: m },
     })))
@@ -1024,7 +1039,15 @@ export default function App() {
   const importData = async (file: File) => {
     try {
       const buf = await file.arrayBuffer()
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+      // ⚠️ 2026-09-16 审计 P1：`btoa(String.fromCharCode(...arr))` 是**展开传参**，
+      //    实测约 >13 万字节即抛 `Maximum call stack size exceeded`（真实 xlsx 常超过）
+      //    ⇒ 改成分块拼接，多大的表都能传。
+      const bytes = new Uint8Array(buf)
+      let bin = ''
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x8000)) as any)
+      }
+      const b64 = btoa(bin)
       const base = { filename: file.name, content_b64: b64, process_type: 'RIE_Cl' }
       const pre = await api.kbIngestUpload({ ...base, dry_run: true })
       const ok = confirm(
@@ -1034,7 +1057,11 @@ export default function App() {
       if (!ok) return
       const r = await api.kbIngestUpload({ ...base, dry_run: false })
       api.kbStats().then(s => setKbTotal(s.total)).catch(() => {})
-      alert(t('alert.importData', { added: r.added, updated: r.updated, entries: r.entries, keys: (r.result_keys || []).join(', ') }))
+      // ⚠️ 2026-09-16 审计 P1：后端已停用"写入 KB"（协议 §11），返回 added/updated=0 +
+      //    message（指引走数据线 core 管道）。原来只弹 "Import done: +0 new" ⇒ **一行没进库
+      //    却显示成功**，把指引文案吞了。现在原样把后端的 message 顶上来。
+      alert(t('alert.importData', { added: r.added, updated: r.updated, entries: r.entries, keys: (r.result_keys || []).join(', ') })
+        + (r.message ? `\n\n${r.message}` : ''))
     } catch (e: any) {
       alert(t('alert.importFail', { msg: e.message }))
     }
@@ -1091,6 +1118,9 @@ export default function App() {
         core_eq_state: (window as any).__dshEqState || [] }
       const pv = await (await fetch('/api/expack/append/preview', { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })).json()
+      // ⚠️ 2026-09-16 审计 P1：原来不判响应形状 —— 401/500 时 body 是 `{detail:…}`，
+      //    `pv.count` 为 undefined 于是弹"没有可追加的 run"，把**鉴权失效误报成"无新增"**。
+      if (!pv || pv.count === undefined) throw new Error(pv?.detail || 'preview failed')
       if (!pv.count) { alert(t('alert.appendNone') + '\n\n' + (pv.note || '')); return }
       const purpose = prompt(t('prompt.purpose', { n: pv.count, list: pv.new_runs.join('\n') }), '') ?? ''
       const saveDir = prompt(t('prompt.appendDir'), '~/Downloads/opennano_append') ?? ''
@@ -1264,12 +1294,17 @@ export default function App() {
   const seasonIds = useMemo(() => new Set(
     nodes.filter(n => (n.data.module as Module).run_nature === 'season').map(n => n.id)), [nodes])
   /* 检测模块 id：渲染层要把它们**换成球**（不动 nodes/edges 本体 ⇒ 保存/导出仍是全量）。
-     判据与后端同一套：`core_stage` 或 run_id 的 stage 段落在表征四值里。 */
+     判据与后端同一套：`core_stage` 或 run_id 的 stage 段落在表征词表里。
+     ⚠️ 2026-09-16 审计 P1：这张表原来是 4 值，而后端 `expack.METROLOGY_STAGES` 2026-09-14
+     已扩到 16 ⇒ 其余 12 类检测 run 不被滤成球（既占主链列又让状态栏计数虚高）。
+     后端那份是真相，本处是渲染镜像，改一边必须同时改另一边。 */
+  const METROLOGY_STAGES = ['SEM', 'ELLIP', 'PROFILE', 'STRESS', 'TEM', 'AFM', 'OM', 'FLUOR',
+                            'XRD', 'XPS', 'AES', 'SIMS', 'FOURPP', 'HALL', 'CV', 'IR']
   const metroIds = useMemo(() => new Set(nodes.filter(n => {
     const m = n.data.module as Module
     const st = String(m.core_stage || '').toUpperCase()
     const seg = String(m.core_run_id || '').split('-').slice(-2, -1)[0]?.toUpperCase() || ''
-    return ['SEM', 'ELLIP', 'PROFILE', 'STRESS'].includes(st || seg)
+    return METROLOGY_STAGES.includes(st || seg)
   }).map(n => n.id)), [nodes])
 
   const viewNodes = useMemo(() => {
@@ -1908,7 +1943,7 @@ export default function App() {
                 </div>
               </div>
               <div className="card">
-                <PanelTabs module={m} onUpdate={updateModule} />
+                <PanelTabs key={m.id} module={m} onUpdate={updateModule} />
               </div>
             </>
           )}
@@ -1947,7 +1982,11 @@ export default function App() {
                   <span style={{ flex:1, fontWeight:'var(--fw-semibold)' }}>{p.name}
                     <span style={{ color:'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight:'var(--fw-normal)' }}> · {p.modules} {t('proj.modules', { n: p.modules, e: p.edges })} · {p.saved_at?.replace('T', ' ')}</span></span>
                   <button className="btn" style={{ fontSize: 'var(--fs-base)', padding:'4px 12px' }} onClick={() => loadProjectByName(p.name)}>{t('topbar.load')}</button>
-                  <span className="chip-x" title={t('proj.del')} onClick={async () => { await api.projectDelete(p.name); setProjects(ps => ps.filter(x => x.name !== p.name)) }}>✕</span>
+                  <span className="chip-x" title={t('proj.del')} onClick={async () => {
+                    // 删除是**不可逆**的（工程文件直接 unlink）：必须二次确认（2026-09-16 审计 P1）
+                    if (!confirm(t('alert.confirmDelProject', { name: p.name }))) return
+                    await api.projectDelete(p.name); setProjects(ps => ps.filter(x => x.name !== p.name))
+                  }}>✕</span>
                 </div>
               ))}
               {projects.length === 0 && <div style={{ color:'var(--muted)', padding:12 }}>{t('proj.empty')}</div>}

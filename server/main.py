@@ -366,6 +366,16 @@ def api_compute(req: ComputeReq):
 
 @app.post("/api/doe")
 def api_doe(req: DoeReq):
+    # ⚠️ 规模闸（2026-09-16 审计 P2）：原来无上限 —— `step` 写小一点，
+    #    `full = list(product(*levels))` 就能直接吃爆服务进程内存（实测把测试进程都杀了）。
+    from engine.doe import MAX_RUNS, estimate_runs
+    est = estimate_runs(req.variables, req.design_type, req.center_points, req.n_runs)
+    if est < 0:
+        raise HTTPException(422, f"DOE 参数不成立（design_type={req.design_type} 与变量数不匹配，"
+                                 f"或 min/max/step 无法解析）")
+    if est > MAX_RUNS:
+        raise HTTPException(422, f"DOE 规模过大：预估 {est} 行，上限 {MAX_RUNS} 行 —— "
+                                 f"请增大 step、减少变量，或改用 bbd/partial 设计。")
     return generate_matrix(req.variables, req.design_type, req.center_points,
                            req.n_runs, req.randomize, 42, req.alpha)
 
@@ -432,6 +442,8 @@ class RunContinueReq(BaseModel):
     title: str = ""
     date: str = ""
     persist: bool = False
+    rev: str = ""                    # persist=true 时的工程版本守卫（与 /api/project/save 同一把）
+    force: bool = False
 
 
 class MenuScanReq(BaseModel):
@@ -472,6 +484,8 @@ class RehydrateReq(BaseModel):
     project_name: str = ""          # 空 = 用 batch_id
     include_measurements: bool = True
     persist: bool = False
+    rev: str = ""                    # persist=true 时的工程版本守卫（与 /api/project/save 同一把）
+    force: bool = False
 
 
 class BatchEventsReq(BaseModel):
@@ -526,7 +540,7 @@ def api_batch_runs(req: BatchRunsReq):
 
 
 @app.post("/api/run/continue")
-def api_run_continue(req: RunContinueReq):
+def api_run_continue(req: RunContinueReq, request: Request):
     """**续做**：算 run_id / parent_run_id / stage_seq，可选直接用 group N 灌参。
 
     - 序号由工具算（该 batch 该 stage 已有最大序号 +1），**禁手输**；stage_seq 沿用已入库值。
@@ -600,9 +614,7 @@ def api_run_continue(req: RunContinueReq):
                "modules": mods + [new_mod],
                "edges": (req.edges or []) + ([edge] if edge else [])}
     if req.persist:
-        p = _project_path(project["name"])
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(project, ensure_ascii=False, indent=2), encoding="utf-8")
+        _save_project_guarded(project["name"], project, req.rev, req.force, request)
 
     issues: list[str] = []
     if steps:
@@ -761,7 +773,7 @@ def api_expack_append_preview(req: AppendPackReq):
 
 
 @app.post("/api/batch/rehydrate")
-def api_batch_rehydrate(req: RehydrateReq):
+def api_batch_rehydrate(req: RehydrateReq, request: Request):
     """**从 core 只读回灌画布**：core → 临时包 → parse_expack → 画布项目。
 
     用途：接着做（PECVD→…→run1 已入库，从权威源起步，不依赖那个镜像包）。
@@ -775,8 +787,7 @@ def api_batch_rehydrate(req: RehydrateReq):
         raise HTTPException(404, str(e)) from e
     if req.persist:
         p = _project_path(proj["name"])
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(proj, ensure_ascii=False, indent=2), encoding="utf-8")
+        _save_project_guarded(proj["name"], proj, req.rev, req.force, request)
         proj["_saved_to"] = str(p)
     return proj
 
@@ -938,9 +949,51 @@ def _project_rev(d: dict) -> str:
 
 
 def _project_with_rev(p: Path) -> dict:
-    d = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:                        # noqa: BLE001 —— 坏文件要说出原因，不是裸 500
+        raise HTTPException(422, f"工程文件损坏，无法解析：{p.name}（{type(e).__name__}）"
+                                 f"—— 请到 {p.parent} 手工备份后处理。") from e
     d["_rev"] = _project_rev(d) if not d.get("_rev") else d["_rev"]
     return d
+
+
+def _save_project_guarded(name: str, data: dict, rev: str, force: bool,
+                          request: Request) -> str:
+    """工程整份保存的**唯一出口**：锁内重读 `_rev` → 校验 → 原子写。返回新 `_rev`。
+
+    为什么（2026-09-16 审计 P1 × 3 同一把修）：
+      ① 原来只有 `/api/project/save` 有 409 守卫，`/api/run/continue` 与
+         `/api/batch/rehydrate` 的 `persist=true` 直接整份覆盖 ⇒ 陈旧画布照样静默抹掉别人；
+      ② 三处都是裸 `write_text` ⇒ 崩溃/kill 留半截 JSON，工程无声消失；
+      ③ rev 检查与写盘之间无锁（TOCTOU）⇒ 两个并发保存双双过检、后写覆盖先写。
+    现在与账号库同一把模式（`engine/atomic`）：**锁内重读 → 校验 → 原子替换**。
+    """
+    from engine import atomic
+    p = _project_path(name)
+    with atomic.file_lock(p):
+        cur = ""
+        if p.exists():
+            try:
+                cur = _project_rev(json.loads(p.read_text(encoding="utf-8")))
+            except Exception as e:                # noqa: BLE001
+                raise HTTPException(
+                    409, f"工程 `{name}` 的盘上文件已损坏（{type(e).__name__}）⇒ 为免把损坏文件"
+                         f"顶掉或把坏版本当基线，本次**没有保存**。请先到 {p.parent} 手工备份处理。") from e
+        if p.exists() and rev != cur:
+            if not force:
+                raise HTTPException(
+                    409, f"工程 `{name}` 在你载入之后被改过（盘上版本 {cur or '—'} / 你手上的 "
+                         f"{rev or '（未带版本，可能是另存为撞名）'}）⇒ 为免覆盖对方的改动，本次**没有保存**。"
+                         f"请重新载入该工程，或把改动另存为别的名字；确要覆盖请显式确认。")
+            audit_engine.record(_actor(request), "project.overwrite", target=name,
+                                detail=f"forced：{rev or '(无)'} → {cur or '(无)'}", ok=True)
+        else:
+            audit_engine.record(_actor(request), "project.save", target=name,
+                                detail=f"modules={len(data.get('modules') or [])}", ok=True)
+        request.state.audited = True
+        atomic.write_json_atomic(p, data)
+        return _project_rev(data)
 
 
 @app.get("/api/project")
@@ -971,8 +1024,10 @@ def api_project_list():
                         "modules": len(d.get("modules", [])),
                         "edges": len(d.get("edges", [])),
                         "saved_at": datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds")})
-        except Exception:  # noqa: BLE001
-            continue
+        except Exception:  # noqa: BLE001 —— 坏文件**不许无声消失**（2026-09-16 审计）：
+            out.append({"name": f.stem, "modules": 0, "edges": 0,   # 列出来并标明，让人去救
+                        "saved_at": datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds"),
+                        "error": "文件损坏（无法解析）"})
     return {"projects": out}
 
 
@@ -989,25 +1044,10 @@ def api_project_save(req: ProjectSaveReq, request: Request):
     覆盖一定留痕（`project.save` / `project.overwrite`），谁覆盖了谁在留痕里看得见。
     """
     p = _project_path(req.name)
-    cur = _project_rev(json.loads(p.read_text(encoding="utf-8"))) if p.exists() else ""
-    if p.exists() and req.rev != cur:
-        if not req.force:
-            raise HTTPException(
-                409, f"工程 `{req.name}` 在你载入之后被改过（盘上版本 {cur or '—'} / 你手上的 "
-                     f"{req.rev or '（未带版本，可能是另存为撞名）'}）⇒ 为免覆盖对方的改动，本次**没有保存**。"
-                     f"请重新载入该工程，或把改动另存为别的名字；确要覆盖请显式确认。")
-        audit_engine.record(_actor(request), "project.overwrite", target=req.name,
-                            detail=f"forced：{req.rev or '(无)'} → {cur or '(无)'}", ok=True)
-    else:
-        audit_engine.record(_actor(request), "project.save", target=req.name,
-                            detail=f"modules={len(req.modules)}", ok=True)
-    request.state.audited = True
-    p.parent.mkdir(parents=True, exist_ok=True)
     data = req.model_dump()
     data.pop("rev", None)
     data.pop("force", None)
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    new_rev = _project_rev(data)
+    new_rev = _save_project_guarded(req.name, data, req.rev, req.force, request)
     return {"saved": str(p), "name": req.name, "modules": len(req.modules), "_rev": new_rev}
 
 
@@ -1087,6 +1127,11 @@ def api_kb_ingest():
             "core": core.stats()["counts"]}
 
 
+#: 上传 Excel 解码后字节上限（2026-09-16 审计：此前无上限，body+b64decode+write_bytes
+#: 三份全量进内存，一个超大请求就能占住线程池 worker）。
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+
 class IngestUploadReq(BaseModel):
     filename: str
     content_b64: str                  # xlsx 文件的 base64
@@ -1103,38 +1148,56 @@ def api_kb_ingest_upload(req: IngestUploadReq):
     未知列保留原表头。source=原文件名::Run编号,重复上传按 source 幂等更新。
     """
     import base64
+    import shutil
     import tempfile
     from pathlib import Path as _P
     from kb.ingest import ingest_xlsx, xlsx_columns
 
     try:
-        raw = base64.b64decode(req.content_b64)
+        raw = base64.b64decode(req.content_b64, validate=True)
     except Exception:
         raise HTTPException(422, "content_b64 解码失败")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"文件超过上限 {MAX_UPLOAD_BYTES // (1 << 20)} MB")
+    # ⚠️ filename 只许是"文件名"：2026-09-16 审计实测 `tmp_dir / 绝对路径` 会被 pathlib
+    #    解析成绝对路径本身（tmp_dir 被丢弃），`../` 同样可逃逸 ⇒ 登录成员可覆写
+    #    ~/.opennano/users.json / library.json。这里先剥掉一切路径成分。
+    fname = (req.filename or "upload.xlsx").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if fname in ("", ".", ".."):
+        fname = "upload.xlsx"
     tmp_dir = _P(tempfile.mkdtemp(prefix="opennano_up_"))
-    tmp = tmp_dir / (req.filename or "upload.xlsx")
-    tmp.write_bytes(raw)
+    try:
+        tmp = tmp_dir / fname
+        tmp.write_bytes(raw)
 
-    if req.dry_run:
-        info = xlsx_columns(tmp)
-        info.update({"filename": req.filename, "process_type": req.process_type})
-        return {"dry_run": True, **info}
+        if req.dry_run:
+            try:
+                info = xlsx_columns(tmp)
+            except Exception as e:                 # noqa: BLE001 —— 坏 xlsx 是 422，不是 500
+                raise HTTPException(422, f"无法解析为 Excel：{type(e).__name__}") from e
+            info.update({"filename": req.filename, "process_type": req.process_type})
+            return {"dry_run": True, **info}
 
-    from kb.ingest import load_core_index
-    load_core_index()          # 可信度按 core verification 派生
-    entries = ingest_xlsx(tmp, req.process_type, "uploaded",
-                          material=req.material or None,
-                          source_name=req.filename)
-    draft = [{"run_id": f"NEW-{i+1:04d}", "quantity": k, "value": v, "unit": "",
-              "method": "", "verification": "未核实", "note": "未落库草稿"}
-             for i, e in enumerate(entries) for k, v in (e.get("results") or {}).items()]
-    return {"dry_run": False, "filename": req.filename, "added": 0, "updated": 0,
-            "entries": len(entries), "total": KB.stats()["total"],
-            "result_keys": sorted({k for e in entries for k in e["results"]}),
-            "draft_measurements": draft[:50],
-            "message": "已停用写入 KB(协议 §11):原始数据应落数据线 core。"
-                       "上式 draft_measurements 为按 core measurement 结构解析的草稿,"
-                       "请交《数据》会话走 build_core.py 落库。"}
+        from kb.ingest import load_core_index
+        load_core_index()          # 可信度按 core verification 派生
+        try:
+            entries = ingest_xlsx(tmp, req.process_type, "uploaded",
+                                  material=req.material or None,
+                                  source_name=req.filename)
+        except Exception as e:                     # noqa: BLE001 —— 同上
+            raise HTTPException(422, f"无法解析为 Excel：{type(e).__name__}") from e
+        draft = [{"run_id": f"NEW-{i+1:04d}", "quantity": k, "value": v, "unit": "",
+                  "method": "", "verification": "未核实", "note": "未落库草稿"}
+                 for i, e in enumerate(entries) for k, v in (e.get("results") or {}).items()]
+        return {"dry_run": False, "filename": req.filename, "added": 0, "updated": 0,
+                "entries": len(entries), "total": KB.stats()["total"],
+                "result_keys": sorted({k for e in entries for k in e["results"]}),
+                "draft_measurements": draft[:50],
+                "message": "已停用写入 KB(协议 §11):原始数据应落数据线 core。"
+                           "上式 draft_measurements 为按 core measurement 结构解析的草稿,"
+                           "请交《数据》会话走 build_core.py 落库。"}
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)   # 临时目录三条路径都必清理
 
 
 # ---------- 数据域 core（只读·权威源；协议 §11） ----------

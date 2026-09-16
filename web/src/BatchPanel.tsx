@@ -67,6 +67,8 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const [report, setReport] = useState('')
   const [meas, setMeas] = useState<{ quantity: string; value: string; unit: string; method: string }[]>([])
   const [obs, setObs] = useState<{ obs_type: string; description: string }[]>([])
+  /** 表单当前装载的是哪个 run（与 `sel` 分开：两者不一致时**禁止写回画布**，见下方 effect）。 */
+  const [formRun, setFormRun] = useState('')
   const [env, setEnv] = useState<any>({ date: new Date().toISOString().slice(0, 10), tool: 'RIE-400iPB', clean_done: '否' })   // i18n-keep：eq_state.clean_done 的取值（core 枚举），下拉选项的 value 与它对齐
   const [showSeason, setShowSeason] = useState(false)          // season 默认不画（owner 2026-09-12 裁断）
   const [tuneLine, setTuneLine] = useState<any>(null)          // v_tune_line（数据线视图）
@@ -85,9 +87,13 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   }, [])
 
   /** 把表单值**就地**写回画布模块（不重建画布）；导出时才能合并进包。
-   *  触发条件：当前选中 run + 该 run 的表单值变化。 */
+   *  触发条件：当前选中 run + 该 run 的表单值变化。
+   *  ⚠️ 必须同时满足 `formRun === sel.run_id`（2026-09-16 审计 P0）：否则"换了选中 run 但表单
+   *     还装着上一个 run"的那一瞬，会把**上一个 run 的测量值写进新 run 的模块**，
+   *     而且 save/导出/追加包全都消费画布模块 ⇒ 错位测量值直接落盘。 */
   useEffect(() => {
     if (!sel || !ctx.onFormChange) return
+    if (formRun !== sel.run_id) return          // 表单没装载到这个 run ⇒ 一个字都不写
     const mods = ctx.modules.map(m => m.core_run_id === sel.run_id
       ? { ...m,
           core_measurements: meas.filter(x => x.quantity && String(x.value).trim() !== ''),
@@ -95,7 +101,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       : m)
     ctx.onFormChange(mods)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meas, obs, sel?.run_id])
+  }, [meas, obs, sel?.run_id, formRun])
 
   /** 环境一行是**批次级**：存到窗口上随项目一起导出（App 侧读 __dshEqState） */
   useEffect(() => {
@@ -249,6 +255,14 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
       method: r.method || '' })))
     setObs((m.core_observations || []).map((o: any) => ({
       obs_type: o.obs_type || '', description: o.description || '' })))
+    setFormRun(runId)          // 标记"表单装的是这个 run"（写回 effect 的门闩）
+  }
+
+  /** 选中一个 run 的唯一入口：**先装载表单、再换选中** —— 顺序不能反（见上方 P0 注释）。 */
+  const selectRun = (r: Run) => {
+    if (!r?.run_id) return
+    loadFormOf(r.run_id)
+    setSel(r)
   }
 
   const natMap: Record<string, { nature: string; nature_label: string; why: string }> = {}
@@ -330,7 +344,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
               <thead><tr><th>run_id</th><th>{tr('bd.colSeq')}</th><th>{tr('bd.colNature')}</th><th>sample</th><th>{tr('bd.colState')}</th><th>parent</th><th>recipe</th><th></th></tr></thead>
               <tbody>
                 {visibleRuns.map(r => (
-                  <tr key={r.run_id} onClick={() => setSel(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
+                  <tr key={r.run_id} onClick={() => selectRun(r)} style={{ cursor: 'pointer', background: sel?.run_id === r.run_id ? 'var(--sel,#0001)' : undefined }}>
                     <td className="code">{r.run_id}</td>
                     <td>{r.stage_seq}</td>
                     {/* 长标签只留主干（全文进 tooltip）：**中英文括号都要切** —— 只切全角曾漏掉「批次级(多片同做)」 */}
@@ -340,7 +354,7 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
                     <td>{r.status}</td>
                     <td className="soft" title={r.parent_run_id || ''}>{short(r.parent_run_id) || '—'}</td>
                     <td className="soft ellip" title={r.recipe_id || ''}>{short((r.recipe_id || '').replace(/^core:/, '')) || '—'}</td>
-                    <td><button className="btn ghost sm" onClick={e => { e.stopPropagation(); setSel(r) }}>{tr('bd.pick')}</button></td>
+                    <td><button className="btn ghost sm" onClick={e => { e.stopPropagation(); selectRun(r) }}>{tr('bd.pick')}</button></td>
                   </tr>
                 ))}
               </tbody>

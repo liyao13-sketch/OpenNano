@@ -96,3 +96,40 @@ def generate_matrix(variables: list[dict], design_type: str = "full",
               for v in variables]
     return {"matrix": matrix, "levels": levels,
             "runs": len(matrix), "design_type": design_type}
+
+
+#: 一次 DOE 请求的矩阵行数上限（2026-09-16 审计：原来无上限，`step` 写小一点
+#: 就能让 `full = product(...)` 直接吃爆服务进程内存 —— 实测把 pytest 进程都杀了）。
+MAX_RUNS = 100_000
+
+
+def estimate_runs(variables: list[dict], design_type: str = "full",
+                  center_points: int = 0, n_runs: int | None = None) -> int:
+    """预估矩阵行数；**不可行/不可估**返回 -1。
+
+    给入口做上限闸用（`main.api_doe`）。与 `generate_matrix` 的分支保持一致：
+    full = ∏ 各变量水平数；partial = n_runs；bbd/ccd 按变量数算。
+    """
+    k = len(variables or [])
+    if k == 0:
+        return 0
+    if design_type == "bbd":
+        if not (3 <= k <= 7):
+            return -1
+        return 4 * (k * (k - 1) // 2) + max(0, center_points)
+    if design_type == "ccd":
+        if k > 20:
+            return -1
+        return 2 ** k + 2 * k + max(0, center_points)
+    if design_type == "partial":
+        return int(n_runs or 0) or 8
+    total = 1
+    for v in variables:
+        try:
+            lv = _levels(float(v["min"]), float(v["max"]), v.get("step"))
+        except (KeyError, TypeError, ValueError):
+            return -1
+        total *= max(1, len(lv))
+        if total > 10 ** 9:                     # 早早退出，别真去乘出天文数字
+            return total
+    return total

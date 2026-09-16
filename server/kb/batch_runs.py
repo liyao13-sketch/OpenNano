@@ -21,6 +21,32 @@ STAGE_ORDER = ["PECVD", "LDW", "EBL", "UV", "MA6", "ICP", "ASH", "DRIE", "RIE",
 
 #: 从 core/runs.csv 读到的 (batch, stage) → stage_seq（进程内缓存）
 _STAGE_SEQ_CACHE: dict[tuple[str, str], int] | None = None
+_STAGE_SEQ_CACHE_SIG: tuple | None = None
+
+
+def _src_sig(paths) -> tuple:
+    """源文件指纹：(path, mtime_ns, size)；文件不存在记 (path, None, None)。
+
+    存在的理由（2026-09-16，A4 实测坐实）：本文件这批"进程内缓存"原来是
+    **读一次、永不失效** —— 服务做成 launchd 常驻后，数据线 `build_core` 落了新数据，
+    这里还在喂旧值（实测：盘上改了 runs.csv，第二次读出来的还是旧的）。
+    现在每次调用先对源文件做一次 `stat`（便宜），指纹变了就重建；
+    真正贵的发现（rglob 整棵树）才走 TTL（见 `_pack_runs_files`）。
+    """
+    out = []
+    for p in paths:
+        try:
+            st = p.stat()
+            out.append((str(p), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(p), None, None))
+    return tuple(out)
+
+
+def _core_sig() -> tuple:
+    """core/runs.csv 的指纹（路径含在里面 ⇒ 测试切 OPENNANO_CORE_DIR 也自动失效）。"""
+    p = core_runs_path()
+    return _src_sig([p] if p else [])
 
 
 def core_runs_path():
@@ -39,8 +65,9 @@ def core_runs_path():
 
 def stage_seq_map() -> dict[tuple[str, str], int]:
     """已入库的 (batch, stage) → stage_seq（**续做的 stage_seq 必须沿用这个**）。"""
-    global _STAGE_SEQ_CACHE
-    if _STAGE_SEQ_CACHE is not None:
+    global _STAGE_SEQ_CACHE, _STAGE_SEQ_CACHE_SIG
+    sig = _core_sig()
+    if _STAGE_SEQ_CACHE is not None and _STAGE_SEQ_CACHE_SIG == sig:
         return _STAGE_SEQ_CACHE
     out: dict[tuple[str, str], int] = {}
     p = core_runs_path()
@@ -56,6 +83,7 @@ def stage_seq_map() -> dict[tuple[str, str], int]:
     except Exception:                     # noqa: BLE001
         pass
     _STAGE_SEQ_CACHE = out
+    _STAGE_SEQ_CACHE_SIG = sig
     return out
 
 
@@ -115,6 +143,7 @@ def runs_of_batch(modules: list[dict], batch: str) -> list[dict]:
 
 
 _RUN_FACTS_CACHE: dict[str, dict] | None = None
+_RUN_FACTS_CACHE_SIG: tuple | None = None
 
 
 def _core_run_facts() -> dict[str, dict]:
@@ -124,8 +153,9 @@ def _core_run_facts() -> dict[str, dict]:
     而 core 里有权威值。**每发现一次"某个字段模块上是空的"，就加进这张表** ——
     不要再为每个字段各写一套 `_xxx_map()`（那正是漏掉 `sample_id` 的原因）。
     """
-    global _RUN_FACTS_CACHE
-    if _RUN_FACTS_CACHE is not None:
+    global _RUN_FACTS_CACHE, _RUN_FACTS_CACHE_SIG
+    sig = _core_sig()
+    if _RUN_FACTS_CACHE is not None and _RUN_FACTS_CACHE_SIG == sig:
         return _RUN_FACTS_CACHE
     cols = ("sample_id", "run_nature", "date", "status", "tool_id", "recipe_id", "stage_seq")
     out: dict[str, dict] = {}
@@ -134,6 +164,7 @@ def _core_run_facts() -> dict[str, dict]:
         if rid:
             out[rid] = {c: (r.get(c) or "").strip() for c in cols}
     _RUN_FACTS_CACHE = out
+    _RUN_FACTS_CACHE_SIG = sig
     return out
 
 
@@ -156,6 +187,28 @@ def _core_runs_rows() -> list[dict]:
 
 
 _PARENT_CACHE: dict[str, str] | None = None
+_PARENT_CACHE_SIG: tuple | None = None
+
+#: 实验包 runs.csv 的**清单**缓存：贵的是 `rglob` 发现（整棵树），不是读文件。
+#: 清单每 300 秒重扫一次；清单里每个文件的**内容指纹**每次调用都 stat（便宜）。
+#: 300 秒够用的原因：新包进 core 必过 `build_core`（runs.csv 变 ⇒ core 部分指纹立即失效），
+#: 包扫描只补"core 尚未入库的老包"的父边 —— 那条路晚几分钟刷新无损。
+_PARENT_FILES: list = []
+_PARENT_FILES_AT: float = 0.0
+_PARENT_FILES_BASE: str = ""
+_PACK_LIST_TTL_S = 300.0
+
+
+def _pack_runs_files(base) -> list:
+    """实验包 runs.csv 清单（按 base 区分；TTL 内复用，见上）。"""
+    global _PARENT_FILES, _PARENT_FILES_AT, _PARENT_FILES_BASE
+    import time
+    key = str(base)
+    if key != _PARENT_FILES_BASE or (time.monotonic() - _PARENT_FILES_AT) > _PACK_LIST_TTL_S:
+        _PARENT_FILES = list(base.rglob("runs.csv"))[:200] if base else []
+        _PARENT_FILES_AT = time.monotonic()
+        _PARENT_FILES_BASE = key
+    return _PARENT_FILES
 
 
 def _parent_map_from_packs() -> dict[str, str]:
@@ -167,41 +220,44 @@ def _parent_map_from_packs() -> dict[str, str]:
          （与 `sample_id` / `run_nature` 是同一个坑：语义标注常在 core 侧）。
       ② 各实验包内的 `runs.csv`（老包能补 core 尚未入库的续做边）。
     """
-    global _PARENT_CACHE
-    if _PARENT_CACHE is not None:
-        return _PARENT_CACHE
-    out: dict[str, str] = {}
-    for r in _core_runs_rows():                    # ① core 权威
-        rid = (r.get("run_id") or "").strip()
-        if rid:
-            out[rid] = (r.get("parent_run_id") or "").strip()
-    try:                                           # ② 包内 runs.csv 补 core 没有的
-        import csv
-        import os
-        from .menu_reader import _workspace
-        # ⚠️ 可隔离：`OPENNANO_PACKS_ROOT` 指定"只扫这一棵"（空串 = 不扫）。
-        #    ① 测试必须隔离（否则夹具会被真实验包里的父污染 ⇒ 假绿/假红都出现过）
-        #    ② 大工作区上 `rglob` 整棵树会拖慢每次点开批次面板 —— 这是它真正的代价
-        env = os.environ.get("OPENNANO_PACKS_ROOT")
+    global _PARENT_CACHE, _PARENT_CACHE_SIG
+    # ⚠️ 可隔离：`OPENNANO_PACKS_ROOT` 指定"只扫这一棵"（空串 = 不扫）。
+    #    ① 测试必须隔离（否则夹具会被真实验包里的父污染 ⇒ 假绿/假红都出现过）
+    #    ② 大工作区上 `rglob` 整棵树会拖慢每次点开批次面板 —— 这是它真正的代价
+    import os
+    env = os.environ.get("OPENNANO_PACKS_ROOT")
+    try:
         if env is None:
+            from .menu_reader import _workspace
             base = _workspace() / "个人空间/18_工艺数据资产"
         elif env == "":
             base = None
         else:
             from pathlib import Path
             base = Path(env).expanduser()
-        for p in (list(base.rglob("runs.csv"))[:200] if base else []):
-            try:
-                with p.open(newline="", encoding="utf-8-sig") as f:
-                    for r in csv.DictReader(f):
-                        rid, par = (r.get("run_id") or "").strip(), (r.get("parent_run_id") or "").strip()
-                        if rid:
-                            out.setdefault(rid, par)
-            except Exception:                     # noqa: BLE001
-                continue
-    except Exception:                             # noqa: BLE001
-        pass
+    except Exception:                             # noqa: BLE001 —— 工作区推断失败退化为只用 core
+        base = None
+    pack_files = _pack_runs_files(base)
+    sig = (_core_sig(), str(base), _src_sig(pack_files))
+    if _PARENT_CACHE is not None and _PARENT_CACHE_SIG == sig:
+        return _PARENT_CACHE
+    out: dict[str, str] = {}
+    for r in _core_runs_rows():                    # ① core 权威
+        rid = (r.get("run_id") or "").strip()
+        if rid:
+            out[rid] = (r.get("parent_run_id") or "").strip()
+    import csv                                     # ② 包内 runs.csv 补 core 没有的
+    for p in pack_files:
+        try:
+            with p.open(newline="", encoding="utf-8-sig") as f:
+                for r in csv.DictReader(f):
+                    rid, par = (r.get("run_id") or "").strip(), (r.get("parent_run_id") or "").strip()
+                    if rid:
+                        out.setdefault(rid, par)
+        except Exception:                          # noqa: BLE001
+            continue
     _PARENT_CACHE = out
+    _PARENT_CACHE_SIG = sig
     return out
 
 
