@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import tempfile
 import os
 import sys
 from pathlib import Path
@@ -54,6 +55,10 @@ _REAL_CORE_DIR = _DATA_ROOT / "core"                # 真 core（只读用例用
 # ⚠️ **必须显式赋值，不能 setdefault**：环境/shell 里若残留旧值，用例会静默回退到
 #    "core 里没有 ⇒ 用习惯序"的分支 ⇒ 看着通过，其实没测到 core 回读（2026-09-13 实际踩到）。
 os.environ["OPENNANO_WORKSPACE"] = str(WS_ROOT)
+#: 资产库也隔离（2026-09-16）：`main.LIB = LibraryStore()` 在 import 时就用默认路径，
+#: 不分隔的话**跑一趟用例就会读写主人的真 library.json**（实测被写过一次）。
+_LIB_TMP = tempfile.mkdtemp(prefix="opennano_test_lib_")
+os.environ["OPENNANO_LIBRARY"] = str(Path(_LIB_TMP) / "library.json")
 os.environ["OPENNANO_CORE_DIR"] = str(_REAL_CORE_DIR)
 
 

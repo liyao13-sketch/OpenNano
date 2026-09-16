@@ -184,3 +184,16 @@ def test_迁移是幂等的(tmp_path):
     b = LibraryStore(p)
     second = json.dumps(b.data, ensure_ascii=False, sort_keys=True)
     assert first == second, "第二次载入又改动了库内容 ⇒ 迁移不幂等"
+
+
+def test_没改动就不重写库文件(tmp_path):
+    """`_migrate()` 结尾原来**无条件** `_save()` ⇒ 每次载入都重写库文件。
+
+    后果实测过一次：`main.LIB = LibraryStore()` 用真库路径，**跑一趟 pytest 就把主人的
+    library.json 写了一遍**。修复后：内容没变 ⇒ 一个字节都不写（mtime 也不动）。
+    """
+    p = _store(tmp_path)
+    LibraryStore(p)                                  # 首次：播种并落盘
+    before = (p.stat().st_mtime_ns, p.read_bytes())
+    LibraryStore(p)                                  # 再载入一次（无事发生）
+    assert (p.stat().st_mtime_ns, p.read_bytes()) == before, "没改动却重写了库文件"

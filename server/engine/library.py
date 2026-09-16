@@ -118,6 +118,11 @@ class LibraryStore:
     def _migrate(self):
         """播种 + 一次性迁移链，在 `_load()` **末尾**调用（新库/老库都要走）。
 
+        ⚠️ **只在确实改动过时才写盘**（2026-09-16 实测踩到）：末尾原来是无条件 `_save()`，
+        而 `main.LIB = LibraryStore()` 用的是**真库路径** ⇒ **跑一趟 pytest 就把主人的
+        library.json 写了一遍**（实测：机器版本号被测试进程改掉、文件 mtime 变化）。
+        没事不改盘，改过才写。
+
         ⚠️ 2026-09-16 审计（P0）：这个链原来**整段落在 `_quarantine_corrupt()` 的末尾**
         （缩进事故）⇒ 只有"库文件损坏"那条路才会执行它。后果：
           · **全新安装**（新同事机器 / CI / 新服务器）拿到的是一份**空骨架** —— 没有 104 种工艺目录、
@@ -127,6 +132,7 @@ class LibraryStore:
         （损坏后重建内存副本的既有行为不变）。
         """
 
+        _before = json.dumps(self.data, ensure_ascii=False, sort_keys=True)
         if self.data.get("seed_version", 0) < 7:
             # 用 104 种工艺目录重建设备库:清空 9 类 + 删除旧分类键 + 重置失效默认
             for c in CATEGORIES:
@@ -195,7 +201,8 @@ class LibraryStore:
             # `_enrich_machines` 只填**空**字段，绝不覆盖已填/手改值。
             self._enrich_machines()
             self.data["machines_version"] = 7
-        self._save()
+        if json.dumps(self.data, ensure_ascii=False, sort_keys=True) != _before:
+            self._save()
 
     def _quarantine_corrupt(self) -> None:
         """把损坏的库文件改名留档，并禁止本次写盘（宁可这次不落盘，也不覆盖可能救得回的文件）。"""
