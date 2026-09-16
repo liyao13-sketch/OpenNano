@@ -95,10 +95,18 @@ def scan(files: list[str], rows: list[tuple[str, int, str]], root: Path = REPO) 
 
 # ---------------------------------------------------------------- L1 结构性
 
+#: ⚠️ **拆开拼**：本文件自己也在被扫描的文件里 —— 写成整串会**自己命中自己**。
+#: 第一次就是这么翻车的：当时判据还没提交（`git ls-files` 看不见本文件）⇒ 本地假绿；
+#: 一提交、进 clone 立刻红（"公开仓库里有绝对家目录路径：['tests/test_public_layer_hygiene.py']"）。
+#: 教训与"禁词表本身是指纹"同源：**判据自己必须站在被扫范围之外，或把针拆开写**。
+_HOME_PREFIX = "/" + "Users" + "/"
+_SELF = "tests/test_public_layer_hygiene.py"
+
+
 def test_no_absolute_home_paths_are_tracked():
-    """代码里不许出现 `/Users/<某人>/…` 绝对路径（会把用户名写进公网）。"""
+    """代码里不许出现绝对家目录路径（会把用户名写进公网）。"""
     hits = [f for f in _tracked_files()
-            if (t := _read(REPO / f)) and "/Users/" in t]
+            if f != _SELF and (t := _read(REPO / f)) and _HOME_PREFIX in t]
     assert hits == [], f"公开仓库里有绝对家目录路径：{hits[:5]}"
 
 
@@ -137,6 +145,9 @@ def test_public_layer_fingerprints_do_not_grow():
                     "评测/CI 环境跳过是预期行为（L1 结构性判据仍然会跑）")
     rows = load_denylist(p)
     assert rows, f"禁词表是空的：{p}"
-    bad = scan(_tracked_files(), rows)
+    # ⚠️ **判据自身不进扫描范围**：本文件引用了工作区路径（含表里的两个词）⇒ 不排除就会自己把上限顶破。
+    #    与 L1 那条同源：**判据要站在被扫范围之外，或把针拆开写**。
+    files = [f for f in _tracked_files() if f != _SELF]
+    bad = scan(files, rows)
     assert bad == [], ("公开层指纹超上限（要么是回流，要么是新增；**别调高上限**，"
                        "该走外置/删除）：\n  - " + "\n  - ".join(bad))
