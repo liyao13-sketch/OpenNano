@@ -1484,11 +1484,16 @@ def health():
     （见 `docs/extension-points.md` 的"失败隔离"）。
     """
     from kb import machine_catalog as mc
+    from kb import machine_drift as mdrift
     from kb import menu_reader as mr
     plugins = {"menu_parser": mr.plugin_status(), "machine_catalog": mc.status()}
     return {"ok": True, "service": "opennano", "version": "0.1.0",
             "plugins": plugins,
-            "plugins_ok": all(p.get("ok") for p in plugins.values())}
+            "plugins_ok": all(p.get("ok") for p in plugins.values()),
+            # 机台口径漂移（**只读**应用库 + 镜像表；权威仍在数据线 `core_schema.TOOL_DISPLAY`）——
+            # 2026-09-17 工单 `20260915-助手线-to-兼-01` B2-残C 工具线半：`resolve_tool` 见
+            # `tool_id ∉ TOOL_DISPLAY` 会**静默落哨兵**，这里把"档案里写错了机台号"提前照出来。
+            "machine_drift": mdrift.status()}
 
 
 # ---------- P3: Agent + RAG ----------
