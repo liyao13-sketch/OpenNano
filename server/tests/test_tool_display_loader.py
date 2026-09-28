@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from pathlib import Path
 
 import pytest
 
@@ -48,7 +49,10 @@ def test_摘要算法与数据线同一份():
     为什么：本加载器要能校验**他们生成的真清单**（头部 `sha256`）。算法一漂，真清单会被误判成"被改过"。
     仍能抓住：有人"顺手优化"了归一化/键序/分隔符 ⇒ 与他们的产物对不上 ⇒ 立刻红。
     """
-    p = WS_ROOT / "个人空间/18_工艺数据资产/03_实验数据/ingest/export_tool_display.py"
+    # ⚠️ 路径走 `opennano_config.DATA_ROOT`：**不硬拼工作区目录名**（那是另一张单的 B1 债，
+    #    且公开层棘轮会数它 —— 判据自己也不许写那个词）。
+    from opennano_config import DATA_ROOT
+    p = Path(DATA_ROOT) / "ingest" / "export_tool_display.py"
     if not p.exists():
         pytest.skip("本机没有数据线的 exporter（评测/CI）⇒ 无法对拍算法（跳过 ≠ 通过）")
     spec = importlib.util.spec_from_file_location("_their_exporter", p)

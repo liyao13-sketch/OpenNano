@@ -459,7 +459,7 @@ TOOLS: list[Tool] = [
         parameters={"type": "object", "properties": {
             "process_type": {"type": "string", "description": "工艺类型,如 RIE_Cl/RIE_F/PECVD"},
             "title": {"type": "string", "description": "条目标题"},
-            "equipment": {"type": "object", "description": "设备信息,如 {\"model\":\"RIE200NL\"}"},
+            "equipment": {"type": "object", "description": "设备信息,如 {\"model\":\"DEMO-ETCH-A\"}"},
             "material": {"type": "object", "description": "材料信息,如 {\"material\":\"Ta\",\"film_thickness_nm\":200}"},
             "parameters": {"type": "object", "description": "配方参数"},
             "results": {"type": "object", "description": "实测结果"},
