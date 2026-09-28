@@ -266,9 +266,12 @@ _XLSX_SOURCES = {
     "Si": ("RIE_F", (SOURCES.get("f_rie") or ("", ""))[1], "f"),
 }
 
+#: 执行表结果列的**参考列序**（目前未被引用；保留作列序备忘）。
+#: ⚠️ 里面的名字也必须走 `_norm_result_key` 后落 §三 —— 原来含 legacy 名 `sidewall_angle_deg`
+#:    与计划列 `Δd_target_nm`，已按 2026-09-28 工单清理（判据会连同本表一起查）。
 _XLSX_RESULTS = ["速率_nm_min", "选择比", "SWA_grating_", "SWA_square_d",
-                 "Δd_target_nm", "Δd_mask_nm", "er_nm_min", "selectivity",
-                 "sidewall_angle_deg", "depth_center_nm", "SWA_deg"]
+                 "Δd_mask_nm", "er_nm_min", "selectivity",
+                 "SWA_deg", "depth_center_nm"]
 
 
 def _f2(v):
@@ -282,17 +285,27 @@ def _f2(v):
 # 结果列名归一:已知量映射到标准英文键(供建模/工具用),未知列保留原名(不丢数据)
 RESULT_ALIASES = {
     "速率_nm_min": "er_nm_min", "速率": "er_nm_min", "刻蚀速率": "er_nm_min",
-    "选择比": "selectivity", "SWA_grating_": "sidewall_angle_deg",
-    "SWA_square_d": "swa_square_deg", "SWA_deg": "sidewall_angle_deg",
-    "Δd_target_nm": "depth_target_nm", "Δd_mask_nm": "mask_loss_nm",
-    "Δd_nm": "depth_nm", "粗糙度": "roughness_nm", "粗糙度_nm": "roughness_nm",
-    "scallop": "scallop", "scallop_nm": "scallop", "扇贝": "scallop",
-    "均匀性": "uniformity_pct", "均匀性_%": "uniformity_pct",
+    "选择比": "selectivity", "SWA_grating_": "swa_deg",
+    "SWA_square_d": "swa_deg", "SWA_deg": "swa_deg",
+    "Δd_nm": "depth_nm", "Δd_mask_nm": "mask_consumed_nm",
+    "粗糙度": "roughness_nm", "粗糙度_nm": "roughness_nm",
+    "scallop_pitch_nm": "scallop_pitch_nm",
+    "scallop_nm": "scallop_nm", "scallop": "scallop_nm", "扇贝": "scallop_nm",
+    "均匀性": "nu_pct", "均匀性_%": "nu_pct",
     "LER_nm": "ler_nm", "LWR_nm": "lwr_nm", "CD_loss_nm": "cd_loss_nm",
     "final_CD_nm": "final_cd_nm", "CD_top_nm": "cd_top_nm",
-    "CD_bot_nm": "cd_bot_nm", "残胶": "resist_residue",
-    "掩膜剩余_nm": "mask_remain_nm", "resist_remain_nm": "mask_remain_nm",
+    "CD_bot_nm": "cd_bottom_nm", "CD_mid_nm": "cd_mid_nm",
+    "掩膜剩余_nm": "mask_remaining_nm", "resist_remain_nm": "mask_remaining_nm",
+    "掩膜消耗_nm": "mask_consumed_nm", "掩膜剩余": "mask_remaining_nm",
+    "刻蚀深度_nm": "depth_nm", "过刻_nm": "overetch_nm",
+    "侧壁角": "swa_deg", "侧壁开口角": "sidewall_open_deg",
+    "粗糙度_Ra_nm": "roughness_nm", "线边缘粗糙度_nm": "ler_nm", "线宽粗糙度_nm": "lwr_nm",
 }
+# ⚠️ **本表每个「值」都必须是 `schema §三` 的受控量名**（别名只许**照词表**，不许自造）——
+#    机器判据见 `unregistered_alias_targets()` 与 `tests/test_ingest_aliases.py`
+#    （2026-09-28 工单 `20260928-助手线-to-工具线-01`：数据线用**真执行表列头**核出 5 处，本侧复核实为 **9 处**）。
+# ⚠️ `Δd_target_nm`（**计划**列）与 `残胶`（**现象**）**刻意不在本表**：前者不是实测（映射到任何实测量名都违
+#    「不把计划当实测」），后者属现象受控词表（`OBS-*`）而非量测 ⇒ 见 `NON_QUANTITY_HEADERS`。
 
 # 参数/标识列(前缀匹配;其余数值列一律当"结果"自动收录)
 PARAM_COL_PREFIXES = (
@@ -305,16 +318,67 @@ PARAM_COL_PREFIXES = (
 )
 
 
+#: **不是量测**的表头 ⇒ 不进 `results`（也就不会变成未登记量名）。
+#: 三类：① 现象（残胶…属 core `obs_type` 受控词表）② 可信度标注（`可靠性*` ⇒ core §四 `verification`）
+#: ③ DOE 设计元数据（`点类型`/`图形`）。⚠️ 这不是"丢数据"：它们本就不属于 `measurements`，
+#: 应走 observations / verification / 参数列；本 ingester 目前没有这两个出口 ⇒ **跳过并出声**（见 ingest_xlsx）。
+NON_QUANTITY_HEADERS = (
+    "残胶", "黑硅", "草状", "侧掏",          # 现象（obs_type）
+    "可靠性", "可靠性标注", "可靠性评分",     # 可信度（verification）
+    "点类型", "图形",                        # DOE 设计元数据
+    "显影质量",                              # 质量判断（非量测）
+    "Δd_target_nm", "目标深度_nm",           # **计划/目标**列（实测在别的列；映射到实测量名＝把计划当实测）
+)
+
+
 def _norm_result_key(header: str) -> str:
     """表头 → 结果键:已知量用标准英文键,未知列保留原表头(清洗空白/单位括号)。"""
     h = header.strip()
+    if h in NON_QUANTITY_HEADERS or any(h.startswith(k) for k in NON_QUANTITY_HEADERS):
+        return ""                                # 非量测 ⇒ 调用方跳过（不是量测就不该进 measurements）
     if h in RESULT_ALIASES:
         return RESULT_ALIASES[h]
-    for k, v in RESULT_ALIASES.items():          # 前缀匹配(表头常带 _nm/_deg 尾巴)
+    # 前缀匹配(表头常带 _nm/_deg 尾巴)：**长键优先** ——
+    # ⚠️ 2026-09-28 实测踩到：按插入序匹配时 `scallop_pitch_nm` 会被更短的 `scallop` 抢先
+    #    映成 `scallop_nm`（明明 §三 里就有 `scallop_pitch_nm`）⇒ 错量名。长键优先即修。
+    for k in sorted(RESULT_ALIASES, key=len, reverse=True):
         if k and h.startswith(k):
-            return v
+            return RESULT_ALIASES[k]
     return (h.replace("(", "").replace(")", "").replace("/", "_per_")
             .replace("%", "pct").replace(" ", "_").strip("_"))
+
+
+def alias_targets(aliases: dict | None = None) -> set[str]:
+    """别名表的**全部目标量名**（判据用）。"""
+    return set((aliases if aliases is not None else RESULT_ALIASES).values())
+
+
+def unregistered_alias_targets(registered, aliases: dict | None = None) -> list[str]:
+    """**判据本体**：别名表里**不在受控量名表内**的目标（空 ＝ 全部已登记）。
+
+    口径（2026-09-28 工单）：别名只许**照词表**，不许自造量名 —— 否则草稿会带未登记量名，
+    落 core 前必须人工再映一次（那正是要堵的口子）。
+    """
+    return sorted(alias_targets(aliases) - set(registered or ()))
+
+
+def unregistered_reachable_names(registered, aliases: dict | None = None,
+                                 extra_names=()) -> list[str]:
+    """**更强的判据**：把「可能当结果列出现」的名字（别名键 ＋ `_XLSX_RESULTS`）过一遍归一，
+    归一后仍不在受控量名表内的列出来。
+
+    为什么需要它：只查"别名表的值"漏掉**没进别名表**的列名 —— 它们会**原样**（清洗后）落进草稿，
+    同样带未登记量名（真表实测：`CD_grat_top_nm` / `占空比` / `Linewidth_nm` …）。
+    ⚠️ 归一为空串 ＝ 判为**非量测**（现象/可信度/设计元数据）⇒ 不算违规（它们本就不该进 measurements）。
+    """
+    reg = set(registered or ())
+    names = set((aliases if aliases is not None else RESULT_ALIASES)) | set(_XLSX_RESULTS) | set(extra_names)
+    bad = []
+    for n in names:
+        key = _norm_result_key(n)
+        if key and key not in reg:
+            bad.append((n, key))
+    return [f"{n} → {k}" for n, k in sorted(bad)]
 
 
 def xlsx_columns(path: Path) -> dict:
@@ -336,7 +400,11 @@ def xlsx_columns(path: Path) -> dict:
     for r in body:
         if any(_f2(r[i] if i < len(r) else None) is not None for i in idx):
             filled += 1
-    return {"params": params, "results": results, "result_keys": {h: _norm_result_key(h) for h in results},
+    keys = {h: _norm_result_key(h) for h in results}
+    return {"params": params, "results": results,
+            "result_keys": {h: k for h, k in keys.items() if k},
+            #: 非量测列（现象/可信度/设计元数据）——**不会**进 measurements，单列出来以免看着像"丢数据"
+            "non_quantity": [h for h, k in keys.items() if not k],
             "rows": len(body), "filled_rows": filled,
             "sheet": ws.title, "sheets": None}
 
@@ -370,6 +438,7 @@ def ingest_xlsx(path: Path, process_type: str, equipment_model: str,
                    if h and not h.startswith(PARAM_COL_PREFIXES)]
 
     entries = []
+    skipped_non_quantity: set = set()
     for r in rows[1:]:
         run_no = col(r, "Run")
         if run_no is None or str(run_no).strip() in ("", "Run"):
@@ -378,8 +447,14 @@ def ingest_xlsx(path: Path, process_type: str, equipment_model: str,
         results = {}
         for i, rc in result_cols:
             v = _f2(r[i] if i < len(r) else None)
-            if v is not None:
-                results[_norm_result_key(rc)] = v
+            if v is None:
+                continue
+            key = _norm_result_key(rc)
+            if not key:
+                # 非量测列（现象/可信度/设计元数据）⇒ **不进 measurements**；但要**出声**记账
+                skipped_non_quantity.add(rc)
+                continue
+            results[key] = v
         if not results:
             continue
         # 配方 → 两步结构(BT + ME),与 cl_rie steps.csv 同构
@@ -420,6 +495,12 @@ def ingest_xlsx(path: Path, process_type: str, equipment_model: str,
             "tags": [t for t in [mat, process_type, "DOE"] if t],
         }, run_id, VIDX.get(run_id)))
     wb.close()
+    if skipped_non_quantity:
+        # ⚠️ 出声（不静默）：这些列**不是**量测，本 ingester 没有 observations/verification 出口
+        #    ⇒ 明确告知它们没进 `results`，别让人以为"丢数据"。
+        print(f"[KB ingester] {path.name}：跳过 {len(skipped_non_quantity)} 个**非量测**列"
+              f"（现象/可信度/设计元数据，不进 measurements）：{sorted(skipped_non_quantity)}",
+              file=sys.stderr)
     return entries
 
 
