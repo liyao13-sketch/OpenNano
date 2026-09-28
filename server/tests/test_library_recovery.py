@@ -27,6 +27,29 @@ def _store(tmp_path: Path) -> Path:
     return tmp_path / "library.json"
 
 
+#: 合成外部机台清单（**中性名**：真机台名是公开层指纹，见 `test_public_layer_hygiene.py`）。
+#: ⚠️ 2026-09-26（工单 B2-残C 的 C6）：代码里的**内建真机台表已整表删除** ⇒ 机型/厂家
+#:   现在只从**外部清单**来。所以凡"要验型号/厂家补全"的用例，必须自己给一份清单；
+#:   不给清单时是**中性**的（不补任何厂名型号）——这正是公开 clone / CI 的形态。
+_CATALOG = [
+    {"name": "DEMO-ETCH-A", "equipment_template": "RIE", "tool_id": "DEMO-ETCH-A",
+     "vendor": "厂A", "model": "M-A", "max_sample": "8 寸", "status": "active", "notes": "样例甲"},
+    {"name": "DEMO-LITHO-A", "equipment_template": "UV Exposure", "tool_id": "DEMO-LITHO-A",
+     "vendor": "厂B", "model": "M-B", "max_sample": "", "status": "active", "notes": "样例乙"},
+    {"name": "DEMO-METRO-A", "equipment_template": "", "tool_id": "DEMO-METRO-A",
+     "vendor": "厂C", "model": "M-C", "max_sample": "", "status": "active", "notes": "样例丙"},
+]
+
+
+def _with_catalog(tmp_path: Path, monkeypatch) -> Path:
+    """把合成清单挂到 `OPENNANO_MACHINES`（返回清单路径）。"""
+    p = tmp_path / "machines.json"
+    p.write_text(json.dumps({"version": 1, "machines": _CATALOG}, ensure_ascii=False),
+                 encoding="utf-8")
+    monkeypatch.setenv("OPENNANO_MACHINES", str(p))
+    return p
+
+
 def test_corrupt_library_is_preserved_and_not_overwritten(tmp_path):
     """**核心断言**：损坏文件的字节必须原样留存（旧代码下它会被默认值覆盖掉）。"""
     p = _store(tmp_path)
@@ -119,7 +142,8 @@ def test_资产库路径可由_env_覆盖(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------- 播种/迁移链（2026-09-16 审计 P0）
-def test_全新安装必须播种并落盘(tmp_path):
+def test_全新安装必须播种并落盘(tmp_path, monkeypatch):
+    _with_catalog(tmp_path, monkeypatch)
     """红证：修复前全新库是**空骨架**（无工艺目录/无机台/无参数），而且**不落盘**。
 
     根因：整段播种+迁移链被缩进事故塞进了 `_quarantine_corrupt()` 的末尾 ⇒
@@ -128,7 +152,9 @@ def test_全新安装必须播种并落盘(tmp_path):
     p = _store(tmp_path)
     lib = LibraryStore(p)
     assert (lib.data.get("equipment") or {}), "全新库没有设备库（工艺目录没播种）"
-    assert len(lib.data.get("machines") or []) >= 10, "全新库没有机台"
+    # ⚠️ 机台不再来自"代码内建表"（C6 已整表外置）⇒ 这里只断言**结构**：
+    #    有清单 ⇒ 按清单播种；数量随清单走，不写死台数。
+    assert len(lib.data.get("machines") or []) >= len(_CATALOG), "全新库没有机台"
     assert lib.data.get("params"), "全新库没有默认参数"
     assert lib.data.get("seed_version") == 7 and lib.data.get("machines_version") == 7
     assert p.exists(), "播种后没落盘 ⇒ 下次启动又是空的"
@@ -138,7 +164,8 @@ def test_全新安装必须播种并落盘(tmp_path):
         "机台型号/厂家没补（顺序 bug：<6 挡在 <4 前面）"
 
 
-def test_老库载入要被迁移(tmp_path):
+def test_老库载入要被迁移(tmp_path, monkeypatch):
+    _with_catalog(tmp_path, monkeypatch)
     """合法 JSON 但很旧（无 seed_version / 无机台）⇒ 必须被迁移，而不是"载入即完事"。"""
     p = _store(tmp_path)
     p.write_text(json.dumps({"version": 1, "params": {"膜厚": {"unit": "nm", "category": "膜厚"}}},
@@ -146,14 +173,16 @@ def test_老库载入要被迁移(tmp_path):
     lib = LibraryStore(p)
     assert lib.data.get("seed_version") == 7, "老库没被迁移（迁移链不可达）"
     assert lib.data["params"].get("膜厚"), "迁移把用户已有的参数弄丢了"
-    assert len(lib.data.get("machines") or []) >= 10
+    assert len(lib.data.get("machines") or []) >= len(_CATALOG)
 
 
-def test_v6_库要补做_enrich(tmp_path):
+def test_v6_库要补做_enrich(tmp_path, monkeypatch):
+    _with_catalog(tmp_path, monkeypatch)
     """已到 v6 但 `<4` 从未跑过的库（顺序 bug 的受害者）⇒ v7 补做，且**只填空字段**。
 
-    构造方式：先播种出新库、把机台字段人为抹空、版本退回 6 —— 这样源码里
-    **不必写任何真机台名**（机器名只作为运行期数据出现）。
+    构造方式：给一份**合成外部清单**、先播种出新库、把机台字段人为抹空、版本退回 6 ——
+    源码里**不必写任何真机台名**（机器名只作为运行期数据出现）。
+    ⚠️ 2026-09-26（C6）：型号/厂家现在**只从外部清单来**，没有清单就无从补 ⇒ 本用例必须自备清单。
     """
     p = _store(tmp_path)
     fresh = LibraryStore(p)
