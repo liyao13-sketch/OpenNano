@@ -27,6 +27,7 @@ import re
 import shutil
 import stat
 import zipfile
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -83,6 +84,25 @@ PARAM_TO_QUANTITY = {v: k for k, v in QUANTITY_TO_PARAM.items()}
 PARAM_TO_QUANTITY.update({"硅CD": "final_cd_nm", "刻蚀深度": "depth_center_nm",
                           "选择比": "selectivity", "膜厚": "film_thickness_nm"})
 
+
+def _core_quantity(name: str) -> str:
+    """画布接口名 → core **受控量名**；认不出返回空串（调用方据此**不写行**）。
+
+    为什么单列一条（2026-09-28 · `07 §G.70` 第 3 条）：`param_outputs` 装的是设备模板的
+    **画布中文接口名**（实测 17 个里 9 个在本表没有量名：`套刻精度`/`形貌缺陷`/`表面脏污`…
+    ——记录里的"12 个里 7 个"是当时那张表的快照）。原实现 `PARAM_TO_QUANTITY.get(out, out)`
+    在映射不中时把**中文名原样**当量名写进 `measurements.quantity` ⇒ 非受控量名，任何视图都取不到。
+
+    ⚠️ **只拦中文**，不拦英文：core 真数据里的量名有一批不在本模块映射表里
+    （`resist_thickness_nm`/`pitch_nm`/`loop_count`…）却确实是受控记录
+    ⇒ 因为"我没见过这个英文名"就丢掉，是把"记录"降成"我的字典"（违反不推断修补的反面）。
+    """
+    q = PARAM_TO_QUANTITY.get(name, name)
+    if q and re.search(r"[\u4e00-\u9fff]", q):
+        return ""            # 映射完还是中文 ⇒ 这个名字没有对应量名
+    return q or ""
+
+
 # Bosch 三步骤前缀(导出 steps 时拆步)
 _STEP_PREFIXES = ("pass_", "brk_", "etch_", "bt_", "me_", "stage")
 
@@ -115,11 +135,11 @@ def _read_csv(p: Path) -> list[dict]:
 # 导出：画布流程 → 实验数据包(zip)
 # ============================================================
 
-def resolve_stage(m: dict, lib=None) -> str:
-    """画布模块 → core stage。三级回退：模板名 → 设备模板(经机台) → 工艺大类。
+def _guess_stage(m: dict, lib=None) -> str:
+    """按**画布侧**信息推 stage（模板名 → 经机台的设备模板 → 工艺大类）。
 
-    回退存在的理由：画布的 `equipment_name` 是**画布模板名**，而 TEMPLATE_TO_STAGE
-    只收了 16 个；SEM/椭偏/台阶等表征设备常对不上，过去会**静默丢节点**。
+    ⚠️ 这是"猜"，只在节点**没有** `core_stage`（还没入过库）时才用它；
+    它另有一个用途：`export_warnings` 拿它与 core 原值对比，把"本来会被改写成什么"说出来。
     """
     stage = TEMPLATE_TO_STAGE.get(m.get("equipment_name") or "")
     if stage:
@@ -144,6 +164,24 @@ def resolve_stage(m: dict, lib=None) -> str:
         if m.get("equipment_name") in TEMPLATE_TO_STAGE:
             return TEMPLATE_TO_STAGE[m["equipment_name"]]
     return CATEGORY_TO_STAGE.get(cat or m.get("subtype") or "", "")
+
+
+def resolve_stage(m: dict, lib=None) -> str:
+    """画布模块 → core stage。**core 原值优先**，其次三级回退：模板名 → 设备模板 → 工艺大类。
+
+    为什么 core 原值排在"猜"前面（2026-09-28 · `07 §G.70` 第 5 条）：
+        已入库的 run，它的工序是**记录**，不是能按画布设备名重猜的东西。原实现只看
+        `equipment_name`/`subtype` ⇒ 回灌节点若设备名不在映射表，stage 被大类兜底**静默改写**
+        （实测三条不同工序的模块全被解析成同一个 stage），而 `stage_seq` / 机台口径 / 检测身份
+        全挂在 stage 上 ⇒ 一处猜错、整条链错。口径与 `core_tool_id`/`core_run_id` 同一套。
+        ⚠️ 只认**词表内**的 `core_stage`：词表外的不硬塞（脏值不许借"原值优先"混进 runs.csv）。
+    回退存在的理由：画布的 `equipment_name` 是**画布模板名**，而 TEMPLATE_TO_STAGE
+    只收了 16 个；SEM/椭偏/台阶等表征设备常对不上，过去会**静默丢节点**。
+    """
+    cs = (m.get("core_stage") or "").strip()
+    if cs in STAGE_CODES:
+        return cs
+    return _guess_stage(m, lib)
 
 
 #: 表征类 stage —— 画布上"检测"的身份判据只有这一处（契约 §三 第四层 + 数据线协议 §15.4）。
@@ -215,28 +253,64 @@ def unmapped_modules(project: dict, lib=None) -> list[dict]:
 def export_warnings(project: dict, lib=None) -> list[dict]:
     """导出**前**的口径告警（`kind` / `subject` / `message`）。**列出即出声**，不静默。
 
-    两类（都来自 2026-09-14 的联调实测，不是假想）：
+    五类（前两类来自 2026-09-14 的联调实测，后三类来自 2026-09-28 `07 §G.70` 的深审）：
 
     · `unregistered_machine` —— 画布选的机台在 core **没登记机台号**（库内 `tool_id` 为空或不在
       `TOOL_DISPLAY` 里）。落 core 时该 run 只能写哨兵 `UNKNOWN`；数据线闸 ⑤ 会**拒收**未登记的名字，
       所以"把库内标签当机台号"这条路两头都堵死 ⇒ 唯一的出路是**先登记**或**接受哨兵**，
-      而这件事必须让导出的人看见（实测库里真有：`RIBE-鲁汶` / `MA6`）。
+      而这件事必须让导出的人看见（实测库里真有：库内标签当机台号 / 恰好等于 stage 名两种）。
     · `batch_mismatch` —— 工程里有 run 属于批次 `X`，而工程名派生的批次号不是 `X`（如画布工作名
       `AR50-T1-明天`）。新节点会被登记成**批次 `X` 之外**的 run ⇒ 幻影批次。
       续做请用**追加包**（`build_append_pack`，只带新 run、批次沿用），或把工程名改成批次号。
+    · `stage_from_core` —— 该节点的工序取自 **core 原值**，且与按画布设备名推出来的**不一样**
+      （`resolve_stage` 的"core 原值优先"）。这正是以前会被**静默改写**的那一类，
+      所以把"本来会写成什么"一并说出来（"改写过"与"本来如此"必须可区分）。
+    · `unmapped_quantity` —— 画布中文接口名在 core **没有对应量名** ⇒ 导出**不写** measurement 行
+      （不能把中文接口名当量名写进 core）。要落库得先由数据线在量名词表登记。
+    · `obs_out_of_vocab` —— 面板填的现象 `obs_type` 不在现象受控词表 ⇒ 不入库（协议 §6）。
+      过去是静默丢，现在既在这里出声，也进 `manifest.observations_skipped` 计数。
     """
     machines = lib.machines() if lib else []
     out: list[dict] = []
     batches: dict[str, int] = {}
+    try:
+        from . import form_contract as fc
+        vocab = {o["obs_type"] for o in fc.observations()}
+    except Exception:                                  # noqa: BLE001 —— 读不到契约就不判词表
+        vocab = set()
     for m in project.get("modules", []):
-        if not resolve_stage(m, lib):
+        stage = resolve_stage(m, lib)
+        if not stage:
             continue                                   # 未映射节点由 unmapped_modules 报，这里不重复
         rid = m.get("core_run_id") or ""
+        subject = rid or (m.get("name") or "(未命名)")
+        cs = (m.get("core_stage") or "").strip()
+        if cs in STAGE_CODES:
+            guess = _guess_stage(m, lib)
+            if guess != cs:
+                out.append({"kind": "stage_from_core", "subject": subject,
+                            "message": (f"工序按 **core 原值** `{cs}` 导出"
+                                        f"（画布设备名本来会推成 `{guess or '—'}`）"
+                                        "—— core 的 stage 是记录，不做二次猜测")})
         tid, _tname, note = resolve_tool(m, machines, STAGE_CODES)
         if note:
-            out.append({"kind": "unregistered_machine",
-                        "subject": rid or (m.get("name") or "(未命名)"),
-                        "message": note})
+            out.append({"kind": "unregistered_machine", "subject": subject, "message": note})
+        bad_q = [q for q in (m.get("param_outputs") or []) if not _core_quantity(q)]
+        if bad_q:
+            out.append({"kind": "unmapped_quantity", "subject": subject,
+                        "message": ("接口名 " + "、".join(f"`{q}`" for q in bad_q)
+                                    + " 在 core **没有对应量名** ⇒ 这些量**不写** measurement 行"
+                                      "（不许把中文接口名当量名写进 core）。"
+                                      "要落库请先在数据线的量名词表登记。")})
+        if vocab:
+            bad_o = sorted({(o.get("obs_type") or "").strip()
+                            for o in (m.get("core_observations") or [])}
+                           - vocab - {""})
+            if bad_o:
+                out.append({"kind": "obs_out_of_vocab", "subject": subject,
+                            "message": ("现象类型 " + "、".join(f"`{x}`" for x in bad_o)
+                                        + " 不在现象受控词表 ⇒ **不入库**"
+                                          "（填写时请从词表下拉里选）")})
         if rid:
             b = (m.get("core_batch_id") or "").strip() or rid.rsplit("-", 2)[0]
             if b:
@@ -264,13 +338,18 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
     machines = lib.machines() if lib else []       # 机台口径解析用（画布选的机台 → core tool_id）
     now = datetime.now().strftime("%Y-%m-%d")
     run_rows, step_rows, meas_rows = [], [], []
-    stage_counter: dict[str, int] = {}
+    stage_counter: dict[str, int] = {}             # 本包各工序几条（batches.planned_stages 用）
+    new_counter: dict[str, int] = {}               # 只有**新节点**才消耗的编号计数器
 
     # ── ⓪ 预扫描：**先给所有模块定下 run id**，才能按连线算出"谁是父" ──
     #    为什么必须先行：父要走**连线**（契约 §37「parent_run_id / 时序 = 连线」），
     #    而连线另一端的 run id 得先存在。原地一趟循环时后面的节点还没有 id，只能退化成
     #    "按导出顺序接上一条"——那是个猜测，对并存试验/检测节点都会编错归属。
     #    ⚠️ 计数语义与原来**逐字一致**（按模块顺序、按 stage 各自计数），只是提前算。
+    #    ⚠️ 2026-09-28：编号与"本包有哪些工序"**分成两个计数器**。原来共用一个 ⇒
+    #       第一次导出后模块被写上了 `core_run_id`，第二次导出 `stage_counter` 就空了
+    #       ⇒ `batches.planned_stages` 由 `RIE` 变空串，**同一输入两次导出不一致**。
+    #       编号仍只给新节点（语义不变、run id 逐字不变），统计则与"是不是新编号"无关。
     was_in_core: dict[int, bool] = {}          # 以**对象 id** 为键：判断"这节点原本在不在 core"
     rid_by_mid: dict[str, str] = {}
     for m in modules:
@@ -281,8 +360,9 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         # ⚠️ 已有 core_run_id 的模块**一律沿用**（续做时工具已算好序号）；
         #    只有全新节点才按 stage 计数分配。否则重导出会把 DRIE-0002 重编号回 0001。
         if not m.get("core_run_id"):
-            stage_counter[stage] = stage_counter.get(stage, 0) + 1
-            m["core_run_id"] = f"{batch}-{stage}-{stage_counter[stage]:04d}"
+            new_counter[stage] = new_counter.get(stage, 0) + 1
+            m["core_run_id"] = f"{batch}-{stage}-{new_counter[stage]:04d}"
+        stage_counter[stage] = stage_counter.get(stage, 0) + 1
         rid_by_mid[m.get("id") or ""] = m["core_run_id"]
     link_parent = _link_parents(project, rid_by_mid)
 
@@ -301,8 +381,8 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
         m["core_stage"] = stage
         m["core_stage_seq"] = seq_proc
         # 机台口径：**只从这里出**（2026-09-14）。过去的 `tool_id = m.get("machine_name") or ""` 写的是
-        # 应用库的**显示名**（`DRIE-Bosch` / `PECVD` / `ICP-鲁汶`）—— 其中 `PECVD` 正好是 stage 名
-        # （撞数据线机台闸 ②），其余看着合法却是**错的机台号**（`RIE-400iPB` / `ICP-PishowA` 才是真值），
+        # 应用库的**显示名（画布标签）**—— 其中有的**恰好等于 stage 名**
+        # （撞数据线机台闸 ②），其余看着合法却是**错的机台号**（真值另有 core 口径的机台号），
         # 会静默入库把归属记错。解析顺序与理由见 `kb/core_vocab.resolve_tool`。
         tool_id, tool_name, _warn = resolve_tool(m, machines, STAGE_CODES)
         # parent：**core 的语义优先，空就是空**。
@@ -328,7 +408,15 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
                          "", "", tool_name, tool_id,
                          m.get("core_recipe_id") or "", operator or "", purpose or "",
                          parent, "", "", "planned",
-                         m.get("comment") or ""])
+                         m.get("comment") or "",
+                         # ── core v0.1.6 的三列（2026-09-28 · `07 §G.70` 第 1 条）──
+                         # 导出侧过去只写到 `note`（18 列），而 `parse_expack` 会**读**这三列
+                         # ⇒ 导入 core 再导出，season 身份（run_nature）/ 调试线归属（tune_id/
+                         # tune_step）**静默消失**（列不存在，读出来恒为空）。列序照数据线
+                         # `core_schema.FIELDS["runs"]`：`note` 之后依次 run_nature/tune_id/tune_step。
+                         m.get("run_nature") or "",
+                         m.get("tune_id") or "",
+                         "" if m.get("tune_step") in (None, "") else m["tune_step"]])
         menu_steps = m.get("core_menu_steps") or []      # 菜单直读灌入的步**优先**（含机台槽位号）
         if menu_steps:
             for s in menu_steps:
@@ -369,7 +457,12 @@ def extract_rows(project: dict, purpose: str = "", operator: str = "",
                      if str(r.get("value", "")).strip() != ""]     # 空=未测，不当 0
         used_ids: set = set()
         for out in (m.get("param_outputs") or []):
-            q = PARAM_TO_QUANTITY.get(out, out)
+            q = _core_quantity(out)
+            if not q:
+                # 画布中文接口名在 core 没有对应量名 ⇒ **不写这一行**（2026-09-28 · §G.70 第 3 条）。
+                # 原实现 `PARAM_TO_QUANTITY.get(out, out)` 会把中文名当量名写进 core，
+                # 那是非受控量名 ⇒ 任何视图都取不到；出声在 `export_warnings`（manifest/流程卡）。
+                continue
             meta = field_meta(q)
             hit = next((r for r in form_meas
                         if r.get("quantity") == q and id(r) not in used_ids), None)
@@ -454,6 +547,40 @@ def _lib_templates(lib) -> list[tuple[str, dict]]:
     return out
 
 
+def _template_defs(m: dict, lib) -> dict:
+    """该节点的**设备模板参数定义表**（认 steps.csv 独立列的真键名用）。
+
+    优先按 `equipment_name` 从应用库的模板里取（与 `param_meta` 同一来源，顺序也一致）；
+    取不到再退节点自带的 `param_defs`（`build_module` 从库或内置默认填的）。
+    两处都没有 ⇒ 空表 ⇒ 调用方**不发明**键名（见 `_contract_key`）。
+    """
+    name = (m.get("equipment_name") or "").strip()
+    for n, p in _lib_templates(lib):
+        if name and n == name and p:
+            return p
+    return m.get("param_defs") or {}
+
+
+def _contract_key(group: str, col: str, defs: dict) -> str:
+    """steps.csv 的独立列（`duration_s` / `pressure`）→ **设备模板里的真键名**。
+
+    为什么不能"给组名加前缀"了事（2026-09-28 · `07 §G.70` 第 2 条）：
+        `step_name` 在 core 里是**人读步名**，不是参数前缀 —— 实测有 `刻硅主刻 (SE)` /
+        `DRIE 1st` / `菜单槽19`，拿它拼出来的 `se_etch_gas_SF6` / `drie_1st_pressure` 谁都不认识；
+        而导出侧的分组名（`main`/`etch`/`pass`…）只是 `_STEP_PREFIXES` 的产物，
+        拼回去必然把 `etch_time_s` 变成 `etch_duration_s`、把 `time` 变成 `main_time`。
+    规则：在**模板**里按"组名前缀 + 语义"找**唯一**命中
+        （时间：`time` / `time_s` / `pass_time_s` / `spin_time_s`…；压强：含 `pressure` 的键）。
+    命中多个或一个不中 ⇒ **不发明**，原样用 CSV 的列名：空手而归好过写一个假键名（不推断修补）。
+    """
+    is_time = col == "duration_s"
+    g = f"{group}_" if group and group != "main" else ""
+    hits = [k for k in (defs or {})
+            if (not g or k.startswith(g))
+            and (k.endswith(("time_s", "duration_s")) if is_time else "pressure" in k)]
+    return hits[0] if len(hits) == 1 else col
+
+
 def param_meta(key: str, lib, equipment_name: str = "") -> dict:
     """参数键 → {label, unit}。
 
@@ -511,16 +638,24 @@ def _unpack_step(s) -> tuple:
     return (sid, rid, order, "", sname, role, dur, press, pu, pj, note)
 
 
-def _form_observations(project: dict, operator: str, now: str) -> list[list]:
-    """面板填的**现象** → observations 行（obs_type 表外跳过；id 照抄或用 {run}.O{nn}）。"""
+def _form_observations(project: dict, operator: str, now: str) -> tuple[list[list], list[str]]:
+    """面板填的**现象** → `(observations 行, 被丢掉的 obs_type 清单)`。
+
+    词表外的 `obs_type` **一律跳过**（协议 §6：必须来自受控词表），但**必须出声**：
+    过去是裸 `continue`、不计数（2026-09-28 · `07 §G.70` 第 9 条）⇒ 用户以为现象记上了，
+    其实一个字都没落。清单进 `manifest.observations_skipped` + 导出告警（`obs_out_of_vocab`）——
+    与追加包 `build_append_pack` 的 `skipped_obs` 同一口径。
+    """
     from . import form_contract as fc
     vocab = {o["obs_type"] for o in fc.observations()}
-    out = []
+    out, skipped = [], []
     for m in project.get("modules") or []:
         rid = m.get("core_run_id") or ""
         for i, o in enumerate((m.get("core_observations") or []), start=1):
             ot = (o.get("obs_type") or "").strip()
             if not ot or (vocab and ot not in vocab):
+                if ot:
+                    skipped.append(ot)      # 空 obs_type 不算"词表外"（那是没填）
                 continue
             out.append([o.get("obs_id") or f"{rid}.O{i:02d}", rid,
                         o.get("sample_id") or m.get("core_sample_id") or "", ot,
@@ -528,21 +663,42 @@ def _form_observations(project: dict, operator: str, now: str) -> list[list]:
                         o.get("judgement", ""), o.get("action", ""),
                         o.get("artifact_id", ""), o.get("recorded_by") or operator or "",
                         o.get("date") or now])
-    return out
+    return out, skipped
 
 
 def _form_eq_state(project: dict) -> list[list]:
-    """面板填的**环境一行** → eq_state.csv 行（§十一 口径；超量程留空并在 note 标注）。"""
+    """面板填的**环境一行** → eq_state.csv 行（§十一 口径；超量程留空并在 note 标注）。
+
+    ⚠️ `state_id` 必须**唯一**（2026-09-28 · `07 §G.70` 第 7 条）：原来是
+    `EQ-{date}-{tool}` ⇒ 同一天同一台机的**第二条起撞号**。撞号不是"难看"，是**丢数据**：
+    数据线 `datasets_folder.py` 见 `state_id` 已存在就 `continue`（静默跳过该行），
+    而 `core_schema` 的 QA 也把 `state_id 唯一` 当硬项。
+    去重序号按**输入顺序**递增 ⇒ 同一份输入重复导出逐字节相同（幂等，见
+    `tests/test_expack_fields.py::test_导出确定性_同一输入两次逐字节相同`）。
+    面板明确填了的 `state_id` **照抄**（那是原值，工具不替它改）。
+    """
     from . import form_contract as fc
     rows = project.get("core_eq_state") or []
     if isinstance(rows, dict):
         rows = [rows]
-    out = []
+    kept: list[tuple[dict, dict, list[str]]] = []
     for r in rows:
         norm, warns = fc.check_eq_state(r)
         if not norm.get("date"):
             continue
-        sid = r.get("state_id") or f"EQ-{norm['date'].replace('-', '')}-{norm.get('tool', '(环境)')}"
+        kept.append((r, norm, warns))
+    base_of = [(r.get("state_id")
+                or f"EQ-{norm['date'].replace('-', '')}-{norm.get('tool') or '(环境)'}")
+               for r, norm, _w in kept]
+    total, seen = Counter(base_of), Counter()
+    out = []
+    for (r, norm, warns), base in zip(kept, base_of):
+        if r.get("state_id"):
+            sid = base                                   # 面板给的 id ⇒ 照抄
+        else:
+            seen[base] += 1
+            # 只有真撞号时才加序号：单条记录保持原来的 id 形态（不无端改既有包）
+            sid = base if total[base] == 1 else f"{base}-{seen[base]:02d}"
         out.append([sid, norm["date"], norm.get("tool", "(环境)"),
                     norm.get("env_temp_c", ""), norm.get("env_rh_pct", ""),
                     norm.get("chamber_bg_pa", ""), norm.get("chiller_temp_c", ""),
@@ -673,7 +829,13 @@ def build_process_card(project: dict, purpose: str = "", operator: str = "",
                     L.append("| " + " | ".join(cells) + " |")
                     first = False
                 if not triples:
-                    L.append(f"| S{order:02d} | （无参数） | " + (" | " if labels_known else "") + "|")
+                    # 列数必须与表头**逐格对齐**（2026-09-28 · `07 §G.70` 第 8 条）：
+                    # 旧写法 `| S01 | （无参数） | |` 比表头少一格，markdown 渲染会串列/缺列。
+                    # `（无参数）` 落在**参数**列，机台槽位号照给（有就写）。
+                    cells = [f"S{order:02d}", f"{mslot}" if mslot else "", "（无参数）", ""]
+                    if labels_known:
+                        cells.append("")             # 值/单位两列留空（表头有"单位"）
+                    L.append("| " + " | ".join(cells) + " |")
             L.append("")
         ms = meas_by_run.get(rid, [])
         if ms:
@@ -728,6 +890,8 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
     run_rows, step_rows, meas_rows, stage_counter, batch = extract_rows(
         project, purpose, operator, lib)
     now = datetime.now().strftime("%Y-%m-%d")
+    obs_rows, obs_skipped = _form_observations(project, operator, now)
+    eq_rows = _form_eq_state(project)
 
     files: dict[str, bytes] = {
         "manifest.json": json.dumps({
@@ -737,7 +901,9 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
             "purpose": purpose, "operator": operator,
             "runs": len(run_rows), "planned_measurements": len(meas_rows),
             "unmapped_nodes": unmapped_modules(project, lib),   # 非空 = 有节点没进包,须处理
-            # 机台口径 / 批次号的告警：非空 = 落 core 会与画布上看着的不一样（不静默）
+            # 词表外的现象**不入库但出声**（2026-09-28 · §G.70 第 9 条）：过去是静默丢
+            "observations_skipped": obs_skipped,
+            # 机台口径 / 批次号 / stage 来源 / 量名词的告警：非空 = 落 core 会与画布上看着的不一样（不静默）
             "warnings": export_warnings(project, lib),
         }, ensure_ascii=False, indent=2).encode(),
         "flow.json": json.dumps(project, ensure_ascii=False, indent=2).encode(),
@@ -746,10 +912,13 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
              "substrate_json", "planned_stages", "started_on", "status", "note"],
             [[batch, "", project.get("name", batch), "", purpose, "", "",
               "·".join(stage_counter), now, "planned", "由 OpenNano 画布导出"]]),
+        # ⚠️ 列序**照数据线 `core_schema.FIELDS["runs"]`**（含 v0.1.6 的 run_nature/tune_id/
+        #    tune_step 三列）—— 少一列＝导入再导出就静默丢一列（2026-09-28 · §G.70 第 1 条）。
         "runs.csv": _csv_bytes(
             ["run_id", "batch_id", "sample_id", "stage", "stage_seq", "date",
              "t_start", "t_end", "tool", "tool_id", "recipe_id", "operator",
-             "purpose", "parent_run_id", "env_temp_c", "env_rh_pct", "status", "note"],
+             "purpose", "parent_run_id", "env_temp_c", "env_rh_pct", "status", "note",
+             "run_nature", "tune_id", "tune_step"],
             run_rows),
         "steps.csv": _csv_bytes(
             ["step_id", "run_id", "step_order", "machine_step", "step_name", "role",
@@ -761,13 +930,13 @@ def build_expack(project: dict, purpose: str = "", operator: str = "",
         "observations.csv": _csv_bytes(
             ["obs_id", "run_id", "sample_id", "obs_type", "severity",
              "description", "judgement", "action", "artifact_id",
-             "recorded_by", "date"], _form_observations(project, operator, now)),
+             "recorded_by", "date"], obs_rows),
         # 环境一行（面板填的；没有就不写这个文件）
-        **({} if not _form_eq_state(project) else {
+        **({} if not eq_rows else {
             "eq_state.csv": _csv_bytes(
                 ["state_id", "date", "tool", "env_temp_c", "env_rh_pct",
                  "chamber_bg_pa", "chiller_temp_c", "chamber_temp_c", "he_flow",
-                 "clean_done", "note"], _form_eq_state(project))}),
+                 "clean_done", "note"], eq_rows)}),
         # 人读流程卡(与上面 CSV 共用同一套 id;不掺实测值)
         f"流程_{batch}.md": build_process_card(
             project, purpose=purpose, operator=operator, lib=lib).encode(),
@@ -951,7 +1120,11 @@ def _parse_expack_root(root: Path, lib) -> dict:
     def _module_from_run(r: dict, idx: int) -> dict:
         stage = r.get("stage") or ""
         sub, tmpl = STAGE_TO_TEMPLATE.get(stage, (None, None))
-        m = build_module(sub or "assist", lib, name=r.get("tool") or stage) if sub \
+        # ⚠️ 节点名取**设备模板名**（`tmpl`），不取 `runs.tool`（2026-09-28 · §G.70 第 4 条）：
+        #    后者是 core 的**机台显示名** ⇒ 同一台机上的多条 run 全同名（实测 6 条 ICP 一模一样），
+        #    机台未记录时更直接变成哨兵串（`UNKNOWN（机台未记录）`）—— 画布上读不出这是什么工序。
+        #    机台归属另有 `machine_id`/`machine_name`/`core_tool_id` 表达，不必也不该占节点名。
+        m = build_module(sub or "assist", lib, name=tmpl or stage) if sub \
             else build_module(stage, lib)
         if sub and tmpl:
             eid = _equipment_id(tmpl)
@@ -961,21 +1134,27 @@ def _parse_expack_root(root: Path, lib) -> dict:
         if mc:
             m["machine_id"], m["machine_name"] = mc["id"], mc.get("name", "")
         params = {}
+        defs = _template_defs(m, lib)          # 认独立列真键名用（见 `_contract_key`）
         for st in _steps_of(r.get("run_id", "")):
             try:
                 pj = json.loads(st.get("param_json") or "{}")
             except Exception:  # noqa: BLE001
                 pj = {}
-            # 前缀取**清洗后的步名**：剥掉机台槽位后缀「·槽N」「·slotN」并清标点，
-            # 否则会生成 `chuck-si·槽1_hv_press_exp` 这类脏键（core 里的参数键是干净的）
-            pre = re.sub(r"[·•]\s*(槽|slot)\s*\d+\s*$", "", (st.get("step_name") or "").strip(),
-                         flags=re.I)
-            pre = re.sub(r"[^0-9a-z]+", "_", pre.lower()).strip("_")
+            # 组名取**清洗后的步名**：剥掉机台槽位后缀「·槽N」「·slotN」并清标点
+            # （core 里有人读步名 `Chuck-Si·槽1`、`N2 Dechuck-Si·槽3`，不清会带出脏字符）。
+            # ⚠️ 它**不是参数前缀**，只在 `_contract_key` 里当"哪一组"的线索用。
+            group = re.sub(r"[·•]\s*(槽|slot)\s*\d+\s*$", "", (st.get("step_name") or "").strip(),
+                           flags=re.I)
+            group = re.sub(r"[^0-9a-z]+", "_", group.lower()).strip("_")
+            # ⚠️ `param_json` 的键**原样透传**（2026-09-28 · §G.70 第 2 条）：导出侧从不剥前缀，
+            #    这里的键本来就是契约键名。过去拿组名往回拼 ⇒ `time → main_time`、
+            #    `gas_SF6 → main_gas_SF6`，画布面板按设备模板键名找值，一个都对不上 ⇒ **全显默认值**。
             for k, v in pj.items():
-                params[f"{pre}_{k}" if pre and not k.startswith(pre) else k] = v
+                params[k] = v
+            # `duration_s`/`pressure` 是被导出"升成独立列"的两个值 ⇒ 键名只能问设备模板
             for k in ("duration_s", "pressure"):
                 if st.get(k):
-                    params[f"{pre}_{k}" if pre else k] = st[k]
+                    params[_contract_key(group, k, defs)] = st[k]
         m["params"] = params
         kv = _meas_of(r.get("run_id", ""))
         m["key_values"] = kv
@@ -987,9 +1166,14 @@ def _parse_expack_root(root: Path, lib) -> dict:
             m["core_sample_id"] = r["sample_id"]
         if r.get("recipe_id"):
             m["core_recipe_id"] = r["recipe_id"]
-        # 机台口径也往返（2026-09-14）：画布的 `machine_name` 是**应用库显示名**，
+        # 工序也往返（2026-09-28 · §G.70 第 5 条）：`resolve_stage` **core 原值优先**，
+        # 不把 core 的 `stage` 带回来 ⇒ 再导出只能按画布设备名重猜，设备名不在映射表时
+        # 会被大类兜底**静默改写**（三条不同工序的模块曾全被解析成同一个 stage）。
+        if (r.get("stage") or "").strip():
+            m["core_stage"] = r["stage"].strip()
+        # 机台口径也往返（2026-09-14）：画布的 `machine_name` 是**应用库显示名（画布标签）**，
         # 与 core 的 `tool_id`/`tool` 是两套字面量 —— 不把 core 原值带回来，再导出就只能
-        # 拿显示名去顶（`DRIE-Bosch` 顶掉 `RIE-400iPB`，静默把机台归属记错）。
+        # 拿显示名去顶**真机台号**，静默把机台归属记错）。
         if (r.get("tool_id") or "").strip():
             m["core_tool_id"] = r["tool_id"].strip()
         if (r.get("tool") or "").strip():

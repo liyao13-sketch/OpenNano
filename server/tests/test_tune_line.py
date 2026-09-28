@@ -11,6 +11,10 @@ import pytest
 
 from batch_fixtures import BATCH
 
+#: 夹具里的**机台显示名**（中性占位）—— 本用例只查"哪列可比/哪轮全空"，**不断言**它；
+#: 真机台名不进公开仓库（工单 `20260915-助手线-to-兼-01` B2-残C 的 C5）。
+TOOL_LABEL = "DEMO-ETCH-A"
+
 COLS = ["tune_id", "tune_step", "run_id", "date", "stage", "tool", "sample_id",
         "t_set_s", "t_dwell_s", "source_w", "bias_w",
         "chf3_sccm", "ar_sccm", "o2_sccm", "cf4_sccm", "sf6_sccm",
@@ -19,10 +23,10 @@ COLS = ["tune_id", "tune_step", "run_id", "date", "stage", "tool", "sample_id",
 
 ROWS = [
     # TUNE1 四轮（照 AR50-T1 现状：step2 只有 depth、step3 全空）
-    (f"{BATCH}-ICP-TUNE1", "1", f"{BATCH}-ICP-0002", "2026-09-06", "ICP", "PishowA", f"{BATCH}-01-DIE4", 300, None, 750, 150, 45, 20, None, None, None, "639", None, None, None, None, None, None),
-    (f"{BATCH}-ICP-TUNE1", "2", f"{BATCH}-ICP-0003", "2026-09-06", "ICP", "PishowA", f"{BATCH}-01-DIE4", 300, None, 752, 205, 45, 20, None, None, None, None, "888.8", None, None, None, None, None),
-    (f"{BATCH}-ICP-TUNE1", "3", f"{BATCH}-ICP-0005", "2026-09-07", "ICP", "PishowA", f"{BATCH}-01-DIE4", 240, None, 749, 222, 45, 20, None, None, None, None, None, None, None, None, None, None),
-    (f"{BATCH}-ICP-TUNE1", "4", f"{BATCH}-ICP-0006", "2026-09-07", "ICP", "PishowA", f"{BATCH}-01-DIE4", 240, None, 793, 223, 45, 20, None, None, None, "114", None, "252", None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "1", f"{BATCH}-ICP-0002", "2026-09-06", "ICP", TOOL_LABEL, f"{BATCH}-01-DIE4", 300, None, 750, 150, 45, 20, None, None, None, "639", None, None, None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "2", f"{BATCH}-ICP-0003", "2026-09-06", "ICP", TOOL_LABEL, f"{BATCH}-01-DIE4", 300, None, 752, 205, 45, 20, None, None, None, None, "888.8", None, None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "3", f"{BATCH}-ICP-0005", "2026-09-07", "ICP", TOOL_LABEL, f"{BATCH}-01-DIE4", 240, None, 749, 222, 45, 20, None, None, None, None, None, None, None, None, None, None),
+    (f"{BATCH}-ICP-TUNE1", "4", f"{BATCH}-ICP-0006", "2026-09-07", "ICP", TOOL_LABEL, f"{BATCH}-01-DIE4", 240, None, 793, 223, 45, 20, None, None, None, "114", None, "252", None, None, None, None),
     # 另一条扫描（只有 2 轮，都在 PECVD）
     (f"{BATCH}-PECVD-TUNE1", "1", f"{BATCH}-PECVD-0001", "2026-09-01", "PECVD", "PECVD-1", f"{BATCH}-01", None, None, None, None, None, None, None, None, None, None, None, None, None, "899.7", "-35.2", "1.4623"),
     (f"{BATCH}-PECVD-TUNE1", "2", f"{BATCH}-PECVD-0002", "2026-09-02", "PECVD", "PECVD-1", f"{BATCH}-01", None, None, None, None, None, None, None, None, None, None, None, None, None, "905.1", "-33.0", "1.4619"),

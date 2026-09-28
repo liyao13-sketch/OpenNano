@@ -12,16 +12,28 @@ import pytest
 
 from batch_fixtures import BATCH, ROOT, batch_rows, sample_rows
 from conftest import seed_core
+from kb.core_vocab import TOOL_DISPLAY, TOOL_ID_SENTINEL
+
+# ---------------------------------------------------------------- 机台号取样（**不写死**）
+# 为什么（2026-09-28 · 工单 B2-残C）：真机台号/厂名写进公开仓库＝实验室指纹。
+# 口径表本身是**加载**来的（`kb/core_vocab`）：本机 = 真清单，公开 clone / CI = 中性样例
+# （`DEMO-*`，两者都 ≥3 条）⇒ 断言的对象是"当前环境登记了哪些机台"，不是某台真机。
+_TOOL_IDS = [tid for tid in TOOL_DISPLAY if tid != TOOL_ID_SENTINEL]
+assert len(_TOOL_IDS) >= 2, (
+    f"口径表里已登记的机台不足 2 台（{len(_TOOL_IDS)} 台）⇒ 本文件要「两台不同机台」，判据无法成立")
+#: 两台**不同**机台：`TOOL_ICP` 配单段（ICP），`TOOL_DRIE` 配多段（DRIE）。
+#: ⚠️ 换的只是机台号，**坑的语义不变**（"按段分开取默认值" / "唯一才认否则报未匹配"）。
+TOOL_ICP, TOOL_DRIE = _TOOL_IDS[0], _TOOL_IDS[1]
 
 RUNS = [
     # ICP：单段（etch），两次，第二次是新值 ⇒ 默认取"同段内出现最多"，并列取最近
     {"run_id": f"{BATCH}-ICP-0001", "batch_id": BATCH, "sample_id": ROOT, "stage": "ICP",
-     "stage_seq": "3", "date": "2026-09-06", "tool_id": "ICP-PishowA"},
+     "stage_seq": "3", "date": "2026-09-06", "tool_id": TOOL_ICP},
     {"run_id": f"{BATCH}-ICP-0002", "batch_id": BATCH, "sample_id": ROOT, "stage": "ICP",
-     "stage_seq": "3", "date": "2026-09-07", "tool_id": "ICP-PishowA"},
+     "stage_seq": "3", "date": "2026-09-07", "tool_id": TOOL_ICP},
     # DRIE：**多段**（chuck/etch/dechuck）—— 不许把 dechuck 的值当成刻蚀默认值
     {"run_id": f"{BATCH}-DRIE-0001", "batch_id": BATCH, "sample_id": ROOT, "stage": "DRIE",
-     "stage_seq": "5", "date": "2026-09-08", "tool_id": "RIE-400iPB"},
+     "stage_seq": "5", "date": "2026-09-08", "tool_id": TOOL_DRIE},
 ]
 
 STEPS = [
@@ -52,9 +64,13 @@ def core(tmp_path, monkeypatch):
 
 
 def test_按段分开给默认值(core):
-    """★ 多段工艺：dechuck 的值**绝不能**当成刻蚀默认值（DRIE 曾出现 bias_w=0）。"""
+    """★ 多段工艺：dechuck 的值**绝不能**当成刻蚀默认值（DRIE 曾出现 bias_w=0）。
+
+    ⚠️ 机台号取自口径表（`TOOL_DRIE`）而非写死；**这条断言仍能抓住**：把各段混成一组、
+    让 dechuck 末尾的 `bias_w=0` 覆盖 etch 段的值（`set(g["phases"])`/逐段取值都钉住它）。
+    """
     from kb.machine_defaults import machine_defaults
-    g = next(g for g in machine_defaults()["groups"] if g["tool_id"] == "RIE-400iPB")
+    g = next(g for g in machine_defaults()["groups"] if g["tool_id"] == TOOL_DRIE)
     assert set(g["phases"]) == {"chuck", "etch", "dechuck"}
     etch = g["by_phase"]["etch"]["params"]
     dech = g["by_phase"]["dechuck"]["params"]
@@ -64,8 +80,13 @@ def test_按段分开给默认值(core):
 
 
 def test_单段工艺给扁平参数(core):
+    """单段（etch）工艺给**扁平** `params`/`per_key`；`TOOL_ICP` 取自口径表（不写死机台号）。
+
+    **这条断言仍能抓住**：两次 run 值不同时"取该段内出现最多、并列取最近"被写错
+    （例如取第一次 / 取最小值）—— 机台号只是夹具，取值规则的检验力不变。
+    """
     from kb.machine_defaults import machine_defaults
-    g = next(g for g in machine_defaults()["groups"] if g["tool_id"] == "ICP-PishowA")
+    g = next(g for g in machine_defaults()["groups"] if g["tool_id"] == TOOL_ICP)
     assert g["phases"] == ["etch"]
     # 两次运行、值不同 ⇒ 取"该段内出现最多"，并列时取最近那次
     assert g["params"]["source_w"] == 780
@@ -84,9 +105,14 @@ def test_每个值都能追到来源(core):
 
 
 def test_按工序过滤(core):
+    """`--stage` 过滤只留该工序；机台号取自口径表（`TOOL_DRIE`）。
+
+    **这条断言仍能抓住**：`stage` 过滤失效（把别的工序的组也带出来）—— 集合相等仍钉住
+    "DRIE 只剩那一台"，只是那台的名字不再写死。
+    """
     from kb.machine_defaults import machine_defaults
     only = machine_defaults("DRIE")["groups"]
-    assert {g["tool_id"] for g in only} == {"RIE-400iPB"}
+    assert {g["tool_id"] for g in only} == {TOOL_DRIE}
     assert [g["stage"] for g in machine_defaults("ICP")["groups"]] == ["ICP"]
 
 
@@ -98,15 +124,24 @@ def test_没记机台的_run不参与(core):
 
 
 def test_机台匹配_唯一才认否则如实报未匹配():
+    """四条匹配分支逐条钉住：① 名字精确 ② 型号精确 ③ 多义不猜 ④ 特征词（≥5 字符）唯一命中。
+
+    ⚠️ 机台档案是**合成的中性样例**（公开仓库零真机台/厂名指纹 · 工单 B2-残C）——
+    换的只是名字，**检验力一字不变**：
+      · 命中多台（`DEMO-ETCH` 同时像 A1 / A2 / `DEMO-ETCH-BIG`）⇒ 必须 `None`（不许挑一个）；
+      · 档案里完全没有 ⇒ `None`（如实报未匹配，而不是硬塞一台）；
+      · `DEMO-ALIGNERX-D` 只能靠**特征词**命中型号 `Vendor AlignerX`（前三条分支都不中）。
+    """
     from kb.machine_defaults import _match_machine
-    ms = [{"id": "1", "name": "RIE200NL", "model": "RIE200NL"},
-          {"id": "2", "name": "RIE10NR", "model": "RIE10NR"},
-          {"id": "3", "name": "DRIE-Bosch", "model": "RIE-400iPB"},
-          {"id": "4", "name": "ICP-鲁汶", "model": "Hassrode PishowA"}]
-    assert _match_machine("RIE-400iPB", ms)["id"] == "3"          # 型号精确
-    assert _match_machine("ICP-PishowA", ms)["id"] == "4"          # 特征词 pishowa
-    assert _match_machine("RIE", ms) is None                       # 多义 ⇒ 不猜
-    assert _match_machine("SPUTTER", ms) is None                   # 档案里没有 ⇒ 报未匹配
+    ms = [{"id": "1", "name": "DEMO-ETCH-A1", "model": "DEMO-ETCH-A1"},
+          {"id": "2", "name": "DEMO-ETCH-A2", "model": "DEMO-ETCH-A2"},
+          {"id": "3", "name": "DEMO-DRIE-B", "model": "DEMO-ETCH-BIG"},
+          {"id": "4", "name": "DEMO-LITHO-C", "model": "Vendor AlignerX"}]
+    assert _match_machine("DEMO-DRIE-B", ms)["id"] == "3"          # ① 名字精确
+    assert _match_machine("DEMO-ETCH-BIG", ms)["id"] == "3"        # ② 型号精确（名字不是它）
+    assert _match_machine("DEMO-ALIGNERX-D", ms)["id"] == "4"      # ④ 特征词 alignerx 唯一命中
+    assert _match_machine("DEMO-ETCH", ms) is None                 # ③ 多义 ⇒ 不猜
+    assert _match_machine("DEMO-SPIN-D", ms) is None               # 档案里没有 ⇒ 报未匹配
 
 
 def test_sentinel_tool_id_is_excluded_and_counted(tmp_path, monkeypatch):
@@ -118,7 +153,7 @@ def test_sentinel_tool_id_is_excluded_and_counted(tmp_path, monkeypatch):
     import kb.machine_defaults as md
     runs = RUNS + [
         {"run_id": f"{BATCH}-RIE-0001", "batch_id": BATCH, "sample_id": ROOT, "stage": "RIE",
-         "stage_seq": "5", "date": "2026-09-09", "tool_id": "UNKNOWN"},
+         "stage_seq": "5", "date": "2026-09-09", "tool_id": TOOL_ID_SENTINEL},
     ]
     steps = STEPS + [(f"{BATCH}-RIE-0001", 1, "etch", {"phase": "etch", "source_w": 999})]
     d = seed_core(tmp_path / "core", batches=batch_rows(), samples=sample_rows(), runs=runs)

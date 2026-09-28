@@ -1,25 +1,52 @@
 """KB 录入:读实验 CSV(只读)→ 自动生成知识条目(幂等)。
 
 数据源(只读红线,仅读不写):
-  个人空间/18_工艺数据资产/03_实验数据/cl_rie/{steps,data}.csv  → RIE_Cl (RIE200NL)
-  个人空间/18_工艺数据资产/03_实验数据/f_rie/{steps,data}.csv   → RIE_F  (RIE10NR)
+  个人空间/18_工艺数据资产/03_实验数据/<源目录>/{steps,data}.csv  → process_type + 机台号
+  ⚠️ **源目录 ↔ (process_type, 机台号) 的对应表是本地数据**（`~/.opennano/kb_sources.json`，
+     可用 `OPENNANO_KB_SOURCES` 覆盖）—— 公开仓库里不写任何机台型号（工单 B2-残C 的 C3/C6）。
+     表缺失 ⇒ 机台号留空并**出声**（知识条目的 `equipment` 会少一个溯源字段，但不编造）。
 
 映射规范见 个人空间/19_工艺资料/契约/归档/知识条目Schema与录入规范_v0.1_20260909.md §四。
 """
 from __future__ import annotations
 
 import csv
+import json
+import os
+import sys
 from pathlib import Path
 
 from .store import KBStore
 
 from opennano_config import DATA_ROOT  # 可在 .env 覆盖(发布用)
 
-# 目录 → (process_type, 设备型号)
-SOURCES = {
-    "cl_rie": ("RIE_Cl", "RIE200NL"),
-    "f_rie": ("RIE_F", "RIE10NR"),
-}
+#: 本地映射表（**不进公开仓库**）：`{"cl_rie": ["RIE_Cl", "<机台号>"], ...}`
+KB_SOURCES_PATH = Path(os.environ.get("OPENNANO_KB_SOURCES")
+                       or (Path.home() / ".opennano" / "kb_sources.json"))
+
+
+def _load_local_sources() -> dict:
+    """读本地「源目录 → (process_type, 机台号)」表；**没有就出声并返回空**（不编造机台号）。"""
+    p = Path(os.environ.get("OPENNANO_KB_SOURCES") or KB_SOURCES_PATH)
+    if not p.exists():
+        print(f"[KB ingester] ⚠️ 未提供本地源目录映射表：{p} ⇒ 条目的 `equipment`（机台号）"
+              f"会**留空**；要带上溯源请写一份（格式见 kb/ingest.py 顶部）。", file=sys.stderr)
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as e:
+        print(f"[KB ingester] ⚠️ 本地源目录映射表读不动：{p}（{type(e).__name__}: {e}）"
+              f" ⇒ 本次不写机台号（**不静默改用别的表**）。", file=sys.stderr)
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    for k, v in (raw or {}).items():
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            out[str(k)] = (str(v[0]), str(v[1] or ""))
+    return out
+
+
+# 目录 → (process_type, 机台号) —— **值来自本地表**，代码里零机台型号
+SOURCES: dict[str, tuple[str, str]] = _load_local_sources()
 
 MATERIAL_FIELDS = ["material", "substrate", "film_thickness_nm", "resist_type",
                    "resist_thickness_nm", "pattern_type", "mask_cd_nm", "pitch_nm",
@@ -232,11 +259,11 @@ def load_core_index() -> dict[str, dict]:
     VIDX = core_verification_index()
     return VIDX
 
-# 文件名关键词 → (process_type, 设备型号, 步结构: 列→步参数映射)
-# 列名匹配执行表表头: Cl2/BCl3/Ar/Power/BT/ME_time_s/ME_pressure_*/结果列
+# 文件名关键词 → (process_type, 机台号, 步结构: 列→步参数映射)
+# 列名匹配执行表表头；**机台号取自本地表**（`_load_local_sources()`，键＝同一源目录名）
 _XLSX_SOURCES = {
-    "Ta": ("RIE_Cl", "RIE200NL", "cl"),
-    "Si": ("RIE_F", "RIE10NR", "f"),
+    "Ta": ("RIE_Cl", (SOURCES.get("cl_rie") or ("", ""))[1], "cl"),
+    "Si": ("RIE_F", (SOURCES.get("f_rie") or ("", ""))[1], "f"),
 }
 
 _XLSX_RESULTS = ["速率_nm_min", "选择比", "SWA_grating_", "SWA_square_d",

@@ -37,8 +37,11 @@ DEFAULT_PATH = Path(os.environ.get("OPENNANO_MACHINES")
                     or (Path.home() / ".opennano" / "machines.json"))
 
 #: 允许的字段（多出来的键保留但不校验；`name` 必填）
-KNOWN_FIELDS = ("name", "equipment_id", "tool_id", "vendor", "model", "max_sample",
-                "location", "serial", "status", "notes")
+#: ⚠️ `equipment_template`（2026-09-26 · 工单 B2-残C 的 C6）：机台挂的**工艺模板名**
+#: （如 `DRIE (Bosch)`）—— 供播种时反查 `equipment_id`。**模板名是工艺类别，不是身份指纹**，
+#: 故可进公开仓库的 demo 清单；真机台的那些字段（vendor/model/notes）只在本机清单里。
+KNOWN_FIELDS = ("name", "equipment_id", "equipment_template", "tool_id", "vendor", "model",
+                "max_sample", "location", "serial", "status", "notes")
 
 
 class MachineCatalogError(RuntimeError):

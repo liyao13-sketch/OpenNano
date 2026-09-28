@@ -77,11 +77,11 @@ TOOL_ID_SENTINEL = core_vocab.TOOL_ID_SENTINEL
 
 
 def _match_machine(tool_id: str, machines: list[dict]) -> dict | None:
-    """把 core 的 `tool_id`（如 `ICP-PishowA`）对上机台档案。
+    """把 core 的 `tool_id`（如 `DEMO-ETCH-A` 这种登记键）对上机台档案。
 
     顺序（**宁可不匹配，也不硬猜**）：
       ① 名字完全相同 ② 型号完全相同
-      ③ 归一化后互相包含 —— **但必须唯一命中**；命中多台（如 `RIE` 同时像 RIE200NL/RIE10NR）
+      ③ 归一化后互相包含 —— **但必须唯一命中**；命中多台（同一个前缀同时像两台机）
          一律判为**未匹配**并如实报出，让人去修 core 里的 tool_id。
     """
     t = (tool_id or "").strip()
@@ -103,7 +103,7 @@ def _match_machine(tool_id: str, machines: list[dict]) -> dict | None:
         return hits[0]
     if len(hits) > 1:
         return None                                     # 多义 ⇒ 不猜
-    # ④ 特征词命中（≥5 字符的片段）—— `ICP-PishowA` ↔ 型号 `Hassrode PishowA` 靠这个对上
+    # ④ 特征词命中（≥5 字符的片段）—— 登记键里的长片段命中型号名时靠这个对上
     import re as _re
     toks = {w for w in _re.split(r"[^0-9a-zA-Z]+", t) if len(w) >= 5}
     for tok in toks:

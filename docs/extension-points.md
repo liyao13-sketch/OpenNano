@@ -30,11 +30,64 @@
 | 设备模板 / 参数 / 公式 / 影响规则 | `~/.opennano/library.json`（界面可编辑） | T1 ✅ | 无版本/无作者（见 A0-0） |
 | 工艺目录 / 族 | `engine/process_catalog.py`（104 种，写在代码里） | T1 ⚠️ | 应外置成数据，随库一起版本化 |
 | 上传表格的列映射 | `kb/adapter_proposal.py`：**机器提议 → 人确认**落账 | T1 ✅ | 已具备"审批门"雏形，可作为插件审批的模板 |
-| 机台清单 / 型号 / 别名 | `core_schema.TOOL_DISPLAY` 等**硬编码在代码里** | T1 ⛔ | **外置**（第一步，已有对应工单） |
+| 机台清单 / 型号 / 别名 | **已外置成数据**（见 §二之一）：core 口径表加载器 `kb/core_vocab.py` ＋ 本机机台档案 `~/.opennano/machines.json` | T1 ✅ | 别名表仍是人写；更新走数据，不改仓库代码 |
 | 机台菜单 / 配方解析器 | 环境变量 `OPENNANO_MENU_PARSER` 指向外部脚本 | T2 ☑️ | **已是插件，但是"暗的"**：无 manifest、无版本、无隔离 |
 | 仪器原始格式适配器 | 无（现在靠人工整理成标准表） | T2 ⛔ | 新设备数据进厂的第一关，第二个该做的点 |
 | 优化 / 建模算法 | `server/opt/`（内置） | T2 ⚠️ | 暂不插件化（需求未到） |
 | 版图 / GDS 生成 | `engine/gds_gen.py`（内置，子进程调 klayout） | T2 ⚠️ | 同上 |
+
+### 二之一、机台清单（T1 数据扩展 · 已落地 · 2026-09-26）
+
+**两份清单、两个用途** —— 别混（混了会把"core 机台号"和"画布机台名"塞进同一字段）：
+
+| | **① core 口径表** | **② 画布机台档案** |
+|---|---|---|
+| 回答 | `tool_id`（core 机台号）→ **唯一显示名** | 画布上那台机：叫什么、挂哪个工艺模板、厂家/型号 |
+| 权威 | **数据线** `core_schema.TOOL_DISPLAY`（唯一真相） | 本机（工具线） |
+| 载体 | 派生物 `<core>/machine_tool_display.json`（数据线 `ingest/export_tool_display.py` 生成） | 本机 `~/.opennano/machines.json` |
+| 仓库里有什么 | **只有中性样例** `server/kb/tool_display.demo.json` | **只有中性样例** `server/kb/machines.demo.json` |
+| 环境变量覆盖 | `OPENNANO_TOOL_DISPLAY` | `OPENNANO_MACHINES` |
+| 加载/播种代码 | `kb/core_vocab.py`（**加载器**） | `kb/machine_catalog.py` ＋ `engine/library.py::_seed_machines` |
+
+**① 的字段表**（格式 `machine-display.v1`，与数据线同源；**顺序有意义**）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `schema` | str | 固定 `machine-display.v1` |
+| `mode` | str | `enforced`（真清单）/ `demo`（中性样例，**不是权威**） |
+| `authority` | str | 指向权威源（`core_schema.TOOL_DISPLAY`） |
+| `sha256` | str | **只对条目算**的摘要（与生成时间无关）；加载器会校验，对不上 ⇒ 抛错 |
+| `tool[]` | list | `{"tool_id": …, "display": …}`，**顺序即跨线判据（G2）比对顺序** |
+| `sentinel` / `sentinel_display` | str | 哨兵与它的显示名（须与工具线语义常量一致，否则**出声**） |
+
+最小样例：
+```json
+{"schema": "machine-display.v1", "mode": "demo", "authority": "core_schema.TOOL_DISPLAY",
+ "sha256": "<只对 tool[] 算>",
+ "tool": [{"tool_id": "DEMO-ETCH-A", "display": "DEMO Etcher A（样例）"},
+          {"tool_id": "UNKNOWN", "display": "UNKNOWN（机台未记录）"}],
+ "sentinel": "UNKNOWN", "sentinel_display": "UNKNOWN（机台未记录）"}
+```
+
+**② 的字段表**（`machine_catalog` 口径）：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `name` | ✅ | 画布上的机台名（**画布名 ≠ core 机台号**） |
+| `tool_id` | | core 机台号（须 ∈ ① 的键；未登记 ⇒ 导出落哨兵并出声，`/api/health.machine_drift` 报硬项）|
+| `equipment_template` | | 挂哪个工艺模板（如 `DRIE (Bosch)`）⇒ 播种时反查 `equipment_id`。**模板名是工艺类别、可进公开仓库** |
+| `vendor` / `model` / `max_sample` / `location` / `serial` / `status` / `notes` | | 机台档案字段（**含厂名型号者绝不进公开仓库**）|
+
+最小样例：
+```json
+{"version": 1,
+ "machines": [{"name": "DEMO-ETCH-A", "equipment_template": "RIE", "tool_id": "DEMO-ETCH-A",
+               "vendor": "", "model": "", "status": "active", "notes": "样例（中性）"}]}
+```
+
+**加载顺序（①，`kb/core_vocab.py`）**：`OPENNANO_TOOL_DISPLAY` → `<core>/machine_tool_display.json` → 仓库中性样例。
+**失败一律出声**：显式路径坏 / 真清单存在但坏 ⇒ **抛错**（不静默退回样例 —— 否则真机台会静默变成"未登记"）。
+**`/api/health.tool_display`** 一眼看出当前用的是哪一份（`ok=false` ⇒ 正在用中性样例）。
 
 ---
 
@@ -66,7 +119,7 @@
 
 | 步 | 做什么 | 验收判据 | 估时 |
 |---|---|---|---|
-| **1** | **清单外置**：机台清单/型号/别名从代码挪到数据（工单已在架上） | 新增一台机**不改仓库代码**即可被识别；机台口径闸仍然拦得住未登记名 | 0.5–1 天 |
+| **1** | ✅ **已完成（2026-09-26 · 工单 `20260915-助手线-to-兼-01` B2-残C）**：机台清单/型号/别名已挪到数据 | 新增一台机**不改仓库代码**即可被识别（写 `~/.opennano/machines.json`）；口径闸仍拦未登记名（`/api/health.machine_drift`）| — |
 | **2** | **扶正第一个代码插件点**：菜单/配方解析器带上 manifest + 版本 + 失败隔离 | 版本不符时**拒装并出声**；解析器抛错只红它自己；现有外部解析器无需改逻辑即可接入 | 1 天 |
 | **3** | **泛化到第二个点**：仪器原始格式适配器 | 一个新仪器的导出文件接入＝写一个适配器目录，不改宿主；产出仍过同一道闸 | 1–2 天 |
 

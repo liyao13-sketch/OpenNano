@@ -163,7 +163,13 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
                          "", "", tool_name, tool_id,
                          m.get("core_recipe_id") or "", operator or "",
                          purpose or "", parent,
-                         "", "", "planned", m.get("comment") or ""])
+                         "", "", "planned", m.get("comment") or "",
+                         # ⚠️ core v0.1.6 的三列（2026-09-28 · `07 §G.70` 第 1 条）：
+                         # 整包导出漏了这三列，追加包**同病**（两处各写一遍表头）。
+                         # 少列＝season 身份 / 调试线归属落库即消失（数据线按 key 读，缺列只能当空）。
+                         m.get("run_nature") or "",
+                         m.get("tune_id") or "",
+                         "" if m.get("tune_step") in (None, "") else m["tune_step"]])
 
     # ---- steps：菜单灌入的步优先；否则用模块 params 生成的组
     step_rows = []
@@ -224,9 +230,12 @@ def build_append_pack(project: dict, purpose: str = "", operator: str = "",
     files = {
         "manifest.json": json.dumps(manifest, ensure_ascii=False, indent=2).encode(),
         "runs.csv": _csv_bytes(
+            # ⚠️ 列序照数据线 `core_schema.FIELDS["runs"]`（含 v0.1.6 的 run_nature/tune_id/
+            #    tune_step）—— 与整包导出**同一份列序**，改一处必须改两处（2026-09-28 · §G.70 #1）。
             ["run_id", "batch_id", "sample_id", "stage", "stage_seq", "date",
              "t_start", "t_end", "tool", "tool_id", "recipe_id", "operator",
-             "purpose", "parent_run_id", "env_temp_c", "env_rh_pct", "status", "note"],
+             "purpose", "parent_run_id", "env_temp_c", "env_rh_pct", "status", "note",
+             "run_nature", "tune_id", "tune_step"],
             run_rows),
         "steps.csv": _csv_bytes(
             ["step_id", "run_id", "step_order", "machine_step", "step_name", "role",

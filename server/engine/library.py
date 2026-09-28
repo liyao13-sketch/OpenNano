@@ -171,28 +171,24 @@ class LibraryStore:
             self._seed_metrology_machines()
             self.data["machines_version"] = 2
         if self.data.get("machines_version", 0) < 4:
-            # 按内部设备清单（实验室 2026-09-06）补全型号/厂家/能力
+            # 按**外部清单**补全型号/厂家/能力（2026-09-26 · C6：原内建表已外置）；无清单 ⇒ 无操作。
+            # ⚠️ 原先这里还有一条**按真机台名强改状态**（在役与否待确认）—— 已随外置删除：
+            #    状态现在由清单里的 `status` 自带（播种/补全时填入），不再在代码里点名某台机。
             self._enrich_machines()
-            # 清单备注:SENTECH SI500 在役与否待确认 → 状态改正(非填空,强制)
-            for m in self.data.get("machines", []):
-                if m.get("name") == "ICP-Sentech" and m.get("status") == "active":
-                    m["status"] = "待确认"
             self.data["machines_version"] = 4
 
         if self.data.get("machines_version", 0) < 5:
-            # 备注改用内部设备清单原文(早期是按文档转述,不够准)
+            # 备注改用外部清单原文（早期是按文档转述,不够准）
             self._apply_equipment_list_notes()
             self.data["machines_version"] = 5
 
         if self.data.get("machines_version", 0) < 6:
-            # 机台补 core tool_id(数据域权威机台标识,实验包/查询用它对齐)
-            tid = {"RIE200NL": "RIE200NL", "RIE10NR": "RIE10NR",
-                   "ICP-鲁汶": "ICP-PishowA", "DRIE-Bosch": "RIE-400iPB",
-                   "EBPG5200": "EBPG5200", "DWL66": "DWL66", "MA6": "MA6",
-                   "PECVD": "PECVD-SAMCO", "RIBE-鲁汶": "RIBE-鲁汶"}
+            # 机台补 core tool_id(数据域权威机台标识,实验包/查询用它对齐) —— 值取自外部清单
+            idx = self._catalog_index()
             for m in self.data.get("machines", []):
-                if m.get("name") in tid and not m.get("tool_id"):
-                    m["tool_id"] = tid[m["name"]]
+                tid = (idx.get(m.get("name")) or {}).get("tool_id")
+                if tid and not m.get("tool_id"):
+                    m["tool_id"] = tid
             self.data["machines_version"] = 6
 
         if self.data.get("machines_version", 0) < 7:
@@ -236,54 +232,46 @@ class LibraryStore:
         self._migrate()
 
     def _apply_equipment_list_notes(self):
-        """内部设备清单（实验室 2026-09-06）原文备注。"""
-        notes = {
-            "RIE10NR": "氟基 RIE：CHF₃/CF₄/SF₆/O₂/N₂/Ar 系，刻 Si/SiO₂/Si₃N₄",
-            "RIE200NL": "氯基 RIE：BCl₃/Cl₂ 系，刻 Cr/Al/Nb/Ta/Mo（与 O₂ 互锁）",
-            "ICP-鲁汶": "双源 ICP(Source+Bias)+脉冲+冷台(约 20°C)；配方 Process\\Etch-SiO2-20C",
-            "ICP-Sentech": "ICP-RIE(HBr,含三五族)；内部设备清单未列，在役与否**待确认**",
-            "DRIE-Bosch": "RIE-400iPB 深硅 Bosch；开腔清洁 recipe5 1H(2026-09-06 开腔 clean)",
-            "RIBE-鲁汶": "HassrodeLoremR 离子束斜入射刻蚀，闪耀角 30°~90°、倾斜角 35°~89°",
-            "CD-SEM": "Apreo 2(表征设备,共用)：CD/侧壁形貌",
-            "EBPG5200": "100 keV 电子束曝光(EBL),~10 nm;dose-CD 基线",
-            "DWL66": "激光直写(同事负责),~1 μm;dose-CD 基线",
-            "MA6": "紫外曝光(I 线,同事负责),~2 μm;dose-CD 基线",
-            "PECVD": "13.56MHz + 400kHz;SiO₂/SiNₓ/a-Si + n/k/应力优化",
-        }
+        """按**外部清单**刷新机台备注（2026-09-26 · C6：原来这里的真机台备注整表已外置）。
+
+        只对清单里**明确给了 `notes`** 的机台写入；没有清单 ⇒ 什么都不做（中性）。
+        """
+        idx = self._catalog_index()
+        if not idx:
+            return
         for m in self.data.get("machines", []):
-            if m.get("name") in notes:
-                m["notes"] = notes[m["name"]]
+            note = (idx.get(m.get("name")) or {}).get("notes")
+            if note:
+                m["notes"] = note
+
+    def _template_ids(self) -> dict:
+        """工艺模板名 → `equipment_id`（播种与升级都用它反查；模板 id 是**每库一份**的，不写进清单）。"""
+        tmpl: dict = {}
+        for cat in CATEGORIES:
+            for eq in self.data["equipment"].get(cat, []):
+                tmpl.setdefault(eq.get("name", ""), eq.get("id", ""))
+        return tmpl
 
     def _enrich_machines(self):
-        """按设备清单补全机台字段(只填当前为空的,不覆盖已填)。"""
-        info = {
-            "RIE10NR": dict(vendor="SAMCO(日本)", model="RIE10NR", max_sample="8 寸",
-                            notes="氟基 RIE:CHF₃/CF₄/SF₆/O₂/N₂/Ar 刻 Si/SiO₂/Si₃N₄"),
-            "RIE200NL": dict(vendor="SAMCO(日本)", model="RIE200NL", max_sample="8 寸",
-                             notes="氯基 RIE:BCl₃/Cl₂ 刻 Cr/Al/Nb/Ta/Mo(与 O₂ 互锁)"),
-            "RIBE-鲁汶": dict(vendor="江苏鲁汶仪器", model="HassrodeLoremR", max_sample="8 寸",
-                              notes="离子束斜入射刻蚀;闪耀角 30°~90°,倾斜角 35°~89°"),
-            "DRIE-Bosch": dict(vendor="SAMCO(日本)", model="RIE-400iPB", max_sample="4 寸",
-                               notes="深硅 Bosch;开腔清洁 recipe5 1H(2026-09-06 开腔 clean)"),
-            "ICP-鲁汶": dict(vendor="江苏鲁汶仪器", model="Hassrode PishowA", max_sample="8 寸",
-                             notes="双源 ICP(Source+Bias)+脉冲+冷台(实验 20°C);配方 Process\\Etch-SiO2-20C"),
-            "ICP-Sentech": dict(vendor="SENTECH", model="SI500", max_sample="",
-                                status="待确认",
-                                notes="HBr 体系;设备清单(09-06)未列,在役与否待确认"),
-            "CD-SEM": dict(vendor="Thermo Fisher", model="Apreo 2", max_sample="",
-                           notes="表征设备(共用):CD/侧壁形貌"),
-            "EBPG5200": dict(model="EBPG5200", notes="100 keV 电子束曝光(EBL);dose-CD 基线"),
-            "DWL66": dict(model="DWL66", notes="激光直写(微米级);dose-CD 基线"),
-            "MA6": dict(model="MA6", notes="紫外曝光(I 线)"),
-            "PECVD": dict(notes="13.56MHz + 400kHz;SiO₂/SiNₓ/a-Si"),
-        }
+        """按**外部清单**补全机台字段(只填当前为空的,不覆盖已填)。
+
+        2026-09-26 · C6：原内建表（厂名/型号/最大片寸/备注）整表外置；无清单 ⇒ 无操作。
+        顺带把 `equipment_template → equipment_id` 也补上（**老库升级路径**原先不反查，
+        只有"空库播种"才反查 ⇒ 新装正常、老库那台机的模板 id 一直空着）。
+        """
+        idx = self._catalog_index()
+        if not idx:
+            return
+        tmpl = self._template_ids()
         for m in self.data.get("machines", []):
-            patch = info.get(m.get("name"))
-            if not patch:
-                continue
-            for k, v in patch.items():
-                if not m.get(k):        # 只填空
+            patch = idx.get(m.get("name")) or {}
+            for k in ("vendor", "model", "max_sample", "status", "location", "serial"):
+                v = patch.get(k)
+                if v and not m.get(k):        # 只填空
                     m[k] = v
+            if not m.get("equipment_id"):
+                tname = patch.get("equipment_template") or ""
+                m["equipment_id"] = tmpl.get(tname, "")
 
     def _seed_metrology_machines(self):
         """表征设备(共用,不挂工艺模板)。缺失才补,不动已有。"""
@@ -299,48 +287,50 @@ class LibraryStore:
                 "status": "active", "notes": note,
             })
 
-    def _seed_machines(self):
-        """播种机台：**优先外部清单**（若提供），否则用内建表（原行为）。
+    def _catalog_index(self) -> dict:
+        """外部机台清单 → `{机台名: 档案}`；**没有清单返回空 dict**（读不动/坏 ⇒ `machine_catalog` 抛错出声）。
 
-        ⚠️ 2026-09-16（工单 B2-残C 的工具线侧接缝）：机台名写死在代码里 ⇒ 公开仓库带指纹、
-        加一台机要改代码发版。外部清单（`kb/machine_catalog.py`，路径 `~/.opennano/machines.json`
-        或 `OPENNANO_MACHINES`）存在时以它为准；**不存在时行为与以前一模一样**。
-        权威归属（代码 vs JSON）待数据线按工单 `§附 待裁①` 裁定 —— 本处只在"有清单就用"这一层接缝，
-        不做权威切换。**清单存在但坏 ⇒ 抛错出声**（不静默回退，免得主人以为清单生效了）。
+        ⚠️ 2026-09-26（工单 `20260915-助手线-to-兼-01` B2-残C 的 C6）：机台名/厂名/型号
+        **整批外置成数据**（本机 `~/.opennano/machines.json`，或 `OPENNANO_MACHINES`）——
+        代码里从此**零真机台/厂名**（公开仓库只有中性 demo `kb/machines.demo.json`）。
+        """
+        from kb import machine_catalog as mc
+        ms = mc.load()                            # 不存在 → None；坏了 → 抛（不静默回退）
+        return {m.get("name"): m for m in (ms or []) if m.get("name")}
+
+    def _seed_machines(self):
+        """播种机台：**外部清单**（本机真机台）→ **仓库中性 demo**（公开 clone / CI）。
+
+        ⚠️ 2026-09-16 起是「有清单就用」，2026-09-26（C6）把**内建真机台表整个删掉**：
+        它曾经是公开仓库里最扎眼的指纹（厂名+型号+内部备注）。现在：
+          · 有本机清单（`~/.opennano/machines.json`）⇒ 用真的（与以前逐字相同，见 §五-5 前后对比）；
+          · 没有 ⇒ 用仓库里的**中性 demo**（`kb/machines.demo.json`），演示与回归照样跑得通；
+          · 清单**存在但坏** ⇒ 抛错出声（不静默回退，免得主人以为清单生效了）。
         """
         if self.data.get("machines"):
             return
         from kb import machine_catalog as mc
-        external = mc.load()                      # 不存在 → None（走内建表）；坏了 → 抛
-        if external is not None:
-            self.data.setdefault("machines", [])
-            for m in external:
-                self.data["machines"].append({k: v for k, v in m.items()
-                                              if k in mc.KNOWN_FIELDS or k.startswith("core_")})
-            return
         tmpl = {}
         for cat in CATEGORIES:
             for eq in self.data["equipment"].get(cat, []):
                 tmpl.setdefault(eq.get("name", ""), eq.get("id", ""))
-        seed = [
-            ("RIE200NL", "RIE", "Cl 基 RIE(Cl₂/BCl₃),与 cl_rie 数据源对应"),
-            ("RIE10NR", "RIE", "F 基 RIE(CF₄/CHF₃),与 f_rie 数据源对应"),
-            ("ICP-鲁汶", "ICP Etch", "鲁汶仪器 ICP,Cl+F 基"),
-            ("ICP-Sentech", "ICP Etch", "Sentech ICP,Cl/F/HBr(含三五族)"),
-            ("DRIE-Bosch", "DRIE (Bosch)", "Samco DRIE,Bosch 三步骤循环"),
-            ("RIBE-鲁汶", "RIBE", "鲁汶仪器 RIBE,CHF₃/Ar/N₂ 物理离子束"),
-            ("PECVD", "PECVD", "13.56MHz + 400kHz,SiO₂/SiNₓ/a-Si"),
-            ("EBPG5200", "E-beam Litho", "100 keV 电子束曝光"),
-            ("DWL66", "Laser Direct Write", "激光直写(微米级)"),
-            ("MA6", "UV Exposure", "紫外曝光(微米级以上)"),
-        ]
+        external = self._catalog_index()
+        if not external:
+            # 仓库内置中性样例（**零真机台**）—— 公开 clone / CI 用
+            demo = Path(mc.__file__).resolve().parent / "machines.demo.json"
+            try:
+                raw = json.loads(demo.read_text(encoding="utf-8"))
+                external = {m.get("name"): m for m in raw.get("machines", []) if m.get("name")}
+            except (OSError, ValueError):
+                external = {}
         self.data.setdefault("machines", [])
-        for name, tname, note in seed:
-            self.data["machines"].append({
-                "id": f"mc_{uuid.uuid4().hex[:8]}", "name": name, "model": "",
-                "serial": "", "equipment_id": tmpl.get(tname, ""), "location": "",
-                "status": "active", "notes": note,
-            })
+        for name, m in external.items():
+            rec = {k: v for k, v in m.items()
+                   if k in mc.KNOWN_FIELDS and k != "equipment_template"}
+            rec.setdefault("id", f"mc_{uuid.uuid4().hex[:8]}")
+            if not rec.get("equipment_id"):
+                rec["equipment_id"] = tmpl.get(m.get("equipment_template", ""), "")
+            self.data["machines"].append(rec)
 
     def _patch_bosch_equipment(self):
         """把 DRIE (Bosch) 的参数模板换成三步骤(钝化/刻蚀钝化/刻蚀硅),输出补 scallop。"""

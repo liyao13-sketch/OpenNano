@@ -68,9 +68,15 @@ def test_测量_值只许数字或留空(contract_source):
 
 
 def test_eq_state_超量程留空但行保留(contract_source):
-    """环境记录宁可缺，不许错：超量程/非数字 ⇒ **留空 + 报警**（绝不是截断到边界）。"""
+    """环境记录宁可缺，不许错：超量程/非数字 ⇒ **留空 + 报警**（绝不是截断到边界）。
+
+    ⚠️ 机台号取自口径表（`TOOL_DISPLAY`）而非写死（公开仓库零真机台指纹 · 工单 B2-残C）；
+    **这条断言仍能抓住**：`env_rh_pct=150` 被**静默截断到边界 100** 写进库（而不是留空+报警）。
+    """
+    from kb.core_vocab import TOOL_DISPLAY, TOOL_ID_SENTINEL
     from kb.form_contract import check_eq_state
-    out, warns = check_eq_state({"date": "2026-09-12", "tool": "RIE-400iPB",
+    tid = next(k for k in TOOL_DISPLAY if k != TOOL_ID_SENTINEL)   # 已登记机台（本机真表 / CI 样例）
+    out, warns = check_eq_state({"date": "2026-09-12", "tool": tid,
                                 "env_temp_c": "23", "env_rh_pct": "150"})
     assert out["env_temp_c"] == 23 and "env_rh_pct" not in out
     assert any("超量程" in w for w in warns)

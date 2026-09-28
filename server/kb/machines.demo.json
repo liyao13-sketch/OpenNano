@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "note": "**中性样例机台档案**（公开 clone / CI 用）：零真机台/厂名型号，与 `samples/core` 的演示机台号对齐。真机台档案在**本机** `~/.opennano/machines.json`（或 `OPENNANO_MACHINES`）—— **绝不进本仓库**（工单 B2-残C 的 C6/C7）。",
+  "machines": [
+    {
+      "name": "DEMO-ICP",
+      "equipment_id": "",
+      "equipment_template": "ICP Etch",
+      "tool_id": "ICP-DEMO",
+      "vendor": "",
+      "model": "",
+      "max_sample": "",
+      "location": "",
+      "serial": "",
+      "status": "active",
+      "notes": "样例 ICP 刻蚀机（中性占位）"
+    },
+    {
+      "name": "DEMO-LDW",
+      "equipment_id": "",
+      "equipment_template": "Laser Direct Write",
+      "tool_id": "LDW-DEMO",
+      "vendor": "",
+      "model": "",
+      "max_sample": "",
+      "location": "",
+      "serial": "",
+      "status": "active",
+      "notes": "样例激光直写（中性占位）"
+    },
+    {
+      "name": "DEMO-PECVD",
+      "equipment_id": "",
+      "equipment_template": "PECVD",
+      "tool_id": "PECVD-DEMO",
+      "vendor": "",
+      "model": "",
+      "max_sample": "",
+      "location": "",
+      "serial": "",
+      "status": "active",
+      "notes": "样例 PECVD（中性占位）"
+    },
+    {
+      "name": "DEMO-SEM",
+      "equipment_id": "",
+      "equipment_template": "",
+      "tool_id": "SEM-DEMO",
+      "vendor": "",
+      "model": "",
+      "max_sample": "",
+      "location": "",
+      "serial": "",
+      "status": "active",
+      "notes": "样例表征设备（中性占位）"
+    }
+  ]
+}

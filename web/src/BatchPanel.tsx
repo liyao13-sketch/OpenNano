@@ -69,7 +69,11 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const [obs, setObs] = useState<{ obs_type: string; description: string }[]>([])
   /** 表单当前装载的是哪个 run（与 `sel` 分开：两者不一致时**禁止写回画布**，见下方 effect）。 */
   const [formRun, setFormRun] = useState('')
-  const [env, setEnv] = useState<any>({ date: new Date().toISOString().slice(0, 10), tool: 'RIE-400iPB', clean_done: '否' })   // i18n-keep：eq_state.clean_done 的取值（core 枚举），下拉选项的 value 与它对齐
+  /* 环境一行（eq_state）：机台号**默认留空**，不预设任何真机台（公开仓库零真机台指纹 · 工单 B2-残C）。
+     为什么空比预设一台好：① 预设的机台名就是**真实实验室指纹**（会随前端 bundle 公开）；
+     ② 这一行是**批次级**环境记录，新建批次时根本还不知道上哪台机 ⇒ 预设＝编归属。
+     后端 `check_eq_state` 对空值落 `"(环境)"`（＝"未指定机台"），语义正确且不丢行；用户可在输入框里填。 */
+  const [env, setEnv] = useState<any>({ date: new Date().toISOString().slice(0, 10), tool: '', clean_done: '否' })   // i18n-keep：eq_state.clean_done 的取值（core 枚举），下拉选项的 value 与它对齐
   const [showSeason, setShowSeason] = useState(false)          // season 默认不画（owner 2026-09-12 裁断）
   const [tuneLine, setTuneLine] = useState<any>(null)          // v_tune_line（数据线视图）
   const [toolsOpen, setToolsOpen] = useState(false)            // 菜单工具下拉
@@ -214,7 +218,14 @@ export default function BatchPanel({ ctx, onClose }: { ctx: Ctx; onClose: () => 
   const proposeMapping = async () => {
     setBusy('llm'); setMsg(''); setReport('')
     try {
-      const d = await post('/api/adapter/propose', { tool: 'RIE-400iPB', dir: menuDir })
+      /* 提案文件名要用"哪台机"（后端落 `proposed/<tool>.json`），但机台名**不许写死**
+         （公开仓库零真机台指纹 · 工单 B2-残C）；空串会被后端 `_safe_tool("")` 落成
+         `proposed/unknown.json` ⇒ 名字丢了。所以从**页面已有状态**取：当前选中 run 的
+         `tool_id`（core 登记的真实机台号，随 run 走）。⚠️ 故意**不**从 `menuDir` 末级目录名取 ——
+         那个目录可能只是菜单根目录（后端 `_menu_dir_for` 的 `<菜单根>/<机台>` 只是其中一种形态），
+         拿它当机台号就是**编归属**；宁可为空（`unknown`）也不猜。 */
+      const toolForProposal = (sel?.tool_id || '').trim()
+      const d = await post('/api/adapter/propose', { tool: toolForProposal, dir: menuDir })
       if (d.skipped) { setMsg('✅ ' + d.note); return }
       const ok = (d.mappings || []).filter((m: any) => m.suggest)
       const human = (d.mappings || []).filter((m: any) => m.needs_human)

@@ -448,24 +448,24 @@ class RunContinueReq(BaseModel):
 
 class MenuScanReq(BaseModel):
     dir: str = ""
-    tool: str = "RIE-400iPB"
+    tool: str = ""                # 空 ⇒ 用菜单目录下的唯一机台子目录（不写死机台名）
 
 
 class MenuGroupReq(BaseModel):
     group: int
     dir: str = ""
-    tool: str = "RIE-400iPB"
+    tool: str = ""
 
 
 class ProposalReq(BaseModel):
-    tool: str = "RIE-400iPB"
+    tool: str = ""
     dir: str = ""                 # 给了就自动取其未映射列
     columns: list[str] = []
     samples: dict = {}
 
 
 class ProposalVerifyReq(BaseModel):
-    tool: str = "RIE-400iPB"
+    tool: str = ""
 
 
 class AppendPackReq(BaseModel):
@@ -501,7 +501,9 @@ class ProposeReq(BaseModel):
 
 class MenuCheckReq(BaseModel):
     dir: str = ""          # 缺省 = <设备菜单>/<tool>
-    tool: str = "RIE-400iPB"
+    #: 机台名**不预设**（公开仓库零真机台指纹 · 工单 B2-残C）：空 ⇒ `_menu_dir_for()` 用菜单目录下
+    #: 的**唯一**机台子目录（本机现状＝一台机一个夹）；多目录则报错并列出候选，不猜。
+    tool: str = ""
     text: bool = False     # True = 附人读报告
 
 
@@ -559,7 +561,7 @@ def api_run_continue(req: RunContinueReq, request: Request):
     steps: list[dict] = []
     if req.menu_group:
         from kb import menu_reader as mr
-        export = req.menu_dir or str(mr.default_menu_dir() / "RIE-400iPB")
+        export = str(_menu_dir_for("", req.menu_dir))
         try:
             g = mr.group_steps(int(req.menu_group), export)
         except Exception as e:                     # noqa: BLE001
@@ -570,7 +572,7 @@ def api_run_continue(req: RunContinueReq, request: Request):
         menu_info = {"group": g["group"], "group_seq": g["group_seq"],
                      "segments": g["segments"], "total_steps": g["total_steps"],
                      "defined_total": g["defined_total"], "skipped_slots": g["skipped_slots"],
-                     "recipe_id": f"RCP-400iPB-G{int(req.menu_group):03d}", "dir": export}
+                     "recipe_id": f"RCP-{Path(export).name}-G{int(req.menu_group):03d}", "dir": export}
 
     base = copy.deepcopy(src) if src else {}
     new_mod = {
@@ -635,11 +637,32 @@ def api_menu_zones():
             "default_dir": str(mr.default_menu_dir()), "pair_tol_min": mr.PAIR_TOL_MIN}
 
 
+def _menu_dir_for(tool: str = "", dir_: str = "") -> Path:
+    """菜单导出目录 —— **不写死机台名**（2026-09-26 · 工单 B2-残C 的 C5/C6 同批）。
+
+    顺序：显式 `dir` → 机台名子目录 → **唯一子目录**（本机现状＝一台机一个夹）→ 报错列候选。
+    ⚠️ 以前这里是 `default_menu_dir() / "<某台真机台>"`：公开仓库里的指纹，且**换机台就错**。
+    """
+    from kb import menu_reader as mr
+    if dir_:
+        return Path(dir_).expanduser()
+    root = mr.default_menu_dir()
+    if tool:
+        return root / tool
+    subs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    if len(subs) == 1:
+        return subs[0]
+    if not subs:
+        raise HTTPException(400, f"菜单目录里没有机台子目录：{root} ⇒ 请显式给 `tool` 或 `dir`")
+    raise HTTPException(400, "菜单目录下有多个机台子目录，请显式给 `tool`："
+                             f"{[p.name for p in subs]}")
+
+
 @app.post("/api/menu/scan")
 def api_menu_scan(req: MenuScanReq):
     """解析一个设备菜单导出目录（.grp/.rcp）→ 预览（不写任何文件）。"""
     from kb import menu_reader as mr
-    d = req.dir or str(mr.default_menu_dir() / req.tool)
+    d = str(_menu_dir_for(req.tool, req.dir))
     try:
         return mr.load_menu(d)
     except (FileNotFoundError, mr.MenuParserUnavailable) as e:
@@ -650,7 +673,7 @@ def api_menu_scan(req: MenuScanReq):
 def api_menu_group(req: MenuGroupReq):
     """取 group N 的三段步骤（**预览**；实际灌参走 /api/run/continue）。"""
     from kb import menu_reader as mr
-    d = req.dir or str(mr.default_menu_dir() / req.tool)
+    d = str(_menu_dir_for(req.tool, req.dir))
     try:
         return mr.group_steps(int(req.group), d)
     except (FileNotFoundError, mr.MenuParserUnavailable, ValueError) as e:
@@ -664,7 +687,7 @@ def api_menu_check(req: MenuCheckReq):
     回答：配对可靠吗 / 列认全了吗 / 配方是空壳吗 / 越界了吗 / 与上次 dump 漂移了吗。
     """
     from kb import menu_checker as mc, menu_reader as mr
-    root = Path(req.dir).expanduser() if req.dir else (mr.default_menu_dir() / req.tool)
+    root = _menu_dir_for(req.tool, req.dir)
     try:
         res = mc.check_tree(root)
     except Exception as e:                       # noqa: BLE001
@@ -1387,7 +1410,7 @@ class OptFitReq(BaseModel):
     source: str = "core"           # core(权威,默认) | kb(旧结论库路径)
     quantity: str | None = None    # core 量名词(如 depth_center_nm)
     stage: str | None = None       # core stage(如 RIE)
-    tool_id: str | None = None     # core tool_id(如 RIE200NL)
+    tool_id: str | None = None     # core tool_id（登记表里的机台号；口径表见 kb/core_vocab.py）
     process_type: str = "RIE_Cl"
     material: str | None = None
     target: str = "er_nm_min"
@@ -1483,6 +1506,7 @@ def health():
     `plugins` 里的每一项都**永不抛**：插件缺失/拒装/自爆只让它自己红，服务照常跑
     （见 `docs/extension-points.md` 的"失败隔离"）。
     """
+    from kb import core_vocab as cv
     from kb import machine_catalog as mc
     from kb import machine_drift as mdrift
     from kb import menu_reader as mr
@@ -1490,9 +1514,11 @@ def health():
     return {"ok": True, "service": "opennano", "version": "0.1.0",
             "plugins": plugins,
             "plugins_ok": all(p.get("ok") for p in plugins.values()),
-            # 机台口径漂移（**只读**应用库 + 镜像表；权威仍在数据线 `core_schema.TOOL_DISPLAY`）——
-            # 2026-09-17 工单 `20260915-助手线-to-兼-01` B2-残C 工具线半：`resolve_tool` 见
-            # `tool_id ∉ TOOL_DISPLAY` 会**静默落哨兵**，这里把"档案里写错了机台号"提前照出来。
+            # 机台口径表**从哪儿加载的**（2026-09-26 · C3：字面量镜像 → 加载器）：
+            # `ok=False` ⇒ 用的是**中性样例**（公开 clone / CI），真机台号会落哨兵 —— 部署排障第一眼。
+            "tool_display": cv.status(),
+            # 机台口径漂移（**只读**应用库 + 加载来的口径表）——2026-09-17 工单 B2-残C：
+            # `resolve_tool` 见 `tool_id ∉ TOOL_DISPLAY` 会**静默落哨兵**，这里提前照出来。
             "machine_drift": mdrift.status()}
 
 

@@ -17,6 +17,20 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from kb.core_vocab import TOOL_DISPLAY, TOOL_ID_SENTINEL
+
+#: 机台号**从口径表取**，不写死（公开仓库零真机台/厂名指纹 · 工单 B2-残C）。
+#: 本文件只需要"几个互不相同的机台标签"来证明**盘上 vs 内存不是同一版**，
+#: 本机（真清单）/ 公开 clone（中性样例）两侧都够取样 ⇒ 断言的结构不变。
+_TIDS = [tid for tid in TOOL_DISPLAY if tid != TOOL_ID_SENTINEL]
+assert len(_TIDS) >= 3, (
+    f"口径表里已登记的机台不足 3 台（{len(_TIDS)} 台）⇒ 本文件的取样无法成立")
+
+
+def _tid(i: int) -> str:
+    """第 `i` 台已登记机台（按口径表顺序取模）—— 跨环境稳定的"真表取样"。"""
+    return _TIDS[i % len(_TIDS)]
+
 
 @pytest.fixture
 def team(tmp_path, monkeypatch):
@@ -195,19 +209,23 @@ def test_project_save_without_rev_cannot_overwrite_an_existing_name(team):
 
 
 def test_library_loaded_rev_mismatch_is_refused_not_overwritten(tmp_path, monkeypatch):
-    """库是**整份覆盖**写的：盘上变了就拒写（真实踩过：手改 4 台机台被运行中的进程抹掉）。"""
+    """库是**整份覆盖**写的：盘上变了就拒写（真实踩过：手改 4 台机台被运行中的进程抹掉）。
+
+    机台号取自口径表（`_tid(i)`）而非写死；**这条断言仍能抓住**：把"盘上已被别人改过"
+    当成"内存是最新版"而整份覆盖写回（`LibraryConflict` 不抛 / 抛了却仍写盘）。
+    """
     from engine.library import LibraryConflict, LibraryStore
     p = tmp_path / "library.json"
     store = LibraryStore(p)
-    store.data["machines"] = [{"id": "mc1", "name": "A", "tool_id": "RIE10NR"}]
+    store.data["machines"] = [{"id": "mc1", "name": "A", "tool_id": _tid(0)}]
     store._save()                                     # 正常：盘上 == 内存
 
     external = json.loads(p.read_text(encoding="utf-8"))
-    external["machines"] = [{"id": "mc1", "name": "B", "tool_id": "PECVD-SAMCO"},
-                            {"id": "mc2", "name": "C", "tool_id": "SI500"}]
+    external["machines"] = [{"id": "mc1", "name": "B", "tool_id": _tid(1)},
+                            {"id": "mc2", "name": "C", "tool_id": _tid(2)}]
     p.write_text(json.dumps(external, ensure_ascii=False), encoding="utf-8")   # "别人"改了
 
-    store.data["machines"].append({"id": "mc9", "name": "D", "tool_id": "DWL66"})
+    store.data["machines"].append({"id": "mc9", "name": "D", "tool_id": _tid(3)})
     with pytest.raises(LibraryConflict):
         store._save()
     assert len(json.loads(p.read_text(encoding="utf-8"))["machines"]) == 2, "别人的改动被覆盖了"

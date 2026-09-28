@@ -1,0 +1,31 @@
+{
+  "schema": "machine-display.v1",
+  "mode": "demo",
+  "authority": "core_schema.TOOL_DISPLAY（数据线）",
+  "note": "**中性样例清单（仓库内置）**：零真机台/厂名，且与 `samples/core` 的演示机台号**对齐**（公开 clone 能跑通「带机台」的演示）。真清单是数据线的派生物 `<core>/machine_tool_display.json`（`mode: enforced`），由 `OPENNANO_TOOL_DISPLAY` 或工作区 core 位置优先加载，**绝不进本仓库**。",
+  "sha256": "0e729e8bff4aa0c763c8f25d89134b75b213ea88a575dda3bb49bcc7a5b30fd9",
+  "tool": [
+    {
+      "tool_id": "ICP-DEMO",
+      "display": "DEMO ICP Etcher（样例）"
+    },
+    {
+      "tool_id": "LDW-DEMO",
+      "display": "DEMO Laser Direct Write（样例）"
+    },
+    {
+      "tool_id": "PECVD-DEMO",
+      "display": "DEMO PECVD（样例）"
+    },
+    {
+      "tool_id": "SEM-DEMO",
+      "display": "DEMO SEM（样例）"
+    },
+    {
+      "tool_id": "UNKNOWN",
+      "display": "UNKNOWN（机台未记录）"
+    }
+  ],
+  "sentinel": "UNKNOWN",
+  "sentinel_display": "UNKNOWN（机台未记录）"
+}

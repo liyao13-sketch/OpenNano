@@ -40,10 +40,15 @@ def core(tmp_path, monkeypatch):
 
 
 def _project(sample="", date="2026-09-20", with_steps=True, obs=None, meas=None):
-    """一个"画布工程"：1 条 core 里没有的新 run。"""
+    """一个"画布工程"：1 条 core 里没有的新 run。
+
+    ⚠️ `machine_name` 是**画布/应用库标签**（≠ core 机台号），这里用**合成的中性画布名**
+    （公开仓库零真机台指纹 · 工单 B2-残C）：本文件断言的是步序/测量/来源继承，与机台身份无关。
+    `equipment_name="RIE"` 是 **stage 代号**（契约词表），保留。
+    """
     m = {"id": "m-new", "name": "RIE 续做", "core_run_id": NEW_RUN,
          "core_parent_run_id": f"{BATCH}-DRIE-0002", "run_state": "planned",
-         "machine_name": "RIE-400iPB", "equipment_name": "RIE"}
+         "machine_name": "CANVAS-RIE-X", "equipment_name": "RIE"}
     if sample:
         m["core_sample_id"] = sample
     if date:
