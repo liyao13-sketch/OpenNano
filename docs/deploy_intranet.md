@@ -95,9 +95,9 @@ http://<服务器内网IP>:8000
 | `OPENNANO_DB` | `~/.opennano/opennano.db` | 知识库 |
 | `OPENNANO_WEB_DIST` | `../web/dist` | 前端产物目录 |
 | `OPENNANO_PBKDF2_ITERS` | `200000` | 口令迭代数（测试会调小；老账号记着自己的迭代数，调大不影响它们） |
-| `OPENNANO_DATA_ROOT` | `<workspace>/个人空间/18_工艺数据资产/03_实验数据` | 实验数据根（core 只读） |
+| `OPENNANO_DATA_ROOT` | `<workspace>/个人空间/32_工艺数据资产/03_实验数据` | 实验数据根（core 只读） |
 | `OPENNANO_CORE_DIR` | `<DATA_ROOT>/core` | core 目录 |
-| `OPENNANO_DOE_DIR` | `<workspace>/个人空间/19_工艺资料/干法刻蚀/数据科学/DOE设计/执行表_2026-08-20` | DOE 执行表目录（服务端扫表用；⚠️ 2026-09-12 表已搬到此，旧默认指向已删除目录会**静默扫空**） |
+| `OPENNANO_DOE_DIR` | `<workspace>/个人空间/33_工艺资料/干法刻蚀/数据科学/DOE设计/执行表_2026-08-20` | DOE 执行表目录（服务端扫表用；⚠️ 2026-09-12 表已搬到此，旧默认指向已删除目录会**静默扫空**） |
 
 ## 四之二、并发与原子性（一台服务器多人同时写时靠它）
 

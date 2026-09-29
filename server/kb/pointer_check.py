@@ -23,23 +23,23 @@ from .menu_reader import _workspace
 #: 工具代码里引用到的**跨线文件**（真源）→ 相对工作区的路径
 CROSSLINE_POINTERS = {
     # 数据线：core / ingest（真源，权威在 ingest/*.py 而非 core/*.csv）
-    "ingest/core_schema.py":   "个人空间/18_工艺数据资产/03_实验数据/ingest/core_schema.py",
-    "ingest/build_core.py":    "个人空间/18_工艺数据资产/03_实验数据/ingest/build_core.py",
-    "ingest/datasets_menu.py": "个人空间/18_工艺数据资产/03_实验数据/ingest/datasets_menu.py",
-    "ingest/datasets_folder.py": "个人空间/18_工艺数据资产/03_实验数据/ingest/datasets_folder.py",
-    "ingest/datasets_eq.py":   "个人空间/18_工艺数据资产/03_实验数据/ingest/datasets_eq.py",
-    "ingest/propose_apply.py": "个人空间/18_工艺数据资产/03_实验数据/ingest/propose_apply.py",
-    "ingest/batch_events.csv": "个人空间/18_工艺数据资产/03_实验数据/ingest/batch_events.csv",
-    "ingest/eq_state_log.csv": "个人空间/18_工艺数据资产/03_实验数据/ingest/eq_state_log.csv",
-    "schema_v0.1.md":          "个人空间/18_工艺数据资产/03_实验数据/schema_v0.1.md",
-    "现象受控词表.csv":         "个人空间/18_工艺数据资产/03_实验数据/现象受控词表.csv",
-    "core/runs.csv":           "个人空间/18_工艺数据资产/03_实验数据/core/runs.csv",
-    "core/samples.csv":        "个人空间/18_工艺数据资产/03_实验数据/core/samples.csv",
+    "ingest/core_schema.py":   "个人空间/32_工艺数据资产/03_实验数据/ingest/core_schema.py",
+    "ingest/build_core.py":    "个人空间/32_工艺数据资产/03_实验数据/ingest/build_core.py",
+    "ingest/datasets_menu.py": "个人空间/32_工艺数据资产/03_实验数据/ingest/datasets_menu.py",
+    "ingest/datasets_folder.py": "个人空间/32_工艺数据资产/03_实验数据/ingest/datasets_folder.py",
+    "ingest/datasets_eq.py":   "个人空间/32_工艺数据资产/03_实验数据/ingest/datasets_eq.py",
+    "ingest/propose_apply.py": "个人空间/32_工艺数据资产/03_实验数据/ingest/propose_apply.py",
+    "ingest/batch_events.csv": "个人空间/32_工艺数据资产/03_实验数据/ingest/batch_events.csv",
+    "ingest/eq_state_log.csv": "个人空间/32_工艺数据资产/03_实验数据/ingest/eq_state_log.csv",
+    "schema_v0.1.md":          "个人空间/32_工艺数据资产/03_实验数据/schema_v0.1.md",
+    "现象受控词表.csv":         "个人空间/32_工艺数据资产/03_实验数据/现象受控词表.csv",
+    "core/runs.csv":           "个人空间/32_工艺数据资产/03_实验数据/core/runs.csv",
+    "core/samples.csv":        "个人空间/32_工艺数据资产/03_实验数据/core/samples.csv",
     # 契约（工具线维护，但路径同样会外发）
     "契约/知识条目Schema与录入规范_v0.2_20260912.md":
-        "个人空间/19_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md",
+        "个人空间/33_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md",
     "契约/实验数据包_规范_v0.1.md":
-        "个人空间/19_工艺资料/契约/实验数据包_规范_v0.1.md",
+        "个人空间/33_工艺资料/契约/实验数据包_规范_v0.1.md",
 }
 
 #: 明确**不该再出现**的错名（防回潮）
@@ -111,7 +111,7 @@ def main() -> int:
     ap.add_argument("--strict", action="store_true", help="有失效即退出码 1")
     ap.add_argument("--json", action="store_true", help="输出 JSON（供数据线脚本消费）")
     ap.add_argument("--allow-missing", action="store_true",
-                    help=("允许「真源不在本机」（CI/别人机器没有 18_工艺数据资产）——"
+                    help=("允许「真源不在本机」（CI/别人机器没有 32_工艺数据资产）——"
                           "此时仍校验禁用名不回流，但不因文件缺失报红。"
                           "等价于环境变量 OPENNANO_POINTERS_ALLOW_MISSING=1"))
     ap.add_argument("--write-manifest", metavar="路径",

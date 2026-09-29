@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """文献 KnowledgeItem → 知识条目 导入器(v0.2 契约实现)。
 
-契约: `个人空间/19_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md` §四之二~之五
+契约: `个人空间/33_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md` §四之二~之五
 
 用法:
     python3 kb/lit_ingest.py <抽取文件.md> --batch D29-20260912 [--dry-run] [--db <path>]
@@ -389,7 +389,7 @@ def print_report(report: list[dict], problems: list, dry: bool) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="文献 KnowledgeItem → 知识条目 导入器")
-    ap.add_argument("src", help="抽取文件(如 07_文献库/D29_知识抽取.md)")
+    ap.add_argument("src", help="抽取文件(如 31_文献库/D29_知识抽取.md)")
     ap.add_argument("--batch", default="", help="批次号(默认 <文献号>-<日期>)")
     ap.add_argument("--db", default="", help="目标库(默认 ~/.opennano/opennano.db)")
     ap.add_argument("--model", default="opennano-extractor", help="抽取执行者,写进 extra_metadata")

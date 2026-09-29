@@ -1,6 +1,6 @@
 """数据域 core 只读适配器（协议 §11：core = 原始事实 · KB = 结论与规则 · 单向推导）。
 
-core 位置：`个人空间/18_工艺数据资产/03_实验数据/core/`（CSV 权威 + process.db 索引）
+core 位置：`个人空间/32_工艺数据资产/03_实验数据/core/`（CSV 权威 + process.db 索引）
 本模块**只读 CSV**（绝不写 db、绝不改 CSV），为 OpenNano 工具提供：
   · 运行/测量/现象/证据 的查询（Agent 工具 query_core）
   · 建模数据集（opt 引擎：step 参数 → measurement 量）

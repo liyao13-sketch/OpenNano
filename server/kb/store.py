@@ -6,7 +6,7 @@ v0.2(2026-09-12,跨线定案) 三处改动:
    (source 相同、loc 不同)的多条知识会互相覆盖。
 3. `resolve_reliability()` 来源分档守卫:非 core 来源缺省不再冒充 4 分,
    一律落 2 并写 reliability_basis 留痕。契约见
-   `19_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md` §二。
+   `33_工艺资料/契约/知识条目Schema与录入规范_v0.2_20260912.md` §二。
 """
 from __future__ import annotations
 
@@ -57,7 +57,9 @@ def tier_of(entry: dict) -> str | None:
     if explicit:
         return str(explicit)
     src = str(entry.get("source") or "")
-    if src.startswith(("18_工艺数据资产", "core", "core/")):
+    # ⚠️ 2026-09-30 顶层夹重编号（18→32）：**新旧两个前缀都要认** ——
+    #    历史条目的 source 字符串是旧号开头（只认新号会让它们掉出 core 派生档 ⇒ 可信度被降）。
+    if src.startswith(("32_工艺数据资产", "18_工艺数据资产", "core", "core/")):
         return "core"
     if src.startswith(("D", "T", "LIT_")) and "/" not in src:
         return None  # 形如 D29 ... 的文献来源,交由调用方显式标注

@@ -24,4 +24,4 @@
 
 - 体检报告（批量扫 dump）：`kb/menu_checker.py` · `POST /api/menu/check`
 - 菜单读取适配器：`kb/menu_reader.py` · `POST /api/menu/{scan,group}`
-- 契约：`19_工艺资料/契约/…`、`18_工艺数据资产/03_实验数据/schema_v0.1.md` §十三
+- 契约：`33_工艺资料/契约/…`、`32_工艺数据资产/03_实验数据/schema_v0.1.md` §十三

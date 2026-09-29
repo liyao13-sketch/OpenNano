@@ -28,8 +28,8 @@ from datetime import datetime
 from pathlib import Path
 
 #: 唯一真相：数据线解析器（可用 OPENNANO_MENU_PARSER 覆盖；默认按工作区推断）
-_DEFAULT_REL = "个人空间/18_工艺数据资产/03_实验数据/ingest/datasets_menu.py"
-_DEFAULT_MENU_REL = "个人空间/18_工艺数据资产/06_设备菜单"
+_DEFAULT_REL = "个人空间/32_工艺数据资产/03_实验数据/ingest/datasets_menu.py"
+_DEFAULT_MENU_REL = "个人空间/32_工艺数据资产/06_设备菜单"
 
 #: 三段组合：chuck / etch(=group 同号) / de-chuck
 SEG_CHUCK, SEG_DECHUCK = 2, 4

@@ -42,13 +42,13 @@ def test_符号级校验_引用的函数必须真在真源里(ws_root):
     """**文件在 ≠ 我引用的函数在** —— 逐条核符号（这是错指针的真正教训）。"""
     syms = [
         # (文件, 期望形式, 符号, 我在哪引用)
-        ("个人空间/18_工艺数据资产/03_实验数据/ingest/core_schema.py", "def", "qa",
+        ("个人空间/32_工艺数据资产/03_实验数据/ingest/core_schema.py", "def", "qa",
          "batch_events.consistency_preview 的 authority 文案（QA 关 [11]）"),
-        ("个人空间/18_工艺数据资产/03_实验数据/ingest/build_core.py", "call", "qa",
+        ("个人空间/32_工艺数据资产/03_实验数据/ingest/build_core.py", "call", "qa",
          "同上：qa() **由 build_core 调用**（不是它定义的）、计入违约"),
-        ("个人空间/18_工艺数据资产/03_实验数据/ingest/datasets_menu.py", "def", "parse_grp",
+        ("个人空间/32_工艺数据资产/03_实验数据/ingest/datasets_menu.py", "def", "parse_grp",
          "menu_reader 动态加载的 .grp 解析入口"),
-        ("个人空间/18_工艺数据资产/03_实验数据/ingest/datasets_menu.py", "def", "parse_rcp",
+        ("个人空间/32_工艺数据资产/03_实验数据/ingest/datasets_menu.py", "def", "parse_rcp",
          "menu_reader 动态加载的 .rcp 解析入口"),
     ]
     missing = []

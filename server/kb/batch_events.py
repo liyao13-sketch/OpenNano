@@ -1,7 +1,7 @@
 """批次事件（裂片 / 取样分配）—— **只读台账 + 产出提案**，写账走数据线的 `propose_apply.py`。
 
 契约（数据线 2026-09-12/13 定 · 他们已实现）：
-    · 源台账 `18_工艺数据资产/03_实验数据/ingest/batch_events.csv`（append-only · 同 event_id 后写生效=纠错路径）
+    · 源台账 `32_工艺数据资产/03_实验数据/ingest/batch_events.csv`（append-only · 同 event_id 后写生效=纠错路径）
     · `kind` 三态要分清（**这是数据线纠正过的关键概念**）：
         `split`    物理裂片（1 片 → N 颗）—— AR50-T1 **只有 1 条**：×49
         `allocate` 取样分配（从现有样品取 N 颗，**不改样品总数**）—— AR50-T1 有 3 条：×4 / ×15 / ×1
@@ -33,12 +33,12 @@ EVENT_FIELDS = ["event_id", "batch_id", "kind", "at", "from_sample_id", "to_samp
 
 def events_path() -> Path:
     env = os.environ.get("OPENNANO_BATCH_EVENTS")
-    return Path(env) if env else _workspace() / "个人空间/18_工艺数据资产/03_实验数据/ingest/batch_events.csv"
+    return Path(env) if env else _workspace() / "个人空间/32_工艺数据资产/03_实验数据/ingest/batch_events.csv"
 
 
 def proposer_path() -> Path:
     env = os.environ.get("OPENNANO_PROPOSE_APPLY")
-    return Path(env) if env else _workspace() / "个人空间/18_工艺数据资产/03_实验数据/ingest/propose_apply.py"
+    return Path(env) if env else _workspace() / "个人空间/32_工艺数据资产/03_实验数据/ingest/propose_apply.py"
 
 
 def read_events(batch: str = "") -> list[dict]:

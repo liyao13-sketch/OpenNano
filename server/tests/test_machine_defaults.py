@@ -179,7 +179,7 @@ def test_sentinel_value_matches_the_data_line():
     import importlib.util
     from conftest import WS_ROOT
     from kb.machine_defaults import TOOL_ID_SENTINEL
-    p = WS_ROOT / "个人空间/18_工艺数据资产/03_实验数据/ingest/core_schema.py"
+    p = WS_ROOT / "个人空间/32_工艺数据资产/03_实验数据/ingest/core_schema.py"
     if not p.exists():
         pytest.skip("工作区里没有数据线的 core_schema.py（评测环境）")
     spec = importlib.util.spec_from_file_location("_core_schema_probe2", p)

@@ -17,8 +17,8 @@ from pathlib import Path
 
 from .menu_reader import _workspace, parser
 
-SCHEMA_REL = "个人空间/18_工艺数据资产/03_实验数据/schema_v0.1.md"
-OBS_REL = "个人空间/18_工艺数据资产/03_实验数据/现象受控词表.csv"
+SCHEMA_REL = "个人空间/32_工艺数据资产/03_实验数据/schema_v0.1.md"
+OBS_REL = "个人空间/32_工艺数据资产/03_实验数据/现象受控词表.csv"
 
 STATUS = ("planned", "running", "done", "aborted")
 VERIFICATION = ("已核实", "未核实", "存疑")          # 默认未核实：不许替记录升可信度

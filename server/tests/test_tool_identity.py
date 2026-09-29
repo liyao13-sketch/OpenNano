@@ -177,7 +177,7 @@ def _core_schema_or_skip(mod_name: str):
     if TOOL_DISPLAY_INFO.get("degraded"):
         pytest.skip(f"本机只有中性样例（来源 {TOOL_DISPLAY_INFO.get('source')}："
                     f"{TOOL_DISPLAY_INFO.get('path')}）⇒ 口径表不是权威，跨线对拍无意义")
-    p = WS_ROOT / "个人空间/18_工艺数据资产/03_实验数据/ingest/core_schema.py"
+    p = WS_ROOT / "个人空间/32_工艺数据资产/03_实验数据/ingest/core_schema.py"
     if not p.exists():
         pytest.skip("工作区里没有数据线的 core_schema.py（评测环境）")
     spec = importlib.util.spec_from_file_location(mod_name, p)
@@ -397,7 +397,7 @@ def test_cross_line_tool_display_is_byte_identical():
     """**跨线逐字判据**：机台表 / 哨兵 / 显示名 —— 我们这侧加载到的口径与数据线 `core_schema.py`
     逐字一致（顺序也算）。
 
-    ⚠️ 只读数据线的文件（`18_工艺数据资产/` 对我们只读）：**无真源则跳过**
+    ⚠️ 只读数据线的文件（`32_工艺数据资产/` 对我们只读）：**无真源则跳过**
     （评测/CI 没有它，或者本机只加载到中性样例）—— 见 `_core_schema_or_skip`。
 
     仍能抓住：加载器把清单读错/读串（顺序、条目、哨兵）⇒ 与真源对不上 ⇒ 红。

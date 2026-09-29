@@ -1,12 +1,12 @@
 """KB 录入:读实验 CSV(只读)→ 自动生成知识条目(幂等)。
 
 数据源(只读红线,仅读不写):
-  个人空间/18_工艺数据资产/03_实验数据/<源目录>/{steps,data}.csv  → process_type + 机台号
+  个人空间/32_工艺数据资产/03_实验数据/<源目录>/{steps,data}.csv  → process_type + 机台号
   ⚠️ **源目录 ↔ (process_type, 机台号) 的对应表是本地数据**（`~/.opennano/kb_sources.json`，
      可用 `OPENNANO_KB_SOURCES` 覆盖）—— 公开仓库里不写任何机台型号（工单 B2-残C 的 C3/C6）。
      表缺失 ⇒ 机台号留空并**出声**（知识条目的 `equipment` 会少一个溯源字段，但不编造）。
 
-映射规范见 个人空间/19_工艺资料/契约/归档/知识条目Schema与录入规范_v0.1_20260909.md §四。
+映射规范见 个人空间/33_工艺资料/契约/归档/知识条目Schema与录入规范_v0.1_20260909.md §四。
 """
 from __future__ import annotations
 

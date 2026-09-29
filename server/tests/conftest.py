@@ -50,7 +50,7 @@ def _find_workspace() -> Path:
 
 
 WS_ROOT = _find_workspace()
-_DATA_ROOT = WS_ROOT / "个人空间/18_工艺数据资产/03_实验数据"
+_DATA_ROOT = WS_ROOT / "个人空间/32_工艺数据资产/03_实验数据"
 _REAL_CORE_DIR = _DATA_ROOT / "core"                # 真 core（只读用例用；评测/CI 上不存在）
 # ⚠️ **必须显式赋值，不能 setdefault**：环境/shell 里若残留旧值，用例会静默回退到
 #    "core 里没有 ⇒ 用习惯序"的分支 ⇒ 看着通过，其实没测到 core 回读（2026-09-13 实际踩到）。
@@ -156,7 +156,7 @@ def ws_root() -> Path:
 @pytest.fixture
 def core_dir(ws_root):
     """真 core 目录（**只读**用例用；不存在就跳过）。"""
-    p = ws_root / "个人空间/18_工艺数据资产/03_实验数据/core"
+    p = ws_root / "个人空间/32_工艺数据资产/03_实验数据/core"
     if not p.is_dir():
         pytest.skip(f"真 core 不在本机：{p}（CI 上这类用例自动跳过）")
     return p
@@ -201,7 +201,7 @@ def contract_source(tmp_path, ws_root, monkeypatch):
     返回 `"real"` / `"synth"` —— 用例据此决定断言强度（真源上可以断言 32 词、51 个量名词，
     合成夹具上只断言"逻辑跑通"）。**任何情况下都不写数据资产。**
     """
-    if (ws_root / "个人空间/18_工艺数据资产/03_实验数据/schema_v0.1.md").exists():
+    if (ws_root / "个人空间/32_工艺数据资产/03_实验数据/schema_v0.1.md").exists():
         return "real"
     s = tmp_path / "schema_v0.1.md"
     v = tmp_path / "现象受控词表.csv"
@@ -215,7 +215,7 @@ def contract_source(tmp_path, ws_root, monkeypatch):
 @pytest.fixture
 def menu_export(ws_root):
     """真菜单导出目录（若本机没有就跳过）。"""
-    base = ws_root / "个人空间/18_工艺数据资产/06_设备菜单"
+    base = ws_root / "个人空间/32_工艺数据资产/06_设备菜单"
     if not base.is_dir():
         pytest.skip(f"本机没有设备菜单目录：{base}")
     dumps = sorted(p for p in base.rglob("*_菜单导出") if p.is_dir())

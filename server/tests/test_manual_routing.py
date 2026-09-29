@@ -31,7 +31,7 @@ ITEM_MECHANISM_LIKE = {
     "id": "M01-K09", "knowledge_type": "经验数值",
     "content": "前烘 85 °C / 90 s；显影 90 s。此为厂商推荐出厂工艺条件。",
     "source": "M01 p.2 §Processing",
-    "citation": "`19_工艺资料/光刻曝光/Resist/曝光-手册_AR-N7520负胶_Allresist.pdf` p.2",
+    "citation": "`33_工艺资料/光刻曝光/Resist/曝光-手册_AR-N7520负胶_Allresist.pdf` p.2",
     "context": {"设备": "EBL"},
 }
 ITEM_TABLE_LIKE = {
@@ -92,7 +92,7 @@ def test_citation_mentioning_a_manual_must_not_flip_the_layer():
     """
     lit = {"id": "D9-K01", "knowledge_type": "经验数值",
            "content": "文献给出的前烘条件与手册不同。", "source": "D9 §III (p.12)",
-           "citation": "`19_工艺资料/光刻曝光/Resist/曝光-手册_X.pdf` 转引自 D9"}
+           "citation": "`33_工艺资料/光刻曝光/Resist/曝光-手册_X.pdf` 转引自 D9"}
     assert not is_manual_item(lit)
     assert pick_process_type(lit) == "THEORY_KINETICS"
 
@@ -120,7 +120,7 @@ def test_subtype_by_process_domain(text, expect):
 def test_subtype_prefers_the_main_domain_of_the_document():
     """光刻胶说明书里顺带提到"耐刻蚀/去胶"时，仍归 LITHO（按主域归架）。"""
     it = {"content": "本胶耐干法刻蚀，可用于去胶工艺；显影 90 s。",
-          "citation": "`19_工艺资料/光刻曝光/Resist/曝光-手册_X.pdf`"}
+          "citation": "`33_工艺资料/光刻曝光/Resist/曝光-手册_X.pdf`"}
     assert pick_manual_subtype(it) == "MANUAL_LITHO"
 
 
@@ -185,7 +185,7 @@ def test_manual_entries_are_reachable_by_their_own_filter(tmp_path):
 def test_real_extraction_files_route_correctly():
     """拿真抽取件跑一遍：M 系列 36/36 落 `MANUAL_*`；8 份文献件**一条都不许**落 `MANUAL_*`。"""
     from conftest import WS_ROOT
-    base = WS_ROOT / "个人空间/07_文献库/知识抽取"
+    base = WS_ROOT / "个人空间/31_文献库/知识抽取"
     if not base.is_dir():
         pytest.skip("工作区里没有文献抽取目录")          # 评测环境；本机一定有
 

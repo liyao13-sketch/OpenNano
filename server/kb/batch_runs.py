@@ -58,7 +58,7 @@ def core_runs_path():
         return Path(env) / "runs.csv"
     try:
         from .menu_reader import _workspace
-        return _workspace() / "个人空间/18_工艺数据资产/03_实验数据/core/runs.csv"
+        return _workspace() / "个人空间/32_工艺数据资产/03_实验数据/core/runs.csv"
     except Exception:                     # noqa: BLE001
         return None
 
@@ -229,7 +229,7 @@ def _parent_map_from_packs() -> dict[str, str]:
     try:
         if env is None:
             from .menu_reader import _workspace
-            base = _workspace() / "个人空间/18_工艺数据资产"
+            base = _workspace() / "个人空间/32_工艺数据资产"
         elif env == "":
             base = None
         else:

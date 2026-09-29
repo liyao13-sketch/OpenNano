@@ -1156,7 +1156,7 @@ def api_kb_add(req: EntryReq):
 def api_kb_ingest():
     """已停用:按数据域协议 §11,KB 不得存原始数值副本(core 才是权威源)。"""
     return {"ok": False, "added": 0, "updated": 0, "total": KB.stats()["total"],
-            "message": "原始数据请走数据线 core(18_工艺数据资产/03_实验数据/ingest/build_core.py);"
+            "message": "原始数据请走数据线 core(32_工艺数据资产/03_实验数据/ingest/build_core.py);"
                        "KB 只存结论与影响规则。查询数据用 /api/core/* 或工具 query_core。",
             "core": core.stats()["counts"]}
 
