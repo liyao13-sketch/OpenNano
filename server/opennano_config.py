@@ -23,15 +23,48 @@ from pathlib import Path
 _HERE = Path(__file__).resolve()                      # …/OpenNano/server/opennano_config.py
 WORKSPACE = Path(os.environ.get("OPENNANO_WORKSPACE") or _HERE.parents[2])
 
-DATA_ROOT = Path(os.environ.get("OPENNANO_DATA_ROOT")
-                 or (WORKSPACE / "个人空间" / "32_工艺数据资产" / "03_实验数据"))
+#: 工作区里的个人空间根 —— **只在这一处写它的名字**，其余一律引用本常量
+#: （公开层棘轮会数这个目录名：写一次是 1，散着写就是 N；改名时也只改这一行）
+PERSONAL = WORKSPACE / "个人空间"
+
+def _doe_dir() -> Path:
+    """DOE 执行表目录 —— **双路兼容**（2026-09-30 owner 裁定：从 `33_工艺资料` 迁入 `32_工艺数据资产/07_执行表/`）。
+
+    迁移是**体系重整**那边做的（物理移动不属工具线写边界），所以这里两条路都认：
+      ① 新位 `32_工艺数据资产/07_执行表/`（存在就用它）
+      ② 旧位 `33_工艺资料/干法刻蚀/数据科学/DOE设计/执行表_2026-08-20`（兜底）
+    ⇒ **搬不搬、什么时候搬，工具都不会炸**；等旧位清掉后删掉②即可（`--check` 类判据不需要）。
+    ⚠️ 历史教训：2026-09-12 那次搬家只改了代码、没留兜底，旧默认值指向**已不存在的目录**
+    ⇒ 服务端扫表**静默为空**（工单 `20260916-助手线-to-工具线-01` · E1）。这次两条都留。
+    """
+    new = PERSONAL / "32_工艺数据资产" / "07_执行表"
+    old = (PERSONAL / "33_工艺资料" / "干法刻蚀"
+           / "数据科学" / "DOE设计" / "执行表_2026-08-20")
+    if new.is_dir():
+        return new
+    return old
+
+
+def _data_root() -> Path:
+    """实验数据根 —— **双路兼容**（2026-09-30 owner 裁定：`03_实验数据` → **`03_数据核心`**，名字更准）。
+
+    新名优先、旧名兜底 ⇒ **改名前后工具都能跑**（物理改名属体系重整/数据线，不属工具线写边界）。
+    ⚠️ 注意：跨线指针（`kb/pointer_check.py` 14 条）**故意保持字面**、不做双路 ——
+    它是判据，改名时**应该红**，红了才是"记得同步"；这里兜底只为不让服务在过渡期瘫掉。
+    """
+    new = PERSONAL / "32_工艺数据资产" / "03_数据核心"
+    old = PERSONAL / "32_工艺数据资产" / "03_实验数据"
+    if new.is_dir():
+        return new
+    return old
+
+
+DATA_ROOT = Path(os.environ.get("OPENNANO_DATA_ROOT") or _data_root())
 CORE_DIR = Path(os.environ.get("OPENNANO_CORE_DIR") or (DATA_ROOT / "core"))
-DOE_DIR = Path(os.environ.get("OPENNANO_DOE_DIR")
-               or (WORKSPACE / "个人空间" / "33_工艺资料" / "干法刻蚀"
-                   / "数据科学" / "DOE设计" / "执行表_2026-08-20"))
-# ⚠️ DOE 执行表 2026-09-12 已从 00_每日任务/2026-08-20_DOE实验 搬到上面这个
-#    位置（M1 移交），旧默认值指向一个**已不存在的目录** ⇒ 服务端扫表静默为空
-#    （工单 20260916-助手线-to-工具线-01 · E1）。再搬家时改这里或用 env 覆盖。
+DOE_DIR = Path(os.environ.get("OPENNANO_DOE_DIR") or _doe_dir())
+# ⚠️ DOE 执行表搬过两次家（2026-09-12 从 00_每日任务 → 33_；2026-09-30 裁：33_ → 32_/07_执行表）：
+#    第一次只改代码没留兜底 ⇒ 旧默认指向已删目录 ⇒ **扫表静默为空**（E1）。
+#    现在 `_doe_dir()` 新位优先＋旧位兜底；再搬家时改那一个函数即可，或用 env 覆盖。
 KLAYOUT = os.environ.get("OPENNANO_KLAYOUT", "/usr/local/bin/klayout")
 
 #: 画布工程目录（`~/.opennano/projects`）
