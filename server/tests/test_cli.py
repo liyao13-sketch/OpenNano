@@ -26,7 +26,9 @@ def test_真源齐全时_strict_必须零退出():
     r = _run("--strict", "--json")
     assert r.returncode == 0, r.stdout + r.stderr
     man = json.loads(r.stdout)
-    assert man["check"]["ok"] is True and man["check"]["checked"] == 14
+    # ⚠️ 2026-10-01：指针表由 14 改 12（两条契约随「契约」夹移入私域记忆库而撤出，
+    #    理由见 kb/pointer_check.py 与 tests/test_pointer_check.py）
+    assert man["check"]["ok"] is True and man["check"]["checked"] == 12
 
 
 def test_允许缺失时_strict_仍拦禁用名(monkeypatch, tmp_path):
@@ -61,5 +63,5 @@ def test_manifest_可落盘且可被数据线脚本消费(tmp_path):
     assert r.returncode == 0
     man = json.loads(out.read_text(encoding="utf-8"))
     assert man["kind"] == "opennano-crossline-pointers"
-    assert len(man["pointers"]) == 14
+    assert len(man["pointers"]) == 12          # 2026-10-01：14 → 12（同上）
     assert all({"name", "path", "exists"} <= set(p) for p in man["pointers"])

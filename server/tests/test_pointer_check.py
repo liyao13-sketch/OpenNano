@@ -17,9 +17,16 @@ from conftest import REPO
 
 
 def test_指针集合本身可信():
-    """14 条 + 每条都指向工作区里真实路径（本机有真源时才要求全命中）。"""
+    """**12 条**，每条都指向工作区里真实路径（本机有真源时才要求全命中）。
+
+    ⚠️ 2026-10-01 由 14 改钉 12（工单 `20261001-助手线-to-工具线-03`）：原 14 条里的两条契约
+    （`实验数据包_规范_v0.1.md`、`知识条目Schema与录入规范_v0.2_20260912.md`）随「契约」夹
+    **移入私域记忆库协议夹** ⇒ **撤出本表**——私域路径本身含内部名，写进公开仓源码＝把私域布局
+    带进公开层（公开层棘轮对内部名字上限 0，非抬上限可解），且那两份是**人读契约**、非运行期依赖。
+    钉住数量仍然有意义：**再有人静默删条**照样红。
+    """
     from kb.pointer_check import CROSSLINE_POINTERS, FORBIDDEN
-    assert len(CROSSLINE_POINTERS) == 14
+    assert len(CROSSLINE_POINTERS) == 12
     assert "data_qa.py" in FORBIDDEN                     # 错名必须留在禁用表里
     # 数据线自己的产物路径不许"发明"：ingest/ 与 core/ 下的名字都要以真名为准
     for name in CROSSLINE_POINTERS:
@@ -68,7 +75,7 @@ def test_check_在真工作区全命中():
     res = check(verbose=False)
     if res["missing"]:
         pytest.skip("本机缺部分跨线真源：" + "、".join(m["name"] for m in res["missing"]))
-    assert res["ok"] is True and res["present"] == res["checked"] == 14
+    assert res["ok"] is True and res["present"] == res["checked"] == 12
 
 
 def test_manifest_给数据线的清单结构():
