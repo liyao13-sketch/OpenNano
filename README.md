@@ -18,6 +18,7 @@ Micro/nano fabrication knowledge lives in engineers' heads and on cleanroom pape
 | **Parameter influence rules** (qualitative + quantitative) | ✅ `when` conditions + expressions + mechanism | ❌ fixed tables |
 | **Optimization on real lab data** | ✅ DOE (full/partial/BBD/CCD) → GPR → BO (EI) | ❌ spreadsheets |
 | **Experiment package ⇄ canvas** bridge | ✅ folder in/out, column-compatible with the data store | ❌ manual re-typing |
+| **Fill measured data inside the tool** | ✅ form editor writes the pack's `measurements`/`observations` **in place** — no "export → hand-edit CSV → re-import" round trip | ❌ manual CSV editing |
 | LLM agent that **queries data and drives the canvas** | ✅ 16 tools, auditable traces | ❌ chat-only |
 
 *(screenshot placeholder — `docs/screenshot-canvas.png`)*
@@ -42,6 +43,37 @@ cd web && npm install && npm run dev
 ```
 
 Open **http://localhost:5173**. Without an LLM key the agent runs in mock mode — everything else works.
+
+## Fill a pack in the tool (no CSV editing)
+
+The workflow used to be *export pack → edit `measurements.csv` by hand → import back*. Now the
+bottom **Data fill** panel does that step in place:
+
+1. **Data fill** (bottom dock) → pick a pack. The repo ships a synthetic one
+   (`samples/expack/DEMO-T1`) — it is **read-only**; hit **Copy to workspace** to get a writable copy
+   under `~/.opennano/packs/`.
+2. Pick a run, then add **measurement** rows (`quantity` / `value` / `unit` / `method` / `loc` / `n` /
+   `uncertainty` / `verification` / `note`) and **observation** rows (`obs_type` / `severity` /
+   `description`). `run_id` and `quantity` are required; leave `meas_id`/`obs_id` blank and the tool
+   assigns `{run_id}.Mnn` / `{run_id}.Onn` — it **tells you** what it filled in.
+3. **Save to pack** writes the two CSVs atomically, keeps a backup, and reloads. Then
+   **Download pack (.zip)** hands the filled pack to whoever lands it into the data store.
+
+Guard rails (all server-side, reported to the UI):
+
+| Guard | Behaviour |
+|---|---|
+| Only two tables | `measurements.csv` / `observations.csv`; columns are read from the pack itself, so it cannot add or drop a column. `runs` / `steps` / `batches` / `manifest` are never touched, and no run is ever created (unknown `run_id` ⇒ error listing the valid ones). |
+| Measurement anchor (§15.1) | `measurement.run_id` is *the process run this value was measured after* — a **metrology run must not carry measurements**; that is rejected with a pointer to its parent run. |
+| No inference | Blank values are dropped (blank ≠ 0). Columns you don't submit keep their on-disk value; an explicitly empty string clears them. |
+| Concurrency | Saving requires the `sha256` revisions from load; if the file changed underneath you get **409** and are told to reload (no silent overwrite). |
+| No mass delete | If the on-disk table is non-empty and the submit would write **0 rows**, it refuses unless you pass `allow_clear`. Every rewritten table is backed up under `~/.opennano/packs/_backups/<batch>/`. |
+| Write scope | Only packs under the workspace root (`~/.opennano/packs/`, or `OPENNANO_PACK_ROOTS`) are writable; repo samples and arbitrary paths are not. |
+
+Endpoints: `GET /api/pack/list` · `POST /api/pack/{load,save,copy}` · `GET /api/pack/download`.
+Vocabulary (quantity names, `obs_type`, `method`, `verification`) is read from the data-store contract
+when reachable and otherwise falls back to the pack plus `samples/core` — on a fresh clone the pickers
+are still populated.
 
 ## Layout
 
