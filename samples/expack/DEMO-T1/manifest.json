@@ -7,7 +7,7 @@
   "project": "synthetic demo",
   "purpose": "demonstrate folder -> canvas import",
   "operator": "demo",
-  "runs": 3,
+  "runs": 4,
   "planned_measurements": 0,
-  "note": "SYNTHETIC — not real lab data"
+  "note": "SYNTHETIC — not real lab data; 含一个检测 run(SEM) 演示协议 §15.1 的挂点规则"
 }

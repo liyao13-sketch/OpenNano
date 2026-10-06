@@ -944,6 +944,86 @@ def api_expack_import(req: ExpackImportReq):
         raise HTTPException(400, str(e)) from e
 
 
+# ---------- 包内填数：在工具里直接填 measurements/observations（不必手改 CSV） ----------
+# 2026-10-06 owner 点名要的功能。口径与红线全在 `kb/pack_edit.py` 顶部（只写两张表 · 不推断 ·
+# 协议 §15.1 检测 run 不挂 measurement · 并发 revision · 原子写 · 清空闸 · 写前备份）。
+
+
+class PackPathReq(BaseModel):
+    path: str = ""
+
+
+class PackSaveReq(BaseModel):
+    path: str
+    measurements: list[dict] | None = None
+    observations: list[dict] | None = None
+    revisions: dict = {}             # load 时返回的 sha256；对不上 ⇒ 409（防覆盖别人的改动）
+    allow_clear: bool = False        # 显式允许把非空表写成 0 行（默认禁止）
+    operator: str = ""               # 谁填的（写进响应回执；不改包内数据）
+
+
+@app.get("/api/pack/list")
+def api_pack_list():
+    """列出可填的实验数据包（仓库样例 + 工作区 `~/.opennano/packs/`）。"""
+    from kb import pack_edit as pe
+    return pe.list_packs()
+
+
+@app.post("/api/pack/load")
+def api_pack_load(req: PackPathReq):
+    """载入包：两张可编辑表 + run 清单 + 枚举（量名/现象词…）+ revisions。"""
+    from kb import pack_edit as pe
+    try:
+        return pe.load_pack(req.path)
+    except pe.PackError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/pack/save")
+def api_pack_save(req: PackSaveReq):
+    """把表单里的两张表写回包（原地 · 原子 · 校验 · 备份）。"""
+    from kb import pack_edit as pe
+    tables: dict = {}
+    if req.measurements is not None:
+        tables["measurements"] = req.measurements
+    if req.observations is not None:
+        tables["observations"] = req.observations
+    try:
+        out = pe.save_pack(req.path, tables, req.revisions, allow_clear=req.allow_clear)
+    except pe.PackConflict as e:                 # 并发 ⇒ 409（界面提示"重新载入"，不是"改输入"）
+        raise HTTPException(409, str(e)) from e
+    except pe.PackError as e:
+        raise HTTPException(400, str(e)) from e
+    if req.operator:
+        out["operator"] = req.operator
+    return out
+
+
+@app.post("/api/pack/copy")
+def api_pack_copy(req: PackPathReq):
+    """把 zip 包 / 只读样例包复制（解压）到工作区，返回可写的目录包。"""
+    from kb import pack_edit as pe
+    try:
+        return pe.copy_to_home(req.path)
+    except pe.PackError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/pack/download")
+def api_pack_download(path: str):
+    """把填好的目录包压成 zip 下载（交给数据线落库用）。"""
+    from fastapi import Response as _R
+    from urllib.parse import quote as _q
+    from kb import pack_edit as pe
+    try:
+        blob, name = pe.pack_as_zip(path)
+    except pe.PackError as e:
+        raise HTTPException(400, str(e)) from e
+    return _R(content=blob, media_type="application/zip",
+              headers={"Content-Disposition":
+                       f"attachment; filename=pack.zip; filename*=UTF-8''{_q(name)}"})
+
+
 def _xlsx_response(data: bytes, stem: str):
     """xlsx 字节 → 下载响应(文件名带日期)。"""
     from datetime import datetime

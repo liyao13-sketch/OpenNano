@@ -7,6 +7,7 @@ import { api, download } from './api'
 import Settings from './Settings'
 import KbBrowser from './KbBrowser'
 import BatchPanel from './BatchPanel'
+import PackFillPanel from './PackFillPanel'
 import Dock from './Dock'
 import ErrorBoundary from './ErrorBoundary'
 import PanelTabs from './PanelTabs'
@@ -1714,6 +1715,7 @@ export default function App() {
               },
             }} />
           )},
+          { key: 'pack', label: t('dock.pack'), render: () => <PackFillPanel /> },
           { key: 'log', label: `${t('dock.log')} (${logs.length})`, render: () => (
             <div className="log-body" ref={logRef}>
               {logs.length === 0 && <div className="chat-empty">{t('dock.logEmpty')}</div>}
