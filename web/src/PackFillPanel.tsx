@@ -128,6 +128,9 @@ export default function PackFillPanel() {
   const runOf = (rid: string) => pack?.runs.find(r => r.run_id === rid)
   const isMet = (rid: string) => !!runOf(rid)?.is_metrology
   const shown = (rows: Row[]) => filter ? rows.filter(r => r.run_id === filter) : rows
+  /** 固定列宽：`.row input/select` 在 styles.css 里是 `flex:1; min-width:0` ⇒ 只写 `width`
+   *  会被压扁、文字被截（2026-10-06 无头截图实测）。这里改成 `flex:0 0 <w>px` 钉死。 */
+  const fw = (w: number) => ({ flex: `0 0 ${w}px`, minWidth: w, width: w })
   const patch = (setter: (f: (a: Row[]) => Row[]) => void, i: number, k: string, v: string) =>
     setter(a => a.map((x, j) => (j === i ? { ...x, [k]: v } : x)))
 
@@ -140,7 +143,7 @@ export default function PackFillPanel() {
       <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <b style={{ fontSize: 'var(--fs-md)' }}>{t('pack.title')}</b>
         <select value="" onChange={e => e.target.value && load(e.target.value)}
-          style={{ minWidth: 230 }} title={t('pack.pickHint')}>
+          style={fw(230)} title={t('pack.pickHint')}>
           <option value="">{t('pack.pickPlaceholder')}</option>
           {packs.map(p => (
             <option key={p.path} value={p.path}>
@@ -162,6 +165,10 @@ export default function PackFillPanel() {
           {t('pack.writableRoots')} {roots.join(' · ')}
         </div>
       )}
+
+      <div className="dim" style={{ fontSize: 'var(--fs-sm)', marginTop: 2 }}>
+        {t('pack.resizeTip')}
+      </div>
 
       {!pack && <div className="dim" style={{ marginTop: 8 }}>{t('pack.emptyHint')}</div>}
 
@@ -186,11 +193,12 @@ export default function PackFillPanel() {
 
           <div className="row" style={{ gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
             <label className="dim" style={{ fontSize: 'var(--fs-sm)' }}>{t('pack.filterRun')}</label>
-            <select value={filter} onChange={e => setFilter(e.target.value)} style={{ minWidth: 200 }}>
+            <select value={filter} onChange={e => setFilter(e.target.value)} style={fw(200)}>
               <option value="">{t('pack.allRuns')}</option>
               {runOptions}
             </select>
-            <span className="dim" style={{ fontSize: 'var(--fs-sm)', maxWidth: 620 }}>{pack.rules.detection_rule}</span>
+            <span className="dim" style={{ fontSize: 'var(--fs-sm)', maxWidth: 640 }}
+              title={pack.rules.detection_rule}>{t('pack.anchorRule')}</span>
           </div>
 
           {err && <div style={{ color: 'var(--c-warn, #e0a0a0)', marginTop: 6, whiteSpace: 'pre-wrap' }}>{err}</div>}
@@ -216,27 +224,27 @@ export default function PackFillPanel() {
                 <div className="row" key={i} style={{ gap: 4, margin: '4px 0', flexWrap: 'wrap',
                   borderLeft: bad ? '3px solid #e0a0a0' : '3px solid transparent', paddingLeft: 4 }}>
                   <input value={r.meas_id || ''} onChange={e => patch(setMeas, i, 'meas_id', e.target.value)}
-                    placeholder="meas_id…" style={{ width: 176 }} title={t('pack.autoId')} />
-                  <select value={r.run_id || ''} onChange={e => patch(setMeas, i, 'run_id', e.target.value)} style={{ minWidth: 178 }}>
+                    placeholder="meas_id…" style={fw(208)} title={t('pack.autoId')} />
+                  <select value={r.run_id || ''} onChange={e => patch(setMeas, i, 'run_id', e.target.value)} style={fw(196)}>
                     <option value="">{t('pack.pickRun')}</option>{runOptions}
                   </select>
                   <input list="pack-q" value={r.quantity || ''} onChange={e => patch(setMeas, i, 'quantity', e.target.value)}
-                    placeholder="quantity" style={{ width: 150 }} />
+                    placeholder="quantity" style={fw(176)} />
                   <datalist id="pack-q">{pack.vocab.quantities.map(q => <option key={q} value={q} />)}</datalist>
                   <input value={r.value || ''} onChange={e => patch(setMeas, i, 'value', e.target.value)}
-                    placeholder={t('pack.valuePh')} style={{ width: 74 }} />
+                    placeholder={t('pack.valuePh')} style={fw(74)} />
                   <input value={r.unit || ''} onChange={e => patch(setMeas, i, 'unit', e.target.value)}
-                    placeholder="unit" style={{ width: 54 }} />
+                    placeholder="unit" style={fw(54)} />
                   <select value={r.method || ''} onChange={e => patch(setMeas, i, 'method', e.target.value)}>
                     <option value="">method</option>
                     {pack.vocab.methods.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                   <input value={r.loc || ''} onChange={e => patch(setMeas, i, 'loc', e.target.value)}
-                    placeholder="loc" style={{ width: 58 }} />
+                    placeholder="loc" style={fw(58)} />
                   <input value={r.n || ''} onChange={e => patch(setMeas, i, 'n', e.target.value)}
-                    placeholder="n" style={{ width: 40 }} />
+                    placeholder="n" style={fw(40)} />
                   <input value={r.uncertainty || ''} onChange={e => patch(setMeas, i, 'uncertainty', e.target.value)}
-                    placeholder="±" style={{ width: 52 }} />
+                    placeholder="±" style={fw(52)} />
                   <select value={r.verification || ''} onChange={e => patch(setMeas, i, 'verification', e.target.value)}>
                     <option value="">verification</option>
                     {pack.vocab.verifications.map(v => <option key={v} value={v}>{v}</option>)}
@@ -263,12 +271,12 @@ export default function PackFillPanel() {
               return (
                 <div className="row" key={i} style={{ gap: 4, margin: '4px 0', flexWrap: 'wrap' }}>
                   <input value={r.obs_id || ''} onChange={e => patch(setObs, i, 'obs_id', e.target.value)}
-                    placeholder="obs_id…" style={{ width: 176 }} title={t('pack.autoId')} />
-                  <select value={r.run_id || ''} onChange={e => patch(setObs, i, 'run_id', e.target.value)} style={{ minWidth: 178 }}>
+                    placeholder="obs_id…" style={fw(208)} title={t('pack.autoId')} />
+                  <select value={r.run_id || ''} onChange={e => patch(setObs, i, 'run_id', e.target.value)} style={fw(196)}>
                     <option value="">{t('pack.pickRun')}</option>{runOptions}
                   </select>
                   <input list="pack-o" value={r.obs_type || ''} onChange={e => patch(setObs, i, 'obs_type', e.target.value)}
-                    placeholder="obs_type" style={{ width: 168 }} />
+                    placeholder="obs_type" style={fw(184)} />
                   <datalist id="pack-o">{pack.vocab.obs_types.map(o => <option key={o} value={o} />)}</datalist>
                   <select value={r.severity || ''} onChange={e => patch(setObs, i, 'severity', e.target.value)}>
                     <option value="">severity</option>
@@ -277,9 +285,9 @@ export default function PackFillPanel() {
                   <input value={r.description || ''} onChange={e => patch(setObs, i, 'description', e.target.value)}
                     placeholder={t('pack.descPh')} style={{ flex: 1, minWidth: 200 }} />
                   <input value={r.recorded_by || ''} onChange={e => patch(setObs, i, 'recorded_by', e.target.value)}
-                    placeholder="recorded_by" style={{ width: 110 }} />
+                    placeholder="recorded_by" style={fw(110)} />
                   <input value={r.date || ''} onChange={e => patch(setObs, i, 'date', e.target.value)}
-                    placeholder="YYYY-MM-DD" style={{ width: 104 }} />
+                    placeholder="YYYY-MM-DD" style={fw(104)} />
                   <button className="btn ghost" onClick={() => setObs(a => a.filter((_, j) => j !== i))}>×</button>
                 </div>
               )
