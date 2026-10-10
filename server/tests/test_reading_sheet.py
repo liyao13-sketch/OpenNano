@@ -314,7 +314,8 @@ def test_api_列表_解析_预览(client):
     assert p.status_code == 200
     d = p.json()
     assert d["stats"]["total"] == 18 and d["col_ok"] is True
-    assert d["vocab"]["quantities"], "量名必须来自运行时词表（解析器/契约）"
+    assert d["vocab"]["quantities"], "量名下拉不许空（真源不可达时要回落到样例语料）"
+    assert "quantity_gate" in d["vocab"] and "quantity_source" in d["vocab"]
     assert d["field_meta"][0]["label"], "字段标签走外置注解（缺失则＝字段名）"
     # 粘贴正文也走同一条路
     assert client.post("/api/sheet/parse", json={"text": SAMPLE.read_text(encoding="utf-8")}).status_code == 200

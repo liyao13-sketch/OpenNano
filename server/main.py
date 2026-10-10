@@ -1011,10 +1011,9 @@ def api_sheet_parse(req: SheetParseReq):
     except OSError as e:
         raise HTTPException(400, f"读表失败：{e}") from e
     v = rsh.landing_vocab()
-    d["vocab"] = {"quantity_source": v["quantity_source"],
-                  "quantities": sorted(v["quantities"]) if v["quantities"] else [],
-                  "method_source": v["method_source"],
-                  "methods": sorted(v["methods"]) if v["methods"] else []}
+    d["vocab"] = {"quantities": v["quantities"], "quantity_source": v["quantity_source"],
+                  "quantity_gate": v["quantity_gate"], "methods": v["methods"],
+                  "method_source": v["method_source"], "method_gate": v["method_gate"]}
     d["field_meta"] = [{"field": f, "label": rsh.field_label(f), "hint": rsh.field_hint(f),
                         "is_bit": rsh.is_bit_field(f)} for f in d["matrix"]["fields"]]
     return d
@@ -1080,8 +1079,14 @@ def api_sheet_preview(req: SheetPreviewReq):
     """落库预览（**只读**）：逐条说"这行会不会被接受/为什么被拒"。"""
     from kb import reading_sheet as rsh
     v = rsh.landing_vocab()
-    out = rsh.landing_preview(req.rows, v["quantities"], v["methods"])
-    out["vocab"] = {"quantity_source": v["quantity_source"], "method_source": v["method_source"]}
+    out = rsh.landing_preview(req.rows,
+                              v["quantities"] if v["quantity_gate"] else None,
+                              v["methods"] if v["method_gate"] else None)
+    out["vocab"] = {"quantity_source": v["quantity_source"], "quantity_gate": v["quantity_gate"],
+                    "method_source": v["method_source"], "method_gate": v["method_gate"]}
+    if not v["quantity_gate"]:
+        out["vocab_note"] = ("量名真源不可达（公开 clone 无私有 schema）⇒ **未做量名闸校验**；"
+                             "下拉里的量名只是样例语料，不代表落库会接受")
     return out
 
 

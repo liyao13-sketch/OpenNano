@@ -715,16 +715,119 @@ def parser_quantities() -> set[str] | None:
     return names - {"quantity", "metrics", "snake_case"}
 
 
+def corpus_quantities() -> list[str]:
+    """公开 clone 没有私有 schema 时的兜底：**仓库样例语料里出现过的量名**。
+
+    为什么需要：Neo 上 `git clone` 只有 `samples/`，契约不可达 ⇒ 选择框会空。
+    兜底**不新增一份词表**（只读 `samples/core`，那是仓库里已有的中性样例），
+    并让 `quantity_gate=False` —— 此时预览**不当闸**（不拿样例语料去判"不在 §三"）。
+    """
+    p = Path(__file__).resolve().parents[2] / "samples" / "core" / "measurements.csv"
+    if not p.exists():
+        return []
+    try:
+        with p.open(newline="", encoding="utf-8-sig") as f:
+            return sorted({(r.get("quantity") or "").strip() for r in csv.DictReader(f)} - {""})
+    except OSError:
+        return []
+
+
+def corpus_methods() -> list[str]:
+    """同上（method 列）：公开 clone 时给选择框兜底。"""
+    p = Path(__file__).resolve().parents[2] / "samples" / "core" / "measurements.csv"
+    if not p.exists():
+        return []
+    try:
+        with p.open(newline="", encoding="utf-8-sig") as f:
+            return sorted({(r.get("method") or "").strip() for r in csv.DictReader(f)} - {""})
+    except OSError:
+        return []
+
+
 def landing_vocab() -> dict:
-    """落库预览要用的两份词表＋来源说明（解析器/契约优先，读不到就注明"未校验"）。"""
+    """给界面用的词表 ＋ **能不能当闸**的标志（`*_gate`）。
+
+    三层来源：解析器（`schema §三` / `datasets_results.METHODS`，**唯一权威**）
+    → 契约（`form_contract`）→ 语料兜底（`samples/core`，只够填选择框，**不当闸**）。
+    """
+    q, qsrc, qgate = None, "unavailable", False
     q = parser_quantities()
-    qsrc = "parser(schema §三)"
-    if q is None:
+    if q:
+        qsrc, qgate = "parser(schema §三)", True
+    else:
         try:
             from . import form_contract as fc
-            q, qsrc = set(fc.quantities()), "contract"
+            q, qsrc, qgate = set(fc.quantities()), "contract", True
         except Exception:                                        # noqa: BLE001
-            q, qsrc = None, "unavailable"
-    m = parser_methods()
-    return {"quantities": q, "quantity_source": qsrc,
-            "methods": m, "method_source": str(parser_path()) if m else "unavailable"}
+            pass
+    if not q:
+        q, qsrc, qgate = set(corpus_quantities()), "corpus(samples)", False
+    m, msrc, mgate = parser_methods(), "unavailable", False
+    if m:
+        msrc, mgate = str(parser_path()), True
+    else:
+        try:
+            from . import form_contract as fc
+            m, msrc, mgate = set(fc.method or []), "contract", True
+        except Exception:                                        # noqa: BLE001
+            pass
+    if not m:
+        m, msrc, mgate = set(corpus_methods()), "corpus(samples)", False
+    return {"quantities": sorted(q), "quantity_source": qsrc, "quantity_gate": qgate,
+            "methods": sorted(m), "method_source": msrc, "method_gate": mgate}
+
+
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+# ── 数据线侧的 method 词表（**运行时读他们的解析器**，不另编一份）──────────
+def parser_path() -> Path:
+    env = os.environ.get("OPENNANO_RESULTS_PARSER")
+    if env:
+        return Path(env).expanduser()
+    try:
+        from .menu_reader import _workspace
+        return _workspace() / "个人空间/32_工艺数据资产/03_实验数据/ingest/datasets_results.py"
+    except Exception:                                            # noqa: BLE001
+        return Path.home() / "nonexistent-datasets_results.py"
+
+
+def parser_methods() -> set[str] | None:
+    """从 `datasets_results.py` 里抠出 `METHODS = {...}`。读不到 ⇒ `None`（预览时跳过词表检查并注明）。"""
+    p = parser_path()
+    if not p.exists():
+        return None
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = re.search(r"METHODS\s*=\s*\{(.*?)\}", txt, re.S)
+    if not m:
+        return None
+    return set(re.findall(r'"([^"]+)"', m.group(1))) or None
+
+
+def parser_quantities() -> set[str] | None:
+    """**照解析器的抠法**读 `schema §三` 受控量名（它才是落库的闸）。
+
+    为什么不用 `form_contract.quantities()`：两者抠的区间/正则不同（实测 51 vs 48），
+    预览若用宽的那份就会**少报**"这行会被拒"。这里与 `datasets_results.py` 对齐：
+    `## 三、`…`## 四、` 之间、`` `snake_case` `` 形式、去掉表格词。
+    """
+    try:
+        from .menu_reader import _workspace
+        schema = _workspace() / "个人空间/32_工艺数据资产/03_实验数据/schema_v0.1.md"
+    except Exception:                                            # noqa: BLE001
+        return None
+    if not schema.exists():
+        return None
+    try:
+        txt = schema.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if "## 三、" not in txt or "## 四、" not in txt:
+        return None
+    sec = txt.split("## 三、")[1].split("## 四、")[0]
+    names = set(re.findall(r"`([a-z][a-z0-9_]*)`", sec))
+    return names - {"quantity", "metrics", "snake_case"}
+
