@@ -944,6 +944,168 @@ def api_expack_import(req: ExpackImportReq):
         raise HTTPException(400, str(e)) from e
 
 
+# ---------- 现场抄读（工单 20261010-数据线-to-工具线-01）----------
+# 四件：导入填表器导出件 · 结果录入 · 比较器 · 图片管理；外加**只读**的落库预览。
+# 口径与红线全在 `kb/reading_sheet.py` 顶部（16 列契约 · 不新开落库通道 · 菜单/量名词不进公开仓）。
+
+
+class SheetParseReq(BaseModel):
+    path: str = ""               # 读盘上的表（NAS 现场夹 / 仓库样例）
+    text: str = ""               # 或直接给 CSV 正文（上传/粘贴）
+
+
+class SheetCompareReq(BaseModel):
+    paths: list[str] = []
+
+
+class SheetStateReq(BaseModel):
+    state: dict = {}
+    rows: list[dict] = []
+    ranges: dict = {}
+    results: list[dict] = []
+    images: list[dict] = []
+
+
+class SheetTplReq(BaseModel):
+    name: str = ""
+    items: list[dict] = []
+
+
+class SheetPreviewReq(BaseModel):
+    rows: list[dict] = []
+
+
+class SheetRenameReq(BaseModel):
+    state: dict = {}
+    images: list[dict] = []
+    rule: str = ""
+    target_dir: str = ""
+
+
+class SheetUploadReq(BaseModel):
+    state: dict = {}
+    name: str = ""
+    data_b64: str = ""
+
+
+@app.get("/api/sheet/list")
+def api_sheet_list():
+    """列出可载入的抄读表（现场夹 + 仓库中性样例 + 工作区）。"""
+    from kb import reading_sheet as rsh
+    return {**rsh.list_sheets(),
+            "columns": rsh.COLUMNS, "frozen_cols": rsh.FROZEN_COLS,
+            "name_rule_default": rsh.DEFAULT_NAME_RULE,
+            "placeholders": ["slot", "run", "recipe", "tag", "seq", "date", "ext", "orig"]}
+
+
+@app.post("/api/sheet/parse")
+def api_sheet_parse(req: SheetParseReq):
+    """解析一张抄读表：行分类（读数/结果/图片/Loop 元数据）＋统计＋矩阵＋列契约体检。"""
+    from kb import reading_sheet as rsh
+    try:
+        if req.text.strip():
+            d = rsh.parse_sheet(req.text)
+            d["name"] = "(pasted)"
+        else:
+            d = rsh.read_sheet_file(req.path)
+    except OSError as e:
+        raise HTTPException(400, f"读表失败：{e}") from e
+    v = rsh.landing_vocab()
+    d["vocab"] = {"quantity_source": v["quantity_source"],
+                  "quantities": sorted(v["quantities"]) if v["quantities"] else [],
+                  "method_source": v["method_source"],
+                  "methods": sorted(v["methods"]) if v["methods"] else []}
+    d["field_meta"] = [{"field": f, "label": rsh.field_label(f), "hint": rsh.field_hint(f),
+                        "is_bit": rsh.is_bit_field(f)} for f in d["matrix"]["fields"]]
+    return d
+
+
+@app.post("/api/sheet/compare")
+def api_sheet_compare(req: SheetCompareReq):
+    """多表比较：run 升序 · 参数×run · 差异标红 · 数值等价不算差异 · 结果并排。"""
+    from kb import reading_sheet as rsh
+    if len(req.paths) < 2:
+        raise HTTPException(400, "至少给两张表（paths）")
+    tables = []
+    for p in req.paths:
+        try:
+            sh = rsh.read_sheet_file(p)
+        except OSError as e:
+            raise HTTPException(400, f"读表失败 {p}：{e}") from e
+        tables.append({"label": sh["name"], "rows": sh["rows"],
+                       "results": rsh.rows_to_results(sh["rows"])})
+    cmp = rsh.build_compare(tables)
+    cmp["csv"] = rsh.compare_to_csv(cmp)
+    return cmp
+
+
+@app.post("/api/sheet/export")
+def api_sheet_export(req: SheetStateReq):
+    """按 16 列契约导出抄读表（含结果行与图片索引行）。"""
+    from fastapi import Response as _R
+    from urllib.parse import quote as _q
+    from kb import reading_sheet as rsh
+    rows = rsh.export_rows(req.state, req.rows, req.ranges, req.results, req.images)
+    body = rsh.to_csv(rows).encode("utf-8")
+    name = rsh.fname_for(req.state)
+    return _R(content=body, media_type="text/csv; charset=utf-8",
+              headers={"Content-Disposition":
+                       f"attachment; filename=sheet.csv; filename*=UTF-8''{_q(name)}"})
+
+
+@app.get("/api/sheet/templates")
+def api_sheet_templates():
+    """结果项目模板（工作区 JSON，不进公开仓）。"""
+    from kb import reading_sheet as rsh
+    return {"templates": rsh.load_templates(), "path": str(rsh.templates_path())}
+
+
+@app.post("/api/sheet/templates")
+def api_sheet_templates_save(req: SheetTplReq):
+    from kb import reading_sheet as rsh
+    try:
+        return rsh.save_template(req.name, req.items)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/sheet/templates/delete")
+def api_sheet_templates_delete(req: SheetTplReq):
+    from kb import reading_sheet as rsh
+    return rsh.delete_template(req.name)
+
+
+@app.post("/api/sheet/preview")
+def api_sheet_preview(req: SheetPreviewReq):
+    """落库预览（**只读**）：逐条说"这行会不会被接受/为什么被拒"。"""
+    from kb import reading_sheet as rsh
+    v = rsh.landing_vocab()
+    out = rsh.landing_preview(req.rows, v["quantities"], v["methods"])
+    out["vocab"] = {"quantity_source": v["quantity_source"], "method_source": v["method_source"]}
+    return out
+
+
+@app.post("/api/sheet/upload")
+def api_sheet_upload(req: SheetUploadReq):
+    """上传一张结果图片（base64）→ 服务工作区 `~/.opennano/readings/<slot>_<run>/images/`。"""
+    import base64
+    from kb import reading_sheet as rsh
+    try:
+        blob = base64.b64decode(req.data_b64 or "", validate=True)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, f"图片数据不是合法 base64：{e}") from e
+    if not blob:
+        raise HTTPException(400, "图片为空")
+    return rsh.save_upload(req.state, req.name or "img", blob)
+
+
+@app.post("/api/sheet/rename")
+def api_sheet_rename(req: SheetRenameReq):
+    """按命名规则**改名并归档**（服务端做；返回映射表供界面与索引行使用）。"""
+    from kb import reading_sheet as rsh
+    return rsh.archive_images(req.state, req.images, req.rule, req.target_dir)
+
+
 # ---------- 包内填数：在工具里直接填 measurements/observations（不必手改 CSV） ----------
 # 2026-10-06 owner 点名要的功能。口径与红线全在 `kb/pack_edit.py` 顶部（只写两张表 · 不推断 ·
 # 协议 §15.1 检测 run 不挂 measurement · 并发 revision · 原子写 · 清空闸 · 写前备份）。

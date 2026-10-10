@@ -96,12 +96,28 @@ def test_eq_state_清洗完成只认是_否(contract_source):
 
 
 # ------------------------------------------------------------------ 词表（真源优先；没真源用合成夹具）
+def _obs_rows_real() -> int:
+    """**词表 CSV 自己的数据行数**（真源）。
+
+    ⚠️ 2026-10-06 的教训：这里原来硬编 `32`，而词表由**数据线**维护 —— 他们当天加了第 33 个词
+    （`现象受控词表.csv` mtime 19:40）⇒ 本仓两条用例当场变红，而**代码一个字没错**。
+    硬编一个词数＝把"别人家的数据"钉进公开仓。改成：**与词表自身的行数一致**（仍能抓"工具丢行/重复"）
+    ＋ **下界 ≥32**（仍能抓"词表被削"）。
+    """
+    import csv
+    from kb.form_contract import _obs_path
+    with _obs_path().open(newline="", encoding="utf-8-sig") as f:
+        return sum(1 for r in csv.DictReader(f) if (r.get("obs_type") or "").strip())
+
+
 def test_现象受控词表_只认表内词(contract_source):
     """现象类型必须走受控词表（自由文本会毁掉后续统计）。"""
     from kb.form_contract import check_observations, observations
     vocab = observations()
-    want = 32 if contract_source == "real" else 3
+    want = _obs_rows_real() if contract_source == "real" else 3
     assert len(vocab) == want, [o["obs_type"] for o in vocab]
+    if contract_source == "real":
+        assert len(vocab) >= 32, "词表不许被削到 32 以下（下界钉子）"
     assert all(o.get("obs_type") for o in vocab)
     errs = check_observations([{"obs_type": vocab[0]["obs_type"]},
                                {"obs_type": "我自己编的现象"},
@@ -132,4 +148,5 @@ def test_量名词与参数键来自_契约真源(contract_source):
     assert list(c["verification"]) == ["已核实", "未核实", "存疑"]
     assert "设备遥测" in c["method"]                       # 机台 log 与口述要能区分来源
     assert c["switch_required"] == ["gvv1", "gvv2"]        # 旁通阀是**必需**开关量
-    assert len(c["observations"]) == (32 if contract_source == "real" else 3)
+    want_obs = _obs_rows_real() if contract_source == "real" else 3
+    assert len(c["observations"]) == want_obs, "observations 数目必须与词表 CSV 自身一致（别再硬编词数）"
